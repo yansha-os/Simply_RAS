@@ -122,8 +122,11 @@ All stage mutations go through authenticated server actions with `requireRole` f
 Ordered steps:
 
 1. Validate candidate exists and is hireable (`OFFER` or explicit Head HR override).  
-2. Create `User` with `role: RBT`, `isActive: true`, name/email from candidate (or activate existing inactive user with same email).  
-3. Set `AtsCandidate.userId`, `stage: HIRED`, `activationStatus: ACTIVE`.  
+2. Resolve staff `User` by candidate email (exact, case-normalized):
+   - **No `User`:** create one with `role: RBT`, `isActive: true`, name/email from candidate.  
+   - **Existing `User` with `isActive: false`:** activate that row (`isActive: true`), set `role: RBT` if it was a hire placeholder, refresh name from candidate. Do **not** insert a second row.  
+   - **Existing `User` with `isActive: true`:** abort hire with a clear error (email already an active staff account). Do **not** create a second `User`.  
+3. Set `AtsCandidate.userId` to that user, `stage: HIRED`, `activationStatus: ACTIVE`.  
 4. Resolve notify targets: prefer BCBAs on clients with `STAFFING_PENDING` / `bcbaId`; if none, notify active `BCBA` users or fall back to `HEAD_HR`.  
 5. Write `Notification` rows: `type: RBT_HIRED`, CRM deep link (`/portal-clinical` or `/client/[id]` when known).  
 
@@ -171,7 +174,7 @@ Session note BCBA e-sign queue; first-day supervision; Plutus claim entity beyon
 ## Error handling
 
 - Unauthorized stage/hire → `FORBIDDEN` via role guard; no silent success.  
-- Duplicate email on hire → clear error; do not create second User.  
+- Hire email resolution (same rules as Hire action step 2): inactive same-email user → **activate and link**; active same-email user → **clear error, never insert a second `User`**.  
 - Missing candidate / invalid stage transition → `{ success: false, error }` for UI toast.  
 - Notification fan-out failure must not roll back a completed hire (log + best-effort notify).  
 
@@ -215,3 +218,4 @@ Session note BCBA e-sign queue; first-day supervision; Plutus claim entity beyon
 | Candidate model | Extend `AtsCandidate`, link `userId` on hire |
 | Stage storage | Prisma only; kill localStorage stages |
 | Cross-app messaging | Existing `Notification` poll; typed `type` strings |
+| Hire email collision | Inactive same email → activate; active same email → error (never two Users) |
