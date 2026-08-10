@@ -9,7 +9,7 @@ import { generateMagicLink, sendToClinical, approveDocument, rejectDocument, rej
 import { Form01ClientIntake } from '@/components/magic-link/Form01ClientIntake';
 import { Form02Consent } from '@/components/magic-link/Form02Consent';
 
-export default function IntakeDocumentsTab({ client }: { client: any }) {
+export default function IntakeDocumentsTab({ client, isCaseCoordMode }: { client: any, isCaseCoordMode?: boolean }) {
   const packet = client.intakePacket;
   const hasPacket = !!packet;
 
@@ -268,59 +268,48 @@ export default function IntakeDocumentsTab({ client }: { client: any }) {
               </CardTitle>
               <p className="text-sm text-zinc-400 mt-1">Review and approve each document below.</p>
             </div>
-
-            {!['DOCS_APPROVED_INTAKE', 'CLINICAL_REVIEW_APPROVED', 'VOB_COMPLETED', 'PA_SUBMITTED', 'PA_APPROVED', 'ACTIVE'].includes(client.status) && (
-              <form action={sendToClinical}>
-                <input type="hidden" name="packetId" value={packet.id} />
-                <input type="hidden" name="clientId" value={client.id} />
-                <div className="relative group rounded-md">
-                  <div className={`absolute -inset-0.5 bg-green-500 rounded-md blur opacity-50 transition duration-200 ${allApproved ? 'group-hover:opacity-100' : 'opacity-0'}`}></div>
-                  <Button type="submit" variant="primary" disabled={!allApproved} className={`relative bg-zinc-900 text-white font-bold tracking-wide border ${allApproved ? 'hover:bg-zinc-800 border-green-500/50' : 'border-white/10 opacity-50'}`}>
-                    Approve & Send to Clinical
-                  </Button>
-                </div>
-              </form>
-            )}
           </CardHeader>
           <CardContent className="pt-6 space-y-8">
             
             {/* Magic Link Display */}
-            <div className="bg-zinc-900 border border-white/5 p-4 rounded-xl flex items-center justify-between group hover:border-brand-blue-500/30 transition-colors">
-              <div>
-                <h4 className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1.5">Secure Parent Link</h4>
-                <p className="text-sm font-mono text-zinc-300 break-all select-all">http://localhost:3000/magic-link/{packet.magicLinkToken}</p>
+            {!isCaseCoordMode && (
+              <div className="bg-zinc-900 border border-white/5 p-4 rounded-xl flex items-center justify-between group hover:border-brand-blue-500/30 transition-colors">
+                <div>
+                  <h4 className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1.5">Secure Parent Link</h4>
+                  <p className="text-sm font-mono text-zinc-300 break-all select-all">http://localhost:3000/magic-link/{packet.magicLinkToken}</p>
+                </div>
+                <div className="flex items-center space-x-2">
+                  {!['DOCS_APPROVED_INTAKE', 'CLINICAL_REVIEW_APPROVED', 'VOB_COMPLETED', 'PA_SUBMITTED', 'PA_APPROVED', 'ACTIVE'].includes(client.status) && (
+                    <form action={regenerateMagicLink}>
+                      <input type="hidden" name="packetId" value={packet.id} />
+                      <input type="hidden" name="clientId" value={client.id} />
+                      <Button 
+                        type="submit"
+                        variant="ghost" 
+                        size="sm" 
+                        className="text-zinc-400 hover:text-white"
+                      >
+                        Regenerate
+                      </Button>
+                    </form>
+                  )}
+                  <Button 
+                    variant="secondary" 
+                    size="sm" 
+                    className="shrink-0"
+                    onClick={(e) => {
+                      navigator.clipboard.writeText(`http://localhost:3000/magic-link/${packet.magicLinkToken}`);
+                      const target = e.target as HTMLButtonElement;
+                      const oldText = target.innerText;
+                      target.innerText = 'Copied!';
+                      setTimeout(() => { target.innerText = oldText; }, 2000);
+                    }}
+                  >
+                    Copy
+                  </Button>
+                </div>
               </div>
-              <div className="flex items-center space-x-2">
-                {!['DOCS_APPROVED_INTAKE', 'CLINICAL_REVIEW_APPROVED', 'VOB_COMPLETED', 'PA_SUBMITTED', 'PA_APPROVED', 'ACTIVE'].includes(client.status) && (
-                  <form action={regenerateMagicLink}>
-                    <input type="hidden" name="packetId" value={packet.id} />
-                    <input type="hidden" name="clientId" value={client.id} />
-                    <Button 
-                      type="submit"
-                      variant="ghost" 
-                      size="sm" 
-                      className="text-zinc-400 hover:text-white"
-                    >
-                      Regenerate
-                    </Button>
-                  </form>
-                )}
-                <Button 
-                  variant="secondary" 
-                  size="sm" 
-                  className="shrink-0"
-                  onClick={(e) => {
-                    navigator.clipboard.writeText(`http://localhost:3000/magic-link/${packet.magicLinkToken}`);
-                    const target = e.target as HTMLButtonElement;
-                    const oldText = target.innerText;
-                    target.innerText = 'Copied!';
-                    setTimeout(() => { target.innerText = oldText; }, 2000);
-                  }}
-                >
-                  Copy
-                </Button>
-              </div>
-            </div>
+            )}
             
             <div className="grid md:grid-cols-2 gap-8">
               <div className="space-y-3">

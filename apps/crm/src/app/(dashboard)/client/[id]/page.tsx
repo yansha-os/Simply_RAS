@@ -25,6 +25,18 @@ export default async function ClientProfilePage(props: { params: Promise<{ id: s
     notFound();
   }
 
+  const allBcbas = await prisma.user.findMany({
+    where: { role: 'BCBA', isActive: true },
+    select: { 
+      id: true, 
+      firstName: true, 
+      lastName: true,
+      _count: {
+        select: { supervisedClients: true }
+      }
+    }
+  });
+
   // Calculate PA Expiring logic
   const txPa = client.paRequests?.find(p => p.type === 'TREATMENT');
   let isPaExpiringSoon = false;
@@ -41,6 +53,11 @@ export default async function ClientProfilePage(props: { params: Promise<{ id: s
     <div className="flex flex-col h-full animate-slide-up">
 
       <div className="px-[30px] pt-[28px] pb-[50px]">
+
+        {/* Back Button */}
+        <div className="mb-2">
+          <BackButton />
+        </div>
 
         {/* Client Header */}
         <h1 className="font-heading text-[31px] font-semibold m-0 mb-[8px] text-[var(--ink-100)]">
@@ -68,7 +85,7 @@ export default async function ClientProfilePage(props: { params: Promise<{ id: s
       )}
 
       {/* Sub Tabs: Overview, Documents, Authorization */}
-      <ClientProfileTabs client={client} mode={searchParams?.mode} />
+      <ClientProfileTabs client={client} mode={searchParams?.mode} bcbas={allBcbas} />
       
       </div>
     </div>

@@ -1,0 +1,22 @@
+{
+  "short_name": "RAS RBT Portal",
+  "name": "Rise & Shine ABA - RBT Employee & Applicant Portal",
+  "icons": [
+    {
+      "src": "/logo.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "/logo.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "/rbt/interview",
+  "background_color": "#090D16",
+  "theme_color": "#F97316",
+  "display": "standalone",
+  "orientation": "portrait",
+  "scope": "/"
+}

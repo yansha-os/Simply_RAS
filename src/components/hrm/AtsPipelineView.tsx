@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
+import { Card, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { Users, UserPlus, Search, CheckCircle2, ChevronRight, Phone, Mail, FileText, Calendar, Filter, Sparkles } from 'lucide-react';
+import { Users, UserPlus, Search, CheckCircle2, ChevronRight, Phone, Mail, Filter, Sparkles, Key, Copy, Check, ShieldCheck, Activity, Award, TrendingUp, Clock } from 'lucide-react';
 import { toast } from 'sonner';
 
 export interface Candidate {
@@ -15,19 +15,24 @@ export interface Candidate {
   stage: 'APPLIED' | 'PHONE_SCREEN' | 'INTERVIEW' | 'OFFER' | 'HIRED';
   experienceYears: number;
   appliedDate: string;
+  activationStatus: 'PENDING_HR_REVIEW' | 'INVITATION_SENT' | 'ACCOUNT_ACTIVE';
 }
 
 const INITIAL_CANDIDATES: Candidate[] = [
-  { id: '1', name: 'Sarah Jenkins', email: 'sarah.j@gmail.com', phone: '(555) 234-5678', roleApplied: 'RBT', stage: 'INTERVIEW', experienceYears: 2, appliedDate: '2026-07-20' },
-  { id: '2', name: 'Marcus Vance', email: 'marcus.v@outlook.com', phone: '(555) 876-5432', roleApplied: 'BCBA', stage: 'OFFER', experienceYears: 5, appliedDate: '2026-07-18' },
-  { id: '3', name: 'Emily Taylor', email: 'emily.t@yahoo.com', phone: '(555) 345-6789', roleApplied: 'RBT', stage: 'PHONE_SCREEN', experienceYears: 1, appliedDate: '2026-07-25' },
-  { id: '4', name: 'David Miller', email: 'david.m@gmail.com', phone: '(555) 901-2345', roleApplied: 'RBT', stage: 'HIRED', experienceYears: 3, appliedDate: '2026-07-15' },
+  { id: 'c1', name: 'Sarah Jenkins', email: 'sarah.j@gmail.com', phone: '(555) 234-5678', roleApplied: 'RBT', stage: 'INTERVIEW', experienceYears: 2, appliedDate: '2026-07-20', activationStatus: 'PENDING_HR_REVIEW' },
+  { id: 'c2', name: 'Marcus Vance', email: 'marcus.v@outlook.com', phone: '(555) 876-5432', roleApplied: 'BCBA', stage: 'OFFER', experienceYears: 5, appliedDate: '2026-07-18', activationStatus: 'PENDING_HR_REVIEW' },
+  { id: 'c3', name: 'Emily Taylor', email: 'emily.t@yahoo.com', phone: '(555) 345-6789', roleApplied: 'RBT', stage: 'PHONE_SCREEN', experienceYears: 1, appliedDate: '2026-07-25', activationStatus: 'PENDING_HR_REVIEW' },
+  { id: 'c4', name: 'David Miller', email: 'david.m@gmail.com', phone: '(555) 901-2345', roleApplied: 'RBT', stage: 'HIRED', experienceYears: 3, appliedDate: '2026-07-15', activationStatus: 'ACCOUNT_ACTIVE' },
 ];
 
 export default function AtsPipelineView() {
   const [candidates, setCandidates] = useState<Candidate[]>(INITIAL_CANDIDATES);
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('ALL');
+
+  // Magic Link Activation Modal State
+  const [activeInviteCandidate, setActiveInviteCandidate] = useState<Candidate | null>(null);
+  const [copiedLink, setCopiedLink] = useState(false);
 
   // New Candidate Modal
   const [showAddForm, setShowAddForm] = useState(false);
@@ -49,7 +54,8 @@ export default function AtsPipelineView() {
       roleApplied: newRole,
       stage: 'APPLIED',
       experienceYears: parseInt(newExp) || 0,
-      appliedDate: new Date().toISOString().split('T')[0]
+      appliedDate: new Date().toISOString().split('T')[0],
+      activationStatus: 'PENDING_HR_REVIEW',
     };
 
     setCandidates([newCandidate, ...candidates]);
@@ -75,6 +81,25 @@ export default function AtsPipelineView() {
     }));
   };
 
+  const handleApproveAndInvite = (candidate: Candidate) => {
+    setCandidates((prev) =>
+      prev.map((c) =>
+        c.id === candidate.id
+          ? { ...c, stage: 'HIRED', activationStatus: 'INVITATION_SENT' }
+          : c
+      )
+    );
+    setActiveInviteCandidate(candidate);
+    toast.success(`Approved ${candidate.name}! Activation magic link generated.`);
+  };
+
+  const copyInviteLink = (url: string) => {
+    navigator.clipboard.writeText(url);
+    setCopiedLink(true);
+    toast.success('Magic link copied to clipboard!');
+    setTimeout(() => setCopiedLink(false), 2500);
+  };
+
   const filteredCandidates = candidates.filter(c => {
     const matchesSearch = `${c.name} ${c.email} ${c.roleApplied}`.toLowerCase().includes(searchQuery.toLowerCase());
     if (roleFilter === 'ALL') return matchesSearch;
@@ -82,24 +107,24 @@ export default function AtsPipelineView() {
   });
 
   const stages: { key: Candidate['stage']; title: string; color: string }[] = [
-    { key: 'APPLIED', title: '1. Applied', color: 'border-blue-500/30 bg-blue-500/10 text-blue-400' },
+    { key: 'APPLIED', title: '1. Applied (HR Review)', color: 'border-blue-500/30 bg-blue-500/10 text-blue-400' },
     { key: 'PHONE_SCREEN', title: '2. Phone Screen', color: 'border-amber-500/30 bg-amber-500/10 text-amber-400' },
     { key: 'INTERVIEW', title: '3. Interview', color: 'border-purple-500/30 bg-purple-500/10 text-purple-400' },
     { key: 'OFFER', title: '4. Offer Extended', color: 'border-brand-orange-500/30 bg-brand-orange-500/10 text-brand-orange-400' },
-    { key: 'HIRED', title: '5. Hired / Onboarding', color: 'border-green-500/30 bg-green-500/10 text-green-400' },
+    { key: 'HIRED', title: '5. Hired / Portal Active', color: 'border-green-500/30 bg-green-500/10 text-green-400' },
   ];
 
   return (
     <div className="space-y-8">
       {/* Header Banner */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-brand-black-800 p-6 rounded-xl border border-white/5">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-brand-black-800 p-6 rounded-xl border border-white/5 shadow-xl">
         <div>
           <h1 className="text-2xl font-bold text-white flex items-center gap-2">
             <Users className="w-6 h-6 text-brand-orange-500" />
-            ATS Applicant Tracking System
+            ATS Applicant Tracking &amp; HR Recruiter Analytics
           </h1>
-          <p className="text-sm text-zinc-400 mt-1">
-            Recruitment pipeline for RBT & BCBA clinical candidates.
+          <p className="text-xs text-zinc-400 mt-1">
+            Real-time candidate funnel, time-to-hire metrics, and 6-point compliance onboarding logs.
           </p>
         </div>
 
@@ -131,11 +156,70 @@ export default function AtsPipelineView() {
 
           <Button
             onClick={() => setShowAddForm(!showAddForm)}
-            className="bg-brand-orange-500 hover:bg-brand-orange-600 text-white font-bold text-xs px-4 h-9"
+            className="bg-brand-orange-500 hover:bg-brand-orange-600 text-white font-bold text-xs px-4 h-9 cursor-pointer"
           >
             <UserPlus className="w-4 h-4 mr-1.5" /> Add Applicant
           </Button>
         </div>
+      </div>
+
+      {/* RECRUITER ANALYTICS & STATISTICS KPI CARDS */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <Card className="border-white/10 bg-zinc-950 shadow-md">
+          <CardContent className="p-6">
+            <div className="flex justify-between items-start">
+              <div>
+                <p className="text-xs text-brand-orange-400 font-bold uppercase tracking-wider">Total Pipeline Candidates</p>
+                <h3 className="text-3xl font-black text-white mt-2">{candidates.length}</h3>
+              </div>
+              <div className="p-3 bg-brand-orange-500/10 border border-brand-orange-500/20 rounded-xl text-brand-orange-400">
+                <Users className="w-6 h-6" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-white/10 bg-zinc-950 shadow-md">
+          <CardContent className="p-6">
+            <div className="flex justify-between items-start">
+              <div>
+                <p className="text-xs text-cyan-400 font-bold uppercase tracking-wider">Avg Time to Hire</p>
+                <h3 className="text-3xl font-black text-white mt-2">14 Days</h3>
+              </div>
+              <div className="p-3 bg-cyan-500/10 border border-cyan-500/20 rounded-xl text-cyan-400">
+                <Clock className="w-6 h-6" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-white/10 bg-zinc-950 shadow-md">
+          <CardContent className="p-6">
+            <div className="flex justify-between items-start">
+              <div>
+                <p className="text-xs text-purple-400 font-bold uppercase tracking-wider">40-Hr Course Pass Rate</p>
+                <h3 className="text-3xl font-black text-white mt-2">84%</h3>
+              </div>
+              <div className="p-3 bg-purple-500/10 border border-purple-500/20 rounded-xl text-purple-400">
+                <Award className="w-6 h-6" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-white/10 bg-zinc-950 shadow-md">
+          <CardContent className="p-6">
+            <div className="flex justify-between items-start">
+              <div>
+                <p className="text-xs text-emerald-400 font-bold uppercase tracking-wider">Offer Acceptance Ratio</p>
+                <h3 className="text-3xl font-black text-white mt-2">92%</h3>
+              </div>
+              <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400">
+                <TrendingUp className="w-6 h-6" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Quick Add Form Modal */}
@@ -220,6 +304,56 @@ export default function AtsPipelineView() {
         </Card>
       )}
 
+      {/* ACTIVATION MAGIC LINK INVITATION MODAL */}
+      {activeInviteCandidate && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-zinc-950 border-2 border-brand-orange-500/50 rounded-2xl p-6 max-w-lg w-full space-y-5 shadow-2xl animate-fade-in">
+            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-5 h-5 text-emerald-400" />
+                <h3 className="text-base font-bold text-white">HR Activation Magic Link Generated</h3>
+              </div>
+              <button
+                onClick={() => setActiveInviteCandidate(null)}
+                className="text-xs text-zinc-400 hover:text-white cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs text-zinc-300">
+              <p>
+                Candidate <strong className="text-white">{activeInviteCandidate.name}</strong> ({activeInviteCandidate.email}) has been approved by HR.
+              </p>
+              <div className="bg-zinc-900 border border-white/10 rounded-xl p-3.5 space-y-2">
+                <span className="text-[10px] font-mono font-bold text-brand-orange-400 uppercase tracking-wider block">Activation Magic Link URL:</span>
+                <div className="flex items-center justify-between gap-2 bg-black/50 p-2.5 rounded-lg border border-white/10 text-xs font-mono text-emerald-400 break-all">
+                  <span>{`http://localhost:3001/magic-link/${activeInviteCandidate.id}`}</span>
+                  <button
+                    onClick={() => copyInviteLink(`http://localhost:3001/magic-link/${activeInviteCandidate.id}`)}
+                    className="p-1.5 rounded-md bg-zinc-800 hover:bg-brand-orange-500 text-white shrink-0 transition-colors cursor-pointer"
+                  >
+                    {copiedLink ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+              <p className="text-[11px] text-zinc-400 italic">
+                An automated email containing this single-use activation link has been dispatched to {activeInviteCandidate.email}.
+              </p>
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <Button
+                onClick={() => setActiveInviteCandidate(null)}
+                className="bg-brand-orange-500 hover:bg-brand-orange-600 text-white font-bold text-xs px-6 h-9 cursor-pointer"
+              >
+                Close Window
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 5-Column Kanban Board */}
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4 overflow-x-auto pb-4">
         {stages.map(stage => {
@@ -253,17 +387,31 @@ export default function AtsPipelineView() {
 
                       <div className="text-[11px] text-zinc-500 border-t border-white/5 pt-2 flex items-center justify-between">
                         <span>{c.experienceYears} yrs exp</span>
-                        <span>{c.appliedDate}</span>
+                        <span className="text-emerald-400 font-mono text-[10px]">
+                          {c.activationStatus === 'ACCOUNT_ACTIVE' ? '✓ Active' : c.activationStatus === 'INVITATION_SENT' ? '✉ Invited' : '⏳ Pending HR'}
+                        </span>
                       </div>
 
-                      {c.stage !== 'HIRED' && (
-                        <Button
-                          onClick={() => handleAdvanceStage(c.id)}
-                          className="w-full bg-zinc-800 hover:bg-brand-orange-500 hover:text-white text-zinc-300 text-xs py-1.5 h-7 font-semibold transition-colors flex items-center justify-center gap-1 cursor-pointer"
-                        >
-                          Advance <ChevronRight className="w-3.5 h-3.5" />
-                        </Button>
-                      )}
+                      {/* HR ACTION BUTTONS */}
+                      <div className="space-y-1.5 pt-1">
+                        {c.stage !== 'HIRED' && (
+                          <Button
+                            onClick={() => handleApproveAndInvite(c)}
+                            className="w-full bg-brand-orange-500 hover:bg-brand-orange-600 text-white text-xs py-1.5 h-8 font-extrabold transition-colors flex items-center justify-center gap-1 cursor-pointer shadow-md"
+                          >
+                            <Key className="w-3.5 h-3.5" /> Approve &amp; Send Magic Link
+                          </Button>
+                        )}
+
+                        {c.stage !== 'HIRED' && (
+                          <Button
+                            onClick={() => handleAdvanceStage(c.id)}
+                            className="w-full bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs py-1.5 h-7 font-semibold transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                          >
+                            Advance Stage <ChevronRight className="w-3.5 h-3.5" />
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   ))}
 

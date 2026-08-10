@@ -148,6 +148,8 @@ model User {
   sentMessages           StaffMessage[]   @relation("StaffMessageSender")
   receivedMessages       StaffMessage[]   @relation("StaffMessageReceiver")
   notifications          Notification[]
+  credentials            StaffCredential[]
+  evvLogs                EVVLog[]
 }
 
 model Client {
@@ -197,6 +199,11 @@ model Client {
   messages        ClientMessage[]
   actionItems     ActionItem[]
   treatmentPlan   Json?        @default("{}")
+
+  skillTargets    SkillTarget[]
+  behaviorTargets BehaviorTarget[]
+  appointments    ScheduleAppointment[]
+  reAuthPackets   ReAuthPacket[]
 }
 
 model Document {
@@ -261,6 +268,8 @@ model Session {
   rbt             User?         @relation("RbtSession", fields: [rbtId], references: [id])
   bcba            User?         @relation("BcbaSession", fields: [bcbaId], references: [id])
   note            SessionNote?
+  trialLogs       SessionTrialData[]
+  behaviorLogs    BehaviorLog[]
 }
 
 model SessionNote {
@@ -470,3 +479,193 @@ model Notification {
 
   user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
+
+// ------------------------------------------------------
+// IN-HOUSE EMR & DATA COLLECTION MODELS (MOTIVITY REPLACEMENT)
+// ------------------------------------------------------
+
+model SkillTarget {
+  id              String   @id @default(uuid()) @db.Uuid
+  clientId        String   @db.Uuid
+  domain          String   // e.g. "Language", "Social", "Self-Help"
+  title           String
+  description     String?  @db.Text
+  measurementType String   @default("TRIAL") // TRIAL, FREQUENCY, DURATION, TASK_ANALYSIS, INTERVAL
+  targetStatus    String   @default("BASELINE") // BASELINE, IN_PROGRESS, MASTERED, ON_HOLD
+  masteryCriteria String?  @default("80% over 3 sessions")
+  baselineData    Float?
+  phaseLines      Json?    @default("[]")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  client          Client             @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  trialLogs       SessionTrialData[]
+}
+
+model SessionTrialData {
+  id          String   @id @default(uuid()) @db.Uuid
+  sessionId   String   @db.Uuid
+  targetId    String   @db.Uuid
+  score       String   // "+", "-", "P", "NR", or numeric duration/count
+  promptLevel String?  // Independent, Verbal, Gestural, Model, Partial Physical, Full Physical
+  trialIndex  Int      @default(1)
+  timestamp   DateTime @default(now())
+
+  session     Session     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  target      SkillTarget @relation(fields: [targetId], references: [id], onDelete: Cascade)
+}
+
+model BehaviorTarget {
+  id                  String   @id @default(uuid()) @db.Uuid
+  clientId            String   @db.Uuid
+  behaviorName        String
+  definition          String   @db.Text
+  measurementType     String   @default("FREQUENCY") // FREQUENCY, DURATION, RATE
+  antecedents         String?  @db.Text
+  consequences        String?  @db.Text
+  replacementBehavior String?  @db.Text
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  client              Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  behaviorLogs        BehaviorLog[]
+}
+
+model BehaviorLog {
+  id             String         @id @default(uuid()) @db.Uuid
+  sessionId      String         @db.Uuid
+  behaviorId     String         @db.Uuid
+  frequencyCount Int?           @default(1)
+  durationSeconds Int?          @default(0)
+  intensity      String?        @default("MODERATE") // MILD, MODERATE, SEVERE
+  abcNotes       String?        @db.Text
+  timestamp      DateTime       @default(now())
+
+  session        Session        @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  behavior       BehaviorTarget @relation(fields: [behaviorId], references: [id], onDelete: Cascade)
+}
+
+// ------------------------------------------------------
+// IN-HOUSE HRM & EVV MODELS (ARTEMIS HRM REPLACEMENT)
+// ------------------------------------------------------
+
+model StaffCredential {
+  id               String    @id @default(uuid()) @db.Uuid
+  userId           String    @db.Uuid
+  credentialType   String    // e.g. "NPI", "CAQH", "BACB_LICENSE", "CPR_CERT", "MEDICAID_PROVIDER_ID"
+  credentialNumber String?
+  payerName        String?   @default("ALL_PAYERS") // e.g. "Sunshine Health", "Simply Healthcare", "ALL_PAYERS"
+  isCredentialed   Boolean   @default(true)
+  expirationDate   DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model EVVLog {
+  id                 String    @id @default(uuid()) @db.Uuid
+  sessionId          String    @db.Uuid
+  staffId            String    @db.Uuid
+  clockInLat         Float?
+  clockInLng         Float?
+  clockOutLat        Float?
+  clockOutLng        Float?
+  isLocationVerified Boolean   @default(true)
+  clockInTimestamp   DateTime  @default(now())
+  clockOutTimestamp  DateTime?
+
+  session            Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  staff              User      @relation(fields: [staffId], references: [id], onDelete: Cascade)
+}
+
+// ------------------------------------------------------
+// INTELLIGENT SCHEDULING MODELS (PHASE 5)
+// ------------------------------------------------------
+
+model ScheduleAppointment {
+  id             String   @id @default(uuid()) @db.Uuid
+  clientId       String   @db.Uuid
+  rbtId          String?  @db.Uuid
+  bcbaId         String?  @db.Uuid
+  scheduledStart DateTime
+  scheduledEnd   DateTime
+  serviceAddress String?
+  cptCode        String   @default("97153")
+  status         String   @default("SCHEDULED") // SCHEDULED, COMPLETED, CANCELLED, NO_SHOW
+  notes          String?  @db.Text
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  client         Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+}
+
+// ------------------------------------------------------
+// RE-AUTH & AUDIT VAULT MODELS (PHASES 9 & 11)
+// ------------------------------------------------------
+
+model ReAuthPacket {
+  id                   String   @id @default(uuid()) @db.Uuid
+  clientId             String   @db.Uuid
+  paRequestId          String?  @db.Uuid
+  status               String   @default("DRAFT") // DRAFT, SUBMITTED, APPROVED, DENIED
+  skillGraphSummary    Json?    @default("{}")
+  behaviorGraphSummary Json?    @default("{}")
+  attendancePct        Float    @default(95.0)
+  cptRequestPayload    Json?    @default("{}")
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  client               Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+}
+
+model AuditLogVault {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String?  @db.Uuid
+  action       String   // VIEW, EDIT, SIGN, EXPORT, DELETE
+  resourceType String   // CLIENT, SESSION_NOTE, PA_REQUEST, BILLING_CLAIM
+  resourceId   String
+  ipAddress    String?
+  metadata     Json?    @default("{}")
+  timestamp    DateTime @default(now())
+}
+
+// ------------------------------------------------------
+// ATS RECRUITING & ONBOARDING MODELS (PHASE 13)
+// ------------------------------------------------------
+
+model AtsCandidate {
+  id           String   @id @default(uuid()) @db.Uuid
+  firstName    String
+  lastName     String
+  email        String   @unique
+  phone        String?
+  appliedRole  String   @default("RBT") // RBT, BCBA, CLINICAL_DIRECTOR
+  stage        String   @default("APPLIED") // APPLIED, INTERVIEW_SCHEDULED, OFFER_EXTENDED, BACKGROUND_CLEARANCE, ONBOARDING, ACTIVE_STAFF
+  bacbNumber   String?
+  bacbVerified Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  onboardingPacket CandidateOnboardingPacket?
+}
+
+model CandidateOnboardingPacket {
+  id                    String   @id @default(uuid()) @db.Uuid
+  candidateId           String   @unique @db.Uuid
+  magicLinkToken        String?  @unique
+  w4Complete            Boolean  @default(false)
+  i9Complete            Boolean  @default(false)
+  directDepositComplete Boolean  @default(false)
+  cprUploaded           Boolean  @default(false)
+  formData              Json?    @default("{}")
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  candidate             AtsCandidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+}
+
+
+
+
+

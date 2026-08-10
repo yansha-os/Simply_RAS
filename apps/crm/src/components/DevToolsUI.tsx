@@ -52,7 +52,7 @@ export function DevToolsUI({
           )}
         </button>
       ) : (
-        <div className="bg-zinc-950 border border-zinc-700 p-4 rounded-xl shadow-2xl w-80 mb-2 animate-in slide-in-from-bottom-5">
+        <div className="devtools-panel bg-zinc-950 border border-zinc-700 p-4 rounded-xl shadow-2xl w-80 mb-2 animate-in slide-in-from-bottom-5">
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-white font-bold text-sm flex items-center gap-2">
               <UserCircle2 className="w-4 h-4 text-cyan-400" />

@@ -7,10 +7,10 @@ import { Button } from '@/components/ui/Button';
 import { assignStaff, activateClient, collectSignature } from '@/app/(dashboard)/case/actions';
 import { Users, CheckCircle, PenTool } from 'lucide-react';
 
-const assignInitialState = { error: '', success: false };
+const assignInitialState: { error?: string; success?: boolean } = {};
 
 export default function CasePipelineClient({ staffingQueue, missingSigs, pendingOnboards, rbts, bcbas }: any) {
-  const [assignState, assignAction, isAssigning] = useActionState(assignStaff, assignInitialState);
+  const [assignState, assignAction, isAssigning] = useActionState<any, FormData>(assignStaff, assignInitialState);
   const [isActivating, startTransition] = useTransition();
 
   const handleActivate = (clientId: string) => {

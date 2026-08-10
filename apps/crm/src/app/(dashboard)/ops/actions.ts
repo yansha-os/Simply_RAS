@@ -26,7 +26,7 @@ export async function getOpsDepartmentMetrics() {
         }
       }),
       prisma.client.count({ where: { status: 'ASSESSMENT_SCHEDULED' } }),
-      prisma.actionItem.count({ where: { status: 'PENDING' } }),
+      prisma.actionItem.count({ where: { status: 'OPEN' } }),
       prisma.sessionNote.findMany({
         where: {
           isConverted: false,

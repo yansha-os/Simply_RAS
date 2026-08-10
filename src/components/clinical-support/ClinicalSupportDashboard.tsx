@@ -36,11 +36,12 @@ export default function ClinicalSupportDashboard({ clients }: { clients: any[] }
             </p>
           </div>
 
-          <Link href="/clinical-support/clients">
-            <Button className="bg-gradient-to-r from-brand-orange-500 to-orange-600 hover:from-brand-orange-600 hover:to-orange-700 text-white font-bold text-xs px-5 h-11 rounded-xl shadow-[0_0_20px_rgba(255,107,0,0.3)] transition-all hover:scale-105 cursor-pointer flex items-center gap-2 flex-shrink-0">
-              <span>View All Clinical Clients</span>
-              <ArrowRight className="w-4 h-4" />
-            </Button>
+          <Link
+            href="/clinical-support/clients"
+            className="bg-gradient-to-r from-brand-orange-500 to-orange-600 hover:from-brand-orange-600 hover:to-orange-700 text-white font-bold text-xs px-5 h-11 rounded-xl shadow-[0_0_20px_rgba(255,107,0,0.3)] transition-all hover:scale-105 cursor-pointer flex items-center justify-center gap-2 flex-shrink-0"
+          >
+            <span>View All Clinical Clients</span>
+            <ArrowRight className="w-4 h-4" />
           </Link>
         </div>
       </div>

@@ -8,7 +8,7 @@ export async function verifyDocuments(clientId: string) {
   try {
     await prisma.client.update({
       where: { id: clientId },
-      data: { status: 'AUTH_INITIATED' } // Passing it back to Intake/PA to initiate the 97151 Auth
+      data: { status: 'PA_SUBMITTED' } // Passing it back to Intake/PA to initiate the 97151 Auth
     })
 
     revalidatePath('/clinical-support')
@@ -24,7 +24,7 @@ export async function submitTreatmentPacket(clientId: string) {
   try {
     await prisma.client.update({
       where: { id: clientId },
-      data: { status: 'AUTH_INITIATED' } // Passing it back to Intake/PA to initiate the 97153 Auth
+      data: { status: 'PA_SUBMITTED' } // Passing it back to Intake/PA to initiate the 97153 Auth
     })
 
     revalidatePath('/clinical-support')

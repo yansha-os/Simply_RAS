@@ -8,6 +8,9 @@ export async function getNotifications(userId?: string) {
     const where: any = {};
     if (userId) {
       where.userId = userId;
+    } else {
+      // If no explicit userId provided, do not fetch unassigned HR notifications for applicant accounts
+      where.userId = '00000000-0000-0000-0000-000000000000';
     }
 
     const notifications = await prisma.notification.findMany({

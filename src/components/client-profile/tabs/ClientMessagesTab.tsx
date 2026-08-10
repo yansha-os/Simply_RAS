@@ -37,12 +37,36 @@ export default function ClientMessagesTab({ clientId, initialMessages }: { clien
   return (
     <div className="space-y-6 animate-slide-up">
       <Card className="border-[var(--line)] shadow-sm w-full bg-[var(--surface)]">
-        <CardHeader className="pb-4 border-b border-[var(--line)]">
-          <CardTitle className="text-lg text-[var(--ink-100)] flex items-center gap-3">
-            <MessageSquare className="w-5 h-5 text-[var(--teal)]" />
-            Client Communication
-          </CardTitle>
-          <p className="text-sm text-[var(--ink-400)] mt-1">Send messages directly to the parent's Zero-Trust portal.</p>
+        <CardHeader className="pb-4 border-b border-[var(--line)] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <CardTitle className="text-lg text-[var(--ink-100)] flex items-center gap-3">
+              <MessageSquare className="w-5 h-5 text-[var(--teal)]" />
+              Client Communication
+            </CardTitle>
+            <p className="text-sm text-[var(--ink-400)] mt-1">Send messages directly to the parent's Zero-Trust portal.</p>
+          </div>
+
+          {/* Magic Link Header Box */}
+          <div className="flex items-center gap-2 bg-zinc-900/90 border border-white/10 p-2 px-3 rounded-xl">
+            <span className="text-[10px] font-mono text-zinc-400 uppercase font-bold">Magic Link:</span>
+            <span className="text-xs font-mono text-cyan-400 truncate max-w-[180px]">
+              http://localhost:3000/magic-link/{clientId}
+            </span>
+            <Button
+              variant="secondary"
+              size="sm"
+              className="h-7 text-[11px] px-2.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg cursor-pointer"
+              onClick={(e) => {
+                navigator.clipboard.writeText(`http://localhost:3000/magic-link/${clientId}`);
+                const target = e.target as HTMLButtonElement;
+                const oldText = target.innerText;
+                target.innerText = 'Copied!';
+                setTimeout(() => { target.innerText = oldText; }, 2000);
+              }}
+            >
+              Copy
+            </Button>
+          </div>
         </CardHeader>
         
         <CardContent className="p-0">

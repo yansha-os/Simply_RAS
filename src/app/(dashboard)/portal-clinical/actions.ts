@@ -36,3 +36,35 @@ export async function rejectClinicalDocs(formData: FormData) {
   revalidatePath('/portal-clinical');
   revalidatePath(`/client/${clientId}`);
 }
+
+export async function assignBcba(clientId: string, bcbaId: string) {
+  try {
+    await prisma.client.update({
+      where: { id: clientId },
+      data: { bcbaId }
+    });
+
+    revalidatePath('/portal-clinical');
+    revalidatePath('/portal-clinical/bcbas');
+    revalidatePath(`/client/${clientId}`);
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+export async function updateTreatmentPlanStatus(clientId: string, status: any) {
+  try {
+    await prisma.client.update({
+      where: { id: clientId },
+      data: { status }
+    });
+
+    revalidatePath('/portal-clinical');
+    revalidatePath('/portal-clinical/bcbas');
+    revalidatePath(`/client/${clientId}`);
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}

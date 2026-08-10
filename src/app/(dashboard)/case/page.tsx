@@ -8,7 +8,7 @@ export default async function CaseCoordinatorDashboard() {
   // Step 6: Clients with APPROVED Treatment Auth, but not yet ACTIVE
   const staffingQueue = await prisma.client.findMany({
     where: {
-      status: 'AUTHORIZED',
+      status: 'STAFFING_PENDING',
       authorizations: {
         some: { type: 'TREATMENT', status: 'APPROVED' }
       }

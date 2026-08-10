@@ -8,7 +8,7 @@ export default async function ClinicalDashboard() {
   // Step 4: Find clients who have an APPROVED Assessment Auth, but NO Treatment Auth yet
   const assessmentClients = await prisma.client.findMany({
     where: {
-      status: 'AUTHORIZED', // Passed Intake
+      status: 'PA_APPROVED', // Passed Intake & Assessment PA Approved
       authorizations: {
         some: { type: 'ASSESSMENT', status: 'APPROVED' },
         none: { type: 'TREATMENT' }

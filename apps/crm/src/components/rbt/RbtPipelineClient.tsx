@@ -7,12 +7,12 @@ import { Button } from '@/components/ui/Button';
 import { logSession, fixDeficiency } from '@/app/(dashboard)/rbt/actions';
 import { Clock, AlertTriangle, Send } from 'lucide-react';
 
-const logInitialState = { error: '', success: false };
-const fixInitialState = { error: '', success: false };
+const logInitialState: { error?: string; success?: boolean } = {};
+const fixInitialState: { error?: string; success?: boolean } = {};
 
 export default function RbtPipelineClient({ activeClients, returnedNotes, rbtId }: any) {
-  const [logState, logAction, isLogging] = useActionState(logSession, logInitialState);
-  const [fixState, fixAction, isFixing] = useActionState(fixDeficiency, fixInitialState);
+  const [logState, logAction, isLogging] = useActionState<any, FormData>(logSession, logInitialState);
+  const [fixState, fixAction, isFixing] = useActionState<any, FormData>(fixDeficiency, fixInitialState);
 
   return (
     <div className="mt-8 space-y-8 max-w-3xl">

@@ -12,7 +12,8 @@ import {
   LogOut,
   Activity,
   ShieldCheck,
-  CalendarDays
+  CalendarDays,
+  PenTool
 } from 'lucide-react';
 import { cn } from '../ui/Button';
 
@@ -64,9 +65,38 @@ const navItems: Record<string, NavItem[]> = {
     { name: 'Dashboard', href: '/clinical-support', icon: LayoutDashboard },
     { name: 'Clients', href: '/clinical-support/clients', icon: Users },
   ],
+  CLINICAL_DIRECTOR: [
+    { name: 'Clinical Command', isHeader: true },
+    { name: 'Dashboard', href: '/portal-clinical', icon: LayoutDashboard },
+    { name: 'Clinical Queue', href: '/portal-clinical/bcbas', icon: Users },
+    { name: 'Daily Workstation', href: '/portal-clinical/daily', icon: PenTool },
+    { name: 'Clinical Support', isHeader: true },
+    { name: 'Dashboard', href: '/clinical-support', icon: LayoutDashboard },
+    { name: 'Clients', href: '/clinical-support/clients', icon: Users },
+  ],
+  CEO: [
+    { name: 'Master Operations', href: '/ops', icon: Activity },
+    { name: 'Intake Portal', isHeader: true },
+    { name: 'Dashboard', href: '/portal-case', icon: LayoutDashboard },
+    { name: 'Clients', href: '/portal-case/clients', icon: Users },
+    { name: 'Clinical Support', isHeader: true },
+    { name: 'Dashboard', href: '/clinical-support', icon: LayoutDashboard },
+    { name: 'Clients', href: '/clinical-support/clients', icon: Users },
+    { name: 'Billing', isHeader: true },
+    { name: 'Dashboard', href: '/portal-billing', icon: LayoutDashboard },
+    { name: 'Clients', href: '/portal-billing/clients', icon: Users },
+    { name: 'Clinical', isHeader: true },
+    { name: 'Dashboard', href: '/portal-clinical', icon: LayoutDashboard },
+    { name: 'Clinical Queue', href: '/portal-clinical/bcbas', icon: Users },
+    { name: 'Daily Workstation', href: '/portal-clinical/daily', icon: PenTool },
+    { name: 'Case Coordinator', isHeader: true },
+    { name: 'Dashboard', href: '/portal-case-coord', icon: LayoutDashboard },
+    { name: 'Clients', href: '/portal-case-coord/clients', icon: Users },
+  ],
   BCBA: [
     { name: 'Clinical Dashboard', href: '/portal-clinical', icon: LayoutDashboard },
-    { name: 'My Clients', href: '/portal-clinical/bcbas', icon: Users },
+    { name: 'Clinical Queue', href: '/portal-clinical/bcbas', icon: Users },
+    { name: 'Daily Workstation', href: '/portal-clinical/daily', icon: PenTool },
   ],
   BILLING: [
     { name: 'Billing Dashboard', href: '/portal-billing', icon: LayoutDashboard },
@@ -84,8 +114,8 @@ export async function Sidebar() {
 
   return (
     <>
-      <div className="w-[76px] flex-shrink-0 transition-all duration-300 hidden md:block border-r border-[var(--line)] bg-[rgba(8,10,18,0.7)]" />
-      <div className="group fixed top-0 left-0 h-full w-[76px] hover:w-[252px] bg-[rgba(8,10,18,0.8)] hover:bg-[rgba(8,10,18,0.95)] backdrop-blur-[24px] border-r border-[var(--line)] py-[20px] px-[14px] flex flex-col z-50 transition-all duration-300 ease-in-out overflow-hidden shadow-[4px_0_24px_rgba(0,0,0,0)] hover:shadow-[4px_0_24px_rgba(0,0,0,0.5)]">
+      <div className="w-[76px] flex-shrink-0 transition-all duration-300 hidden md:block border-r border-[var(--line)] bg-transparent" />
+      <div className="group fixed top-0 left-0 h-full w-[76px] hover:w-[252px] bg-[rgba(8,10,18,0.2)] hover:bg-[rgba(8,10,18,0.4)] backdrop-blur-[12px] border-r border-[var(--line)] py-[20px] px-[14px] flex flex-col z-50 transition-all duration-300 ease-in-out overflow-hidden shadow-[4px_0_24px_rgba(0,0,0,0)] hover:shadow-[4px_0_24px_rgba(0,0,0,0.5)]">
         
         <div className="flex items-center gap-[12px] px-[4px] pb-[24px] mb-[16px] border-b border-[var(--line)] whitespace-nowrap min-w-[220px]">
           <div className="w-11 h-11 rounded-xl bg-brand-orange-500/10 flex items-center justify-center flex-shrink-0 shadow-[0_0_20px_rgba(255,107,0,0.3)] border border-brand-orange-500/20">

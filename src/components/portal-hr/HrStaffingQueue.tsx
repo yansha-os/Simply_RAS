@@ -53,18 +53,11 @@ export default function HrStaffingQueue({ clients, bcbas, rbts }: { clients: any
 
                 <div className="mt-4 space-y-3">
                   <div>
-                    <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">BCBA Supervisor</label>
-                    <select
-                      className="w-full bg-zinc-950 border border-white/10 rounded-lg p-2.5 text-xs text-white focus:border-brand-orange-500 outline-none cursor-pointer"
-                      value={client.bcbaId || ''}
-                      onChange={(e) => handleAssign(client.id, 'bcba', e.target.value)}
-                      disabled={isPending}
-                    >
-                      <option value="">-- Select BCBA --</option>
-                      {bcbas.map(bcba => (
-                        <option key={bcba.id} value={bcba.id}>{bcba.firstName} {bcba.lastName}</option>
-                      ))}
-                    </select>
+                    <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">BCBA Supervisor (Assigned by Clinical Director)</label>
+                    <div className="w-full bg-zinc-950/60 border border-white/5 rounded-lg p-2.5 text-xs text-zinc-300 font-mono flex items-center justify-between">
+                      <span>{client.bcba ? `${client.bcba.firstName} ${client.bcba.lastName}` : (client.bcbaId ? 'BCBA Assigned' : 'Clinical Director Assigned')}</span>
+                      <span className="text-[10px] text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded border border-cyan-500/20">Clinical Director Owned</span>
+                    </div>
                   </div>
 
                   <div>

@@ -36,10 +36,11 @@ export default async function HrPortalPage() {
           <p className="text-brand-blue-400">Clinical workforce metrics, staffing demand ratios, and fill rates.</p>
         </div>
 
-        <Link href="/portal-hr/clients">
-          <Button className="bg-brand-orange-500 hover:bg-brand-orange-600 text-white font-bold text-xs px-4 h-10">
-            Open Staffing Queue ({missingStaffCount}) <ArrowRight className="w-4 h-4 ml-1.5" />
-          </Button>
+        <Link
+          href="/portal-hr/clients"
+          className="bg-brand-orange-500 hover:bg-brand-orange-600 text-white font-bold text-xs px-4 h-10 rounded-xl flex items-center justify-center cursor-pointer"
+        >
+          Open Staffing Queue ({missingStaffCount}) <ArrowRight className="w-4 h-4 ml-1.5" />
         </Link>
       </div>
 

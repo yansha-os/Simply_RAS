@@ -1,20 +1,26 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Card, CardContent } from '@/components/ui/Card';
-import { UserPlus, Mail, FileCheck, ArrowRight, Loader2, UserCheck, ShieldCheck, Clock, CheckCircle2, Plus } from 'lucide-react';
+import { Card } from '@/components/ui/Card';
+import { UserPlus, Mail, FileCheck, ArrowRight, Loader2, UserCheck, Clock, Plus, Phone, Globe } from 'lucide-react';
 import Link from 'next/link';
-import { generateMagicLink, assignCaseCoordinator } from '@/app/(dashboard)/portal-case/actions';
-import { createInquiry } from '@/app/(dashboard)/intake/actions';
+import { createInquiry, generateMagicLink, assignCaseCoordinator } from '@/app/(dashboard)/portal-case/actions';
 import { Button } from '@/components/ui/Button';
 
 export default function IntakeQueue({ clients, coordinators }: { clients: any[], coordinators?: any[] }) {
   const [mounted, setMounted] = React.useState(false);
   const [isPending, startTransition] = React.useTransition();
   const [showAddForm, setShowAddForm] = useState(false);
-  const [newFirstName, setNewFirstName] = useState('');
-  const [newLastName, setNewLastName] = useState('');
-  const [newEmail, setNewEmail] = useState('');
+
+  // Form State
+  const [childFirstName, setChildFirstName] = useState('');
+  const [childLastName, setChildLastName] = useState('');
+  const [parentFirstName, setParentFirstName] = useState('');
+  const [parentLastName, setParentLastName] = useState('');
+  const [guardianPhone, setGuardianPhone] = useState('');
+  const [guardianEmail, setGuardianEmail] = useState('');
+  const [preferredLanguage, setPreferredLanguage] = useState('English');
+
   const [selectedCoord, setSelectedCoord] = useState<{ [key: string]: string }>({});
 
   React.useEffect(() => setMounted(true), []);
@@ -34,20 +40,29 @@ export default function IntakeQueue({ clients, coordinators }: { clients: any[],
     'TX_PA_SUBMITTED', 
     'TX_PA_APPROVED'
   ].includes(c.status));
-  const readyToAssignQueue = clients.filter(c => c.status === 'STAFFING_PENDING' || !c.caseCoordinatorId);
+  const readyToAssignQueue = clients.filter(c => c.status === 'STAFFING_PENDING' && !c.caseCoordinatorId);
 
   const handleCreateInquirySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newFirstName || !newLastName) return;
+    if (!childFirstName || !childLastName) return;
     startTransition(async () => {
       const formData = new FormData();
-      formData.append('firstName', newFirstName);
-      formData.append('lastName', newLastName);
-      formData.append('guardianEmail', newEmail);
+      formData.append('childFirstName', childFirstName);
+      formData.append('childLastName', childLastName);
+      formData.append('parentFirstName', parentFirstName);
+      formData.append('parentLastName', parentLastName);
+      formData.append('guardianPhone', guardianPhone);
+      formData.append('guardianEmail', guardianEmail);
+      formData.append('preferredLanguage', preferredLanguage);
+
       await createInquiry({}, formData);
-      setNewFirstName('');
-      setNewLastName('');
-      setNewEmail('');
+      setChildFirstName('');
+      setChildLastName('');
+      setParentFirstName('');
+      setParentLastName('');
+      setGuardianPhone('');
+      setGuardianEmail('');
+      setPreferredLanguage('English');
       setShowAddForm(false);
     });
   };
@@ -69,6 +84,9 @@ export default function IntakeQueue({ clients, coordinators }: { clients: any[],
                 )}
               </h4>
               <p className="text-xs text-zinc-400 font-sans">{desc}</p>
+              {client.guardianName && (
+                <p className="text-[11px] text-zinc-500 font-sans">Parent: {client.guardianName}</p>
+              )}
               {badge && (
                 <div className="mt-2 text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full bg-brand-orange-500/10 text-brand-orange-400 border border-brand-orange-500/20 inline-block uppercase tracking-wider">
                   {badge}
@@ -110,47 +128,104 @@ export default function IntakeQueue({ clients, coordinators }: { clients: any[],
           >
             <Plus className="w-4 h-4" /> Log New Lead
           </Button>
-          <Link href="/portal-case">
-            <Button className="bg-zinc-900 hover:bg-zinc-800 text-zinc-300 font-bold text-xs px-3.5 h-9 rounded-xl border border-white/10 transition-all cursor-pointer">
-              ← Back to Intake Dashboard
-            </Button>
-          </Link>
         </div>
       </div>
 
       {/* Log New Lead Form Modal / Dropdown */}
       {showAddForm && (
-        <Card className="bg-zinc-900/90 border border-brand-orange-500/30 backdrop-blur-xl p-5 rounded-2xl shadow-2xl space-y-3 animate-fade-in-up">
-          <h4 className="text-sm font-bold text-white font-heading flex items-center gap-2">
-            <UserPlus className="w-4 h-4 text-brand-orange-400" /> Quick Add New Client Lead
-          </h4>
-          <form onSubmit={handleCreateInquirySubmit} className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-            <input
-              type="text"
-              placeholder="First Name"
-              value={newFirstName}
-              onChange={e => setNewFirstName(e.target.value)}
-              required
-              className="bg-zinc-950 border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-brand-orange-500"
-            />
-            <input
-              type="text"
-              placeholder="Last Name"
-              value={newLastName}
-              onChange={e => setNewLastName(e.target.value)}
-              required
-              className="bg-zinc-950 border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-brand-orange-500"
-            />
-            <input
-              type="email"
-              placeholder="Guardian Email"
-              value={newEmail}
-              onChange={e => setNewEmail(e.target.value)}
-              className="bg-zinc-950 border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-brand-orange-500"
-            />
-            <Button type="submit" disabled={isPending} className="bg-brand-orange-500 hover:bg-brand-orange-600 text-white font-bold text-xs h-9 rounded-xl">
-              {isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Create Lead'}
-            </Button>
+        <Card className="bg-zinc-900/95 border border-brand-orange-500/40 backdrop-blur-2xl p-6 rounded-2xl shadow-2xl space-y-4 animate-fade-in-up">
+          <div className="flex justify-between items-center border-b border-white/10 pb-3">
+            <h4 className="text-base font-bold text-white font-heading flex items-center gap-2">
+              <UserPlus className="w-5 h-5 text-brand-orange-400" /> Log New Client Lead
+            </h4>
+            <span className="text-xs font-mono text-zinc-400">Intake Lead Capture</span>
+          </div>
+
+          <form onSubmit={handleCreateInquirySubmit} className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Child Info */}
+              <div className="space-y-2">
+                <label className="text-xs font-mono font-bold text-brand-orange-400 uppercase tracking-wider block">Child Information</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="text"
+                    placeholder="Child's First Name *"
+                    value={childFirstName}
+                    onChange={e => setChildFirstName(e.target.value)}
+                    required
+                    className="bg-zinc-950 border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-brand-orange-500 font-sans"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Child's Last Name *"
+                    value={childLastName}
+                    onChange={e => setChildLastName(e.target.value)}
+                    required
+                    className="bg-zinc-950 border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-brand-orange-500 font-sans"
+                  />
+                </div>
+              </div>
+
+              {/* Parent Info */}
+              <div className="space-y-2">
+                <label className="text-xs font-mono font-bold text-brand-orange-400 uppercase tracking-wider block">Parent / Guardian Information</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="text"
+                    placeholder="Parent's First Name"
+                    value={parentFirstName}
+                    onChange={e => setParentFirstName(e.target.value)}
+                    className="bg-zinc-950 border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-brand-orange-500 font-sans"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Parent's Last Name"
+                    value={parentLastName}
+                    onChange={e => setParentLastName(e.target.value)}
+                    className="bg-zinc-950 border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-brand-orange-500 font-sans"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Contact Details & Language */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <input
+                type="tel"
+                placeholder="Parent Phone Number"
+                value={guardianPhone}
+                onChange={e => setGuardianPhone(e.target.value)}
+                className="bg-zinc-950 border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-brand-orange-500 font-sans"
+              />
+              <input
+                type="email"
+                placeholder="Parent Email"
+                value={guardianEmail}
+                onChange={e => setGuardianEmail(e.target.value)}
+                className="bg-zinc-950 border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-brand-orange-500 font-sans"
+              />
+              <select
+                value={preferredLanguage}
+                onChange={e => setPreferredLanguage(e.target.value)}
+                className="bg-zinc-950 border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none cursor-pointer focus:border-brand-orange-500 font-sans"
+              >
+                <option value="English">English (Default)</option>
+                <option value="Spanish">Spanish</option>
+                <option value="Arabic">Arabic</option>
+                <option value="Creole">Creole</option>
+                <option value="Portuguese">Portuguese</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-white/10">
+              <Button type="button" onClick={() => setShowAddForm(false)} className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs px-4 h-9 rounded-xl">
+                Cancel
+              </Button>
+              <Button type="submit" disabled={isPending} className="bg-gradient-to-r from-brand-orange-500 to-orange-600 hover:from-brand-orange-600 text-white font-bold text-xs px-5 h-9 rounded-xl shadow-lg">
+                {isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Log Client Lead'}
+              </Button>
+            </div>
           </form>
         </Card>
       )}
@@ -315,33 +390,6 @@ export default function IntakeQueue({ clients, coordinators }: { clients: any[],
                 icon={UserCheck}
                 desc="Intake complete. Ready for CC."
                 badge="Ready to Assign"
-                action={
-                  <div className="space-y-1.5">
-                    <select
-                      className="w-full bg-zinc-950 border border-white/10 rounded-xl px-2 py-1 text-xs text-white outline-none cursor-pointer"
-                      value={selectedCoord[c.id] || c.caseCoordinatorId || ''}
-                      onChange={e => setSelectedCoord({ ...selectedCoord, [c.id]: e.target.value })}
-                    >
-                      <option value="">Select Coordinator...</option>
-                      {coordinators?.map(cc => (
-                        <option key={cc.id} value={cc.id}>{cc.firstName} {cc.lastName}</option>
-                      ))}
-                    </select>
-                    <Button
-                      disabled={!selectedCoord[c.id] || isPending}
-                      onClick={() => {
-                        startTransition(async () => {
-                          if (selectedCoord[c.id]) {
-                            await assignCaseCoordinator(c.id, selectedCoord[c.id]);
-                          }
-                        });
-                      }}
-                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs h-7 rounded-lg"
-                    >
-                      Confirm Assign
-                    </Button>
-                  </div>
-                }
               />
             ))}
 

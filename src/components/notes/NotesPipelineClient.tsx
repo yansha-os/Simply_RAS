@@ -7,11 +7,11 @@ import { Button } from '@/components/ui/Button';
 import { convertNoteToBillable, flagDeficiency } from '@/app/(dashboard)/notes/actions';
 import { CheckSquare, FileText, XCircle, AlertTriangle } from 'lucide-react';
 
-const flagInitialState = { error: '', success: false };
+const flagInitialState: { error?: string; success?: boolean } = {};
 
 export default function NotesPipelineClient({ pendingNotes }: any) {
   const [isConverting, startTransition] = useTransition();
-  const [flagState, flagAction, isFlagging] = useActionState(flagDeficiency, flagInitialState);
+  const [flagState, flagAction, isFlagging] = useActionState<any, FormData>(flagDeficiency, flagInitialState);
 
   const handleConvert = (noteId: string) => {
     startTransition(async () => {

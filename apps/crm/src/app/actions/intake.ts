@@ -71,7 +71,7 @@ export async function submitIntakePacket(packetId: string, formData: any) {
     const client = await prisma.client.findUnique({ where: { id: packet.clientId } });
     
     // Only move to DOCS_SUBMITTED if they aren't already past it
-    if (client && (client.status === 'MAGIC_LINK_SENT' || client.status === 'INQUIRY' || client.status === 'NEW')) {
+    if (client && (client.status === 'MAGIC_LINK_SENT' || client.status === 'INQUIRY')) {
       await prisma.client.update({
         where: { id: packet.clientId },
         data: { status: 'DOCS_SUBMITTED' }

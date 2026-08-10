@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { createInquiry, verifyDocuments, approveAssessmentAuth, approveTreatmentAuth } from '@/app/(dashboard)/intake/actions';
+import { createInquiry, approveDocument } from '@/app/(dashboard)/portal-case/actions';
 import { User, FileCheck, ShieldAlert, Activity } from 'lucide-react';
 
 const createInitialState = { error: '', success: false };
@@ -13,14 +13,7 @@ const authInitialState = { error: '', success: false };
 const txAuthInitialState = { error: '', success: false };
 
 export default function IntakePipelineClient({ inquiries, pendingAuths, expiringAuths, pendingTreatmentAuths = [] }: any) {
-  const [createState, createAction, isCreating] = useActionState(createInquiry, createInitialState);
-  const [authState, authAction, isApproving] = useActionState(approveAssessmentAuth, authInitialState);
-  const [txAuthState, txAuthAction, isApprovingTx] = useActionState(approveTreatmentAuth, txAuthInitialState);
-
-  // Quick action to transition an inquiry -> AUTH_INITIATED
-  const handleVerify = async (clientId: string) => {
-    await verifyDocuments(clientId);
-  };
+  const [createState, createAction, isCreating] = useActionState<any, FormData>(createInquiry, createInitialState);
 
   return (
     <div className="grid gap-6 md:grid-cols-4 mt-8">
@@ -57,7 +50,7 @@ export default function IntakePipelineClient({ inquiries, pendingAuths, expiring
                 </div>
                 <Badge variant="warning">Inquiry</Badge>
               </div>
-              <Button variant="outline" size="sm" className="w-full h-8 text-xs gap-2" onClick={() => handleVerify(client.id)}>
+              <Button variant="outline" size="sm" className="w-full h-8 text-xs gap-2">
                 <FileCheck className="w-3 h-3" /> Mark Verified
               </Button>
             </CardContent>
@@ -81,19 +74,6 @@ export default function IntakePipelineClient({ inquiries, pendingAuths, expiring
                 </div>
                 <Badge variant="secondary" className="bg-blue-100 text-blue-700">97151</Badge>
               </div>
-
-              <form action={authAction} className="space-y-2 border-t pt-3">
-                <input type="hidden" name="clientId" value={client.id} />
-                <Input name="authNumber" placeholder="Auth Number" required className="h-8 text-xs" />
-                <div className="grid grid-cols-2 gap-2">
-                  <Input name="startDate" type="date" required className="h-8 text-xs" />
-                  <Input name="endDate" type="date" required className="h-8 text-xs" />
-                </div>
-                <Input name="unitsApproved" type="number" placeholder="Units" required className="h-8 text-xs" />
-                <Button type="submit" variant="primary" size="sm" className="w-full h-8 text-xs bg-green-600 hover:bg-green-700" isLoading={isApproving}>
-                  Approve
-                </Button>
-              </form>
             </CardContent>
           </Card>
         ))}
@@ -116,19 +96,6 @@ export default function IntakePipelineClient({ inquiries, pendingAuths, expiring
                 </div>
                 <Badge variant="secondary" className="bg-purple-100 text-purple-700">Tx PA</Badge>
               </div>
-
-              <form action={txAuthAction} className="space-y-2 border-t pt-3">
-                <input type="hidden" name="authId" value={auth.id} />
-                <Input name="authNumber" placeholder="Auth Number" required className="h-8 text-xs" />
-                <div className="grid grid-cols-2 gap-2">
-                  <Input name="startDate" type="date" required className="h-8 text-xs" />
-                  <Input name="endDate" type="date" required className="h-8 text-xs" />
-                </div>
-                <Input name="unitsApproved" type="number" placeholder="Units (e.g. 97153)" required className="h-8 text-xs" />
-                <Button type="submit" variant="primary" size="sm" className="w-full h-8 text-xs bg-purple-600 hover:bg-purple-700" isLoading={isApprovingTx}>
-                  Approve Tx
-                </Button>
-              </form>
             </CardContent>
           </Card>
         ))}

@@ -1,6 +1,12 @@
-import React from 'react';
-import RbtDeidentifiedSessionView from '@/components/hrm/RbtDeidentifiedSessionView';
+'use client';
 
-export default function StandaloneSessionEmrPage() {
-  return <RbtDeidentifiedSessionView />;
+import React from 'react';
+import { RbtDataCollectionEngine } from '@/components/emr/RbtDataCollectionEngine';
+
+export default function SessionEmrPage() {
+  return (
+    <div className="max-w-5xl mx-auto py-6">
+      <RbtDataCollectionEngine mode="LIVE_SESSION" />
+    </div>
+  );
 }

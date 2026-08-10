@@ -2,20 +2,22 @@
 
 import { useState, useEffect } from 'react';
 
-export type HrmRole = 'HEAD_HR' | 'HR_AGENT' | 'FINANCE' | 'RBT';
+export type HrmRole = 'HEAD_HR' | 'HR_AGENT' | 'FINANCE' | 'RBT' | 'APPLICANT' | 'NONE';
 
 export function useHrmRole() {
   const [role, setRoleState] = useState<HrmRole>('HEAD_HR');
 
   useEffect(() => {
     const saved = localStorage.getItem('hrm_active_role') as HrmRole;
-    if (saved && ['HEAD_HR', 'HR_AGENT', 'FINANCE', 'RBT'].includes(saved)) {
+    if (saved && ['HEAD_HR', 'HR_AGENT', 'FINANCE', 'RBT', 'APPLICANT', 'NONE'].includes(saved)) {
       setRoleState(saved);
     }
 
     const handleStorage = () => {
       const updated = localStorage.getItem('hrm_active_role') as HrmRole;
-      if (updated) setRoleState(updated);
+      if (updated && ['HEAD_HR', 'HR_AGENT', 'FINANCE', 'RBT', 'APPLICANT', 'NONE'].includes(updated)) {
+        setRoleState(updated);
+      }
     };
 
     window.addEventListener('storage', handleStorage);

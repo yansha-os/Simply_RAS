@@ -4,6 +4,43 @@ import { prisma } from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
+export async function createInquiry(prevState: any, formData: FormData) {
+  try {
+    const firstName = String(formData.get('childFirstName') || formData.get('firstName') || '').trim()
+    const lastName = String(formData.get('childLastName') || formData.get('lastName') || '').trim()
+    
+    const parentFirstName = String(formData.get('parentFirstName') || '').trim()
+    const parentLastName = String(formData.get('parentLastName') || '').trim()
+    const guardianName = `${parentFirstName} ${parentLastName}`.trim() || null
+
+    const guardianPhone = String(formData.get('guardianPhone') || '').trim() || null
+    const guardianEmail = String(formData.get('guardianEmail') || '').trim() || null
+    const preferredLanguage = String(formData.get('preferredLanguage') || 'English').trim()
+
+    if (!firstName || !lastName) {
+      return { success: false, error: 'Child First Name and Last Name are required.' }
+    }
+
+    await prisma.client.create({
+      data: {
+        firstName,
+        lastName,
+        guardianName,
+        guardianPhone,
+        guardianEmail,
+        status: 'INQUIRY'
+      }
+    })
+
+    revalidatePath('/portal-case')
+    revalidatePath('/portal-case/clients')
+    return { success: true }
+  } catch (error: any) {
+    console.error('Failed to create inquiry:', error)
+    return { success: false, error: error.message || 'Failed to create inquiry.' }
+  }
+}
+
 export async function createIntakeClient(prevState: any, formData: FormData) {
   let newClient;
   
@@ -95,8 +132,6 @@ export async function sendToClinical(formData: FormData) {
   revalidatePath(`/client/${clientId}`)
   redirect('/portal-case/clients')
 }
-
-
 
 export async function approveDocument(packetId: string, documentKey: string, clientId: string) {
   const packet = await prisma.intakePacket.update({
@@ -274,7 +309,6 @@ export async function assignClinicalTeam(clientId: string, bcbaId: string, caseC
   if (isSuccess) redirect('/portal-case/clients');
 }
 
-
 export async function getClinicalStaff() {
   const bcbas = await prisma.user.findMany({
     where: { role: 'BCBA', isActive: true },
@@ -313,7 +347,7 @@ export async function markClientMessagesAsRead(clientId: string, isFromClient: b
     await prisma.clientMessage.updateMany({
       where: {
         clientId,
-        isFromClient, // if CRM is marking as read, they are marking messages FROM client. If client, they mark messages FROM CRM (false).
+        isFromClient,
         readAt: null
       },
       data: {
@@ -327,6 +361,7 @@ export async function markClientMessagesAsRead(clientId: string, isFromClient: b
     return { success: false };
   }
 }
+
 export async function assignCaseCoordinator(clientId: string, caseCoordinatorId: string) {
   try {
     const client = await prisma.client.findUnique({ where: { id: clientId } });
@@ -342,7 +377,6 @@ export async function assignCaseCoordinator(clientId: string, caseCoordinatorId:
       data
     });
 
-    // Data wipe messages to prepare for Case Coordinator
     await prisma.clientMessage.deleteMany({
       where: { clientId }
     });
@@ -360,7 +394,6 @@ export async function approveRbtCandidate(clientId: string) {
     if (!client) return { success: false, error: 'Client not found.' };
 
     const data: any = { rbtApproved: true };
-    // Check if we can activate the client now
     if (client.status === 'STAFFING_PENDING' && client.bcbaId && client.caseCoordinatorId) {
       data.status = 'ACTIVE';
     }
@@ -393,4 +426,3 @@ export async function rejectRbtCandidate(clientId: string) {
     return { success: false, error: 'Failed to reject RBT candidate.' };
   }
 }
-

@@ -63,17 +63,214 @@ html, body {
   padding: 0;
   max-width: 100vw;
   overflow-x: hidden !important;
-  background:
-    radial-gradient(ellipse 900px 600px at 15% -10%, rgba(139,79,140,.22), transparent 60%),
-    radial-gradient(ellipse 900px 600px at 85% 110%, rgba(255,122,69,.18), transparent 65%),
-    #06070D;
+  background-color: transparent; /* Allow ::before background to show through */
   color: #F4F2EC;
   font-family: var(--font-sans);
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 122, 69, 0.4) rgba(6, 7, 13, 0.95);
+  scrollbar-color: #F97316 #FFF5ED;
+  position: relative;
+  z-index: 0;
+}
+
+/* Modern Sunlit Custom Scrollbar Styling */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: #FFF5ED;
+  border-left: 1px solid #FFE4D6;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #F97316;
+  border-radius: 9999px;
+  border: 2px solid #FFF5ED;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #EA580C;
+}
+
+/* Brighter Orange Foggy Dynamic Background */
+body::before {
+  content: "";
+  position: fixed;
+  inset: -200px;
+  z-index: -2;
+  background:
+    radial-gradient(ellipse 900px 700px at 20% 10%, rgba(255, 94, 0, 0.25), transparent 70%),
+    radial-gradient(ellipse 1000px 800px at 80% 85%, rgba(255, 122, 69, 0.2), transparent 70%),
+    radial-gradient(ellipse 800px 600px at 50% 50%, rgba(255, 155, 92, 0.15), transparent 80%),
+    #1a0b05; /* Warm dark orange-brown base instead of pitch black */
+  filter: blur(50px);
+  animation: floatFog 22s infinite ease-in-out alternate;
+  pointer-events: none;
+}
+
+/* Independent Star Layers for Dynamic Twinkling */
+.star-layer {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-repeat: repeat;
+  opacity: 0.85;
+}
+
+.star-layer-1 {
+  background-image: 
+    radial-gradient(1.5px 1.5px at 100px 150px, rgba(255, 255, 255, 0.9), rgba(0,0,0,0)),
+    radial-gradient(2px 2px at 300px 250px, rgba(255, 190, 140, 0.95), rgba(0,0,0,0)),
+    radial-gradient(1.5px 1.5px at 750px 180px, rgba(255, 255, 255, 0.85), rgba(0,0,0,0)),
+    radial-gradient(2px 2px at 500px 700px, rgba(255, 170, 100, 0.9), rgba(0,0,0,0));
+  background-size: 800px 600px;
+  animation: twinkleStars 4s infinite ease-in-out alternate;
+}
+
+.star-layer-2 {
+  background-image: 
+    radial-gradient(1px 1px at 450px 80px, rgba(255, 255, 255, 0.8), rgba(0,0,0,0)),
+    radial-gradient(2.5px 2.5px at 600px 400px, rgba(255, 150, 80, 0.9), rgba(0,0,0,0)),
+    radial-gradient(2px 2px at 900px 320px, rgba(255, 200, 160, 0.9), rgba(0,0,0,0)),
+    radial-gradient(1.5px 1.5px at 800px 650px, rgba(255, 255, 255, 0.85), rgba(0,0,0,0));
+  background-size: 1100px 900px;
+  animation: twinkleStars 5.5s infinite ease-in-out alternate 1.5s;
+}
+
+.star-layer-3 {
+  background-image: 
+    radial-gradient(1px 1px at 1100px 120px, rgba(255, 255, 255, 0.75), rgba(0,0,0,0)),
+    radial-gradient(2px 2px at 1250px 480px, rgba(255, 122, 69, 0.9), rgba(0,0,0,0)),
+    radial-gradient(1.5px 1.5px at 200px 600px, rgba(255, 255, 255, 0.8), rgba(0,0,0,0)),
+    radial-gradient(2px 2px at 1050px 750px, rgba(255, 140, 70, 0.85), rgba(0,0,0,0));
+  background-size: 1300px 1000px;
+  animation: twinkleStars 7s infinite ease-in-out alternate 3s;
+}
+
+@keyframes floatFog {
+  0% {
+    transform: translate(0px, 0px) scale(1);
+  }
+  50% {
+    transform: translate(40px, -30px) scale(1.08);
+  }
+  100% {
+    transform: translate(-30px, 20px) scale(0.95);
+  }
+}
+
+/* Make Stars Come In and Out */
+@keyframes twinkleStars {
+  0% {
+    opacity: 0.1;
+    transform: scale(0.95);
+  }
+  40% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+}
+
+/* Shooting Stars Animation - Dot with Tail */
+.shooting-star-container {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.shooting-star {
+  position: absolute;
+  height: 2px;
+  background: linear-gradient(90deg, rgba(255,155,92,0) 0%, rgba(255,255,255,0.8) 100%);
+  border-radius: 999px;
+  opacity: 0;
+}
+
+/* The Bright Dot at the Front (Head) */
+.shooting-star::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 0; /* Front of the star */
+  transform: translateY(-50%);
+  width: 5px;
+  height: 5px;
+  background: #ffffff;
+  border-radius: 50%;
+  box-shadow: 0 0 10px 2px rgba(255, 155, 92, 1), 0 0 20px 4px rgba(255, 255, 255, 0.8);
+}
+
+.shooting-star-1 {
+  top: 10%;
+  left: 90%;
+  width: 120px;
+  transform-origin: right center;
+  animation: meteorShoot1 8s linear infinite 1s;
+}
+
+.shooting-star-2 {
+  top: 20%;
+  left: -10%;
+  width: 160px;
+  transform-origin: right center;
+  animation: meteorShoot2 11s linear infinite 5s;
+}
+
+@keyframes meteorShoot1 {
+  0% {
+    opacity: 0;
+    transform: rotate(215deg) translateX(0) scaleX(0);
+  }
+  2% {
+    opacity: 1;
+    transform: rotate(215deg) translateX(0) scaleX(1);
+  }
+  15% {
+    opacity: 1;
+    transform: rotate(215deg) translateX(120vw) scaleX(1);
+  }
+  17% {
+    opacity: 0;
+    transform: rotate(215deg) translateX(140vw) scaleX(0);
+  }
+  100% {
+    opacity: 0;
+    transform: rotate(215deg) translateX(140vw) scaleX(0);
+  }
+}
+
+@keyframes meteorShoot2 {
+  0% {
+    opacity: 0;
+    transform: rotate(25deg) translateX(0) scaleX(0);
+  }
+  2% {
+    opacity: 1;
+    transform: rotate(25deg) translateX(0) scaleX(1);
+  }
+  15% {
+    opacity: 1;
+    transform: rotate(25deg) translateX(120vw) scaleX(1);
+  }
+  17% {
+    opacity: 0;
+    transform: rotate(25deg) translateX(140vw) scaleX(0);
+  }
+  100% {
+    opacity: 0;
+    transform: rotate(25deg) translateX(140vw) scaleX(0);
+  }
 }
 
 main {
@@ -81,23 +278,37 @@ main {
   overflow-x: hidden !important;
 }
 
-/* Glassmorphism Panel Utilities */
+/* Roundify Everything */
+.rounded-lg { border-radius: 1.25rem !important; }
+.rounded-xl { border-radius: 1.75rem !important; }
+.rounded-2xl { border-radius: 2.25rem !important; }
+.rounded-3xl { border-radius: 3rem !important; }
+
+/* Glassmorphism Panel Utilities & Ultra-Translucent Dark Div Overrides */
 .glass-panel {
-  background: rgba(10,13,24,0.80);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border: 1px solid rgba(255,255,255,0.08);
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.50);
+  background: rgba(8, 10, 18, 0.35) !important;
+  backdrop-filter: blur(24px) !important;
+  -webkit-backdrop-filter: blur(24px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.30) !important;
+  border-radius: 2.25rem !important; /* Extremely round */
   transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .glass-panel:hover {
-  background: rgba(20,26,46,0.88);
-  border-color: rgba(255,122,69,0.35);
-  box-shadow: 0 12px 40px 0 rgba(255, 122, 69, 0.15);
+  background: rgba(16, 20, 36, 0.48) !important;
+  border-color: rgba(var(--accent-rgb-primary), 0.5) !important;
+  box-shadow: 0 12px 40px 0 rgba(var(--accent-rgb-primary), 0.25) !important;
 }
 
-/* Global Custom Scrollbars for All Elements */
+/* Div Hover Glow Overrides for Accent Color */
+div[class*="hover:border-brand-orange-500"]:hover,
+div[class*="hover:border-white"]:hover {
+  border-color: rgba(var(--accent-rgb-primary), 0.5) !important;
+  box-shadow: 0 0 25px 0 rgba(var(--accent-rgb-primary), 0.25) !important;
+}
+
+/* Global Custom Scrollbars - Dynamically recolored by Primary Accent */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -109,15 +320,15 @@ main {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 122, 69, 0.35);
+  background: rgba(var(--accent-rgb-primary), 0.45) !important;
   border-radius: 9999px;
   border: 1px solid rgba(255, 255, 255, 0.05);
   transition: background 0.2s ease-in-out;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 122, 69, 0.85);
-  box-shadow: 0 0 12px rgba(255, 122, 69, 0.6);
+  background: rgba(var(--accent-rgb-primary), 0.9) !important;
+  box-shadow: 0 0 12px rgba(var(--accent-rgb-primary), 0.7) !important;
 }
 
 ::-webkit-scrollbar-corner {
@@ -165,3 +376,170 @@ main {
     box-shadow: 0 0 0 0 rgba(79, 232, 206, 0);
   }
 }
+
+/* MULTI-THEME & HYPER-CUSTOMIZABLE ENGINE STYLES */
+/* MULTI-THEME & HYPER-CUSTOMIZABLE ENGINE STYLES */
+:root {
+  --glass-opacity: 0.35;
+  --accent-rgb-primary: 255, 122, 69;
+  --accent-rgb-glow: 255, 94, 0;
+}
+
+[data-accent="orange"] {
+  --dawn: #FF7A45 !important;
+  --dawn-hot: #FF9B5C !important;
+  --color-brand-orange-500: #FF7A45 !important;
+  --color-brand-orange-400: #FF9B5C !important;
+  --color-brand-orange-600: #E66330 !important;
+  --accent-rgb-primary: 255, 122, 69 !important;
+  --accent-rgb-glow: 255, 94, 0 !important;
+}
+
+[data-accent="cyan"] {
+  --dawn: #06B6D4 !important;
+  --dawn-hot: #22D3EE !important;
+  --color-brand-orange-500: #06B6D4 !important;
+  --color-brand-orange-400: #22D3EE !important;
+  --color-brand-orange-600: #0891B2 !important;
+  --accent-rgb-primary: 6, 182, 212 !important;
+  --accent-rgb-glow: 34, 211, 238 !important;
+}
+
+[data-accent="purple"] {
+  --dawn: #A855F7 !important;
+  --dawn-hot: #C084FC !important;
+  --color-brand-orange-500: #A855F7 !important;
+  --color-brand-orange-400: #C084FC !important;
+  --color-brand-orange-600: #9333EA !important;
+  --accent-rgb-primary: 168, 85, 247 !important;
+  --accent-rgb-glow: 192, 132, 252 !important;
+}
+
+[data-accent="emerald"] {
+  --dawn: #10B981 !important;
+  --dawn-hot: #34D399 !important;
+  --color-brand-orange-500: #10B981 !important;
+  --color-brand-orange-400: #34D399 !important;
+  --color-brand-orange-600: #059669 !important;
+  --accent-rgb-primary: 16, 185, 129 !important;
+  --accent-rgb-glow: 52, 211, 153 !important;
+}
+
+[data-accent="rose"] {
+  --dawn: #F43F5E !important;
+  --dawn-hot: #FB7185 !important;
+  --color-brand-orange-500: #F43F5E !important;
+  --color-brand-orange-400: #FB7185 !important;
+  --color-brand-orange-600: #E11D48 !important;
+  --accent-rgb-primary: 244, 63, 94 !important;
+  --accent-rgb-glow: 251, 113, 133 !important;
+}
+
+[data-accent="amber"] {
+  --dawn: #F59E0B !important;
+  --dawn-hot: #FBBF24 !important;
+  --color-brand-orange-500: #F59E0B !important;
+  --color-brand-orange-400: #FBBF24 !important;
+  --color-brand-orange-600: #D97706 !important;
+  --accent-rgb-primary: 245, 158, 11 !important;
+  --accent-rgb-glow: 251, 191, 36 !important;
+}
+
+/* ANIMATION CANVAS MODES RECOLORED BY ACCENT */
+[data-mode="professional-matte"] body::before {
+  background: #080A12 !important;
+  filter: none !important;
+  animation: none !important;
+}
+
+[data-mode="professional-matte"] .star-layer,
+[data-mode="professional-matte"] .shooting-star-container {
+  display: none !important;
+}
+
+[data-mode="cosmic-stars"] body::before {
+  background:
+    radial-gradient(ellipse 900px 700px at 20% 10%, rgba(var(--accent-rgb-glow), 0.28), transparent 70%),
+    radial-gradient(ellipse 1000px 800px at 80% 85%, rgba(var(--accent-rgb-primary), 0.22), transparent 70%),
+    #080a12 !important;
+  animation: floatFog 22s infinite ease-in-out alternate !important;
+}
+
+[data-mode="liquid-aurora"] body::before {
+  background:
+    radial-gradient(ellipse 1100px 800px at 10% 20%, rgba(var(--accent-rgb-primary), 0.32), transparent 70%),
+    radial-gradient(ellipse 900px 700px at 90% 80%, rgba(var(--accent-rgb-glow), 0.28), transparent 70%),
+    #050c18 !important;
+  animation: floatFog 15s infinite ease-in-out alternate !important;
+}
+
+[data-mode="cyberpunk-grid"] body::before {
+  background:
+    linear-gradient(rgba(var(--accent-rgb-primary), 0.12) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(var(--accent-rgb-primary), 0.12) 1px, transparent 1px),
+    radial-gradient(ellipse 900px 700px at 50% 30%, rgba(var(--accent-rgb-glow), 0.25), transparent 70%),
+    #040a12 !important;
+  background-size: 40px 40px, 40px 40px, auto, auto !important;
+  animation: none !important;
+}
+
+/* Dynamic Panel Opacity - excludes dropdowns, popovers, modals, and devtools */
+.glass-panel:not(.static-glass):not(.profile-dropdown):not(.modal-content):not(.devtools-panel),
+.bg-zinc-950:not(.static-glass):not(.profile-dropdown):not(.modal-content):not(.devtools-panel),
+.bg-slate-950:not(.static-glass):not(.profile-dropdown):not(.modal-content):not(.devtools-panel),
+.bg-zinc-900:not(.static-glass):not(.profile-dropdown):not(.modal-content):not(.devtools-panel),
+.bg-slate-900:not(.static-glass):not(.profile-dropdown):not(.modal-content):not(.devtools-panel),
+[class*="bg-zinc-950"]:not(.static-glass):not(.profile-dropdown):not(.modal-content):not(.devtools-panel),
+[class*="bg-zinc-900"]:not(.static-glass):not(.profile-dropdown):not(.modal-content):not(.devtools-panel) {
+  background-color: rgba(8, 10, 18, var(--glass-opacity, 0.35)) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+}
+
+/* Static High-Contrast Glass Overrides for Dropdowns, Modals & DevTools */
+.static-glass,
+.profile-dropdown,
+.modal-content,
+.devtools-panel {
+  background-color: rgba(8, 10, 18, 0.95) !important;
+  backdrop-filter: blur(24px) !important;
+  -webkit-backdrop-filter: blur(24px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.18) !important;
+}
+
+/* Continuous News Marquee Ticker Keyframes */
+@keyframes marquee {
+  0% {
+    transform: translateX(0%);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-marquee {
+  display: flex;
+  width: max-content;
+  animation: marquee 25s linear infinite;
+}
+
+.animate-marquee:hover {
+  animation-play-state: paused;
+}
+
+/* Smooth Render Slide-Up Animation */
+@keyframes slideUpFade {
+  0% {
+    opacity: 0;
+    transform: translateY(28px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-up {
+  animation: slideUpFade 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+

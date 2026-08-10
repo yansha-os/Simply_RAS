@@ -27,6 +27,8 @@ export const metadata: Metadata = {
   },
 };
 
+import { ThemeProvider } from '@/components/layout/ThemeContext';
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -38,7 +40,16 @@ export default function RootLayout({
       className={`${inter.variable} ${fraunces.variable} ${ibmPlexMono.variable} h-full antialiased dark`}
     >
       <body className="min-h-full flex flex-col font-sans">
-        {children}
+        <ThemeProvider>
+          <div className="star-layer star-layer-1"></div>
+          <div className="star-layer star-layer-2"></div>
+          <div className="star-layer star-layer-3"></div>
+          <div className="shooting-star-container">
+            <div className="shooting-star shooting-star-1"></div>
+            <div className="shooting-star shooting-star-2"></div>
+          </div>
+          {children}
+        </ThemeProvider>
       </body>
     </html>
   );
