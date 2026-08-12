@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { submitRbtApplication } from '@/app/actions/publicRbt';
+import { attachApplicantDocuments } from '@/app/actions/candidateDocumentActions';
 import { toast } from 'sonner';
 import {
   User,
@@ -15,52 +16,36 @@ import {
   Upload,
   Check,
   RotateCcw,
-  MapPin,
-  Search,
-  Loader2,
   AlertCircle,
   Eye,
   Trash2,
   XCircle,
 } from 'lucide-react';
+import {
+  classifyApplicantAccessError,
+  validateDocumentFile,
+} from '@/components/rbt/documentUx';
+import { resolvePrivateApplicantLocation } from './applicantAddressPrivacy';
 
-const DRAFT_KEY = 'rbt_app_draft_v1';
+const DRAFT_KEY = 'rbt_app_draft_v2';
 
-// PRESET NYC / METRO ADDRESS DATABASE FOR STRICT FALLBACK MATCHING
-const NYC_ADDRESS_DATABASE = [
-  { street: '2137 33rd Street', city: 'Astoria', state: 'NY', zip: '11105' },
-  { street: '150 Court Street', city: 'Brooklyn', state: 'NY', zip: '11201' },
-  { street: '350 5th Avenue', city: 'New York', state: 'NY', zip: '10118' },
-  { street: '89-02 Sutphin Blvd', city: 'Jamaica', state: 'NY', zip: '11435' },
-  { street: '1250 Waters Place', city: 'Bronx', state: 'NY', zip: '10461' },
-  { street: '100 Richmond Terrace', city: 'Staten Island', state: 'NY', zip: '10301' },
-  { street: '70-00 Austin Street', city: 'Forest Hills', state: 'NY', zip: '11375' },
-  { street: '200 Park Avenue', city: 'New York', state: 'NY', zip: '10166' },
-  { street: '500 Atlantic Avenue', city: 'Brooklyn', state: 'NY', zip: '11217' },
-  { street: '718 Bedford Avenue', city: 'Brooklyn', state: 'NY', zip: '11211' },
-  { street: '104-02 Queens Blvd', city: 'Forest Hills', state: 'NY', zip: '11375' },
-  { street: '2500 Westchester Avenue', city: 'Bronx', state: 'NY', zip: '10461' },
-  { street: '55 Broad Street', city: 'New York', state: 'NY', zip: '10004' },
-  { street: '1500 Franklin Avenue', city: 'Garden City', state: 'NY', zip: '11530' },
-  { street: '455 Main Street', city: 'Roosevelt Island', state: 'NY', zip: '10044' },
-];
+const NYC_BOROUGHS = [
+  'Manhattan',
+  'Brooklyn',
+  'Queens',
+  'Bronx',
+  'Staten Island',
+  'Long Island',
+  'Westchester',
+  'New Jersey',
+] as const;
 
 export default function RbtApplicationForm() {
   const [currentStep, setCurrentStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
-
-  // Address Auto-Suggest Dropdown & Geocoding State
-  const [addressSearchQuery, setAddressSearchQuery] = useState('');
-  const [addressSuggestions, setAddressSuggestions] = useState<
-    Array<{ street: string; city: string; state: string; zip: string; displayName?: string }>
-  >([]);
-  const [showAddressDropdown, setShowAddressDropdown] = useState(false);
-  const [selectedAddressVerified, setSelectedAddressVerified] = useState(false);
-  const [isSearchingAddress, setIsSearchingAddress] = useState(false);
-
-  const addressDropdownRef = useRef<HTMLDivElement>(null);
-  const searchDebounceRef = useRef<NodeJS.Timeout | null>(null);
+  const [documentSubmissionIssue, setDocumentSubmissionIssue] = useState<string | null>(null);
+  const [landingAccessError, setLandingAccessError] = useState<string | null>(null);
 
   // Form State
   const [formData, setFormData] = useState({
@@ -72,15 +57,14 @@ export default function RbtApplicationForm() {
     searchAddress: '',
     addressLine1: '',
     addressLine2: '',
-    city: 'New York',
-    state: 'NY',
+    city: '',
+    state: '',
     zipCode: '',
     gender: '',
 
     // Step 2: RBT Readiness
     courseCompleted: '',
     yearsExperience: '',
-    ageGroups: [] as string[],
     languages: [] as string[],
     transportation: '',
 
@@ -88,12 +72,13 @@ export default function RbtApplicationForm() {
     weekdays: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
     weekends: ['Saturday'],
     weeklyHours: '15-25 hours/week',
-    earliestStartTime: '14:00',
-    latestEndTime: '19:00',
+    boroughs: [] as string[],
+    availableToStart: '',
 
     // Step 4: Compliance & Eligibility
     workAuth: '',
     backgroundCheck: '',
+    isAdultConfirmed: false,
     cprStatus: '',
     additionalNotes: '',
 
@@ -101,172 +86,122 @@ export default function RbtApplicationForm() {
     resumeFileName: '',
     idFileName: '',
     rbtCertFileName: '',
-    cprCardFileName: '',
   });
+  const privateApplicantLocation = resolvePrivateApplicantLocation(formData.zipCode);
 
-  // Dedicated state for uploaded document data URLs
-  const [fileDataUrls, setFileDataUrls] = useState<{ resumeFileDataUrl?: string; govtIdFileDataUrl?: string }>({});
+  // Keep File blobs in memory for Storage upload (no localStorage data URLs)
+  const [resumeFile, setResumeFile] = useState<File | null>(null);
+  const [govtIdFile, setGovtIdFile] = useState<File | null>(null);
+  const [fortyHourCertFile, setFortyHourCertFile] = useState<File | null>(null);
+  const [previewUrls, setPreviewUrls] = useState<{
+    resume?: string;
+    govtId?: string;
+    fortyHourCert?: string;
+  }>({});
+  const previewUrlsRef = useRef(previewUrls);
+  const previewDialogRef = useRef<HTMLDivElement>(null);
+  const previewCloseButtonRef = useRef<HTMLButtonElement>(null);
   // Applicant Document Preview Modal State
-  const [previewModal, setPreviewModal] = useState<{ name: string; url: string } | null>(null);
+  const [previewModal, setPreviewModal] = useState<{
+    name: string;
+    url: string;
+    mimeType: string;
+  } | null>(null);
 
-  // LOAD DRAFT FROM LOCAL STORAGE
+  // LOAD DRAFT FROM LOCAL STORAGE (form fields only — not file blobs)
   useEffect(() => {
     try {
-      const savedUrls = localStorage.getItem('ras_file_data_urls');
-      if (savedUrls) {
-        setFileDataUrls(JSON.parse(savedUrls));
-      }
       const saved = localStorage.getItem(DRAFT_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed.formData) {
+          // Browser-only draft hydration intentionally occurs after mount.
+          // eslint-disable-next-line react-hooks/set-state-in-effect
           setFormData((prev) => ({ ...prev, ...parsed.formData }));
-          if (parsed.formData.addressLine1) {
-            setSelectedAddressVerified(true);
-            setAddressSearchQuery(
-              `${parsed.formData.addressLine1}, ${parsed.formData.city}, ${parsed.formData.state} ${parsed.formData.zipCode}`
-            );
-          }
         }
         if (parsed.currentStep) {
           setCurrentStep(parsed.currentStep);
         }
       }
-    } catch (e) {}
+    } catch {}
   }, []);
 
-  // CLOSE DROPDOWN ON OUTSIDE CLICK
   useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (addressDropdownRef.current && !addressDropdownRef.current.contains(event.target as Node)) {
-        setShowAddressDropdown(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    const error = new URLSearchParams(window.location.search).get('error');
+    if (!error) return;
+    const timer = window.setTimeout(() => setLandingAccessError(error), 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
-  // STRICT REAL-TIME NOMINATIM GEOCODING ADDRESS SEARCH (NO FAKE DUMMY FALLBACKS)
-  const fetchRealTimeAddressSuggestions = async (query: string) => {
-    const trimmed = query.trim();
-    if (trimmed.length < 3) {
-      setAddressSuggestions([]);
-      setShowAddressDropdown(false);
-      setIsSearchingAddress(false);
-      return;
-    }
+  useEffect(() => {
+    previewUrlsRef.current = previewUrls;
+  }, [previewUrls]);
 
-    setIsSearchingAddress(true);
-    setShowAddressDropdown(true);
+  useEffect(() => {
+    return () => {
+      const urls = previewUrlsRef.current;
+      if (urls.fortyHourCert) URL.revokeObjectURL(urls.fortyHourCert);
+      if (urls.resume) URL.revokeObjectURL(urls.resume);
+      if (urls.govtId) URL.revokeObjectURL(urls.govtId);
+    };
+  }, []);
 
-    try {
-      // Query OpenStreetMap Nominatim API limited strictly to New York
-      const url = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&countrycodes=us&limit=8&q=${encodeURIComponent(
-        trimmed + ', NY'
-      )}`;
+  useEffect(() => {
+    if (!previewModal) return;
+    const trigger =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const focusFrame = window.requestAnimationFrame(() => {
+      previewCloseButtonRef.current?.focus();
+    });
 
-      const res = await fetch(url);
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data) && data.length > 0) {
-          const parsed = data
-            .map((item: any) => {
-              const addr = item.address || {};
-              const house = addr.house_number || '';
-              const road = addr.road || addr.pedestrian || addr.street || '';
-              
-              if (!road && !item.display_name) return null;
-
-              const street = house && road ? `${house} ${road}` : road || item.display_name.split(',')[0];
-              const city =
-                addr.city ||
-                addr.town ||
-                addr.village ||
-                addr.borough ||
-                addr.suburb ||
-                addr.county ||
-                'New York';
-
-              const state = addr.state ? (addr.state === 'New York' ? 'NY' : addr.state) : 'NY';
-              const zip = addr.postcode || '10001';
-
-              return {
-                street,
-                city,
-                state,
-                zip,
-                displayName: item.display_name,
-              };
-            })
-            .filter(Boolean) as Array<{ street: string; city: string; state: string; zip: string; displayName?: string }>;
-
-          if (parsed.length > 0) {
-            setAddressSuggestions(parsed);
-            setIsSearchingAddress(false);
-            return;
-          }
-        }
+    const handleDialogKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setPreviewModal(null);
+        return;
       }
-    } catch (err) {
-      // Network error fallback to preset DB
-    } finally {
-      setIsSearchingAddress(false);
-    }
+      if (event.key !== 'Tab' || !previewDialogRef.current) return;
 
-    // Strict preset DB matching (No fake dummy strings created for gibberish)
-    const q = trimmed.toLowerCase();
-    const matched = NYC_ADDRESS_DATABASE.filter((addr) => {
-      const full = `${addr.street} ${addr.city} ${addr.state} ${addr.zip}`.toLowerCase();
-      return full.includes(q);
-    });
+      const focusable = Array.from(
+        previewDialogRef.current.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), iframe, [tabindex]:not([tabindex="-1"])'
+        )
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const activeElement = document.activeElement;
 
-    setAddressSuggestions(matched.map((m) => ({ ...m, displayName: `${m.street}, ${m.city}, ${m.state} ${m.zip}` })));
-  };
+      if (event.shiftKey && (activeElement === first || !previewDialogRef.current.contains(activeElement))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener('keydown', handleDialogKeyDown);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      window.removeEventListener('keydown', handleDialogKeyDown);
+      document.body.style.overflow = previousOverflow;
+      window.requestAnimationFrame(() => {
+        if (trigger?.isConnected) trigger.focus();
+      });
+    };
+  }, [previewModal]);
 
-  const handleAddressInputChange = (query: string) => {
-    setAddressSearchQuery(query);
-    setSelectedAddressVerified(false);
-
-    if (searchDebounceRef.current) {
-      clearTimeout(searchDebounceRef.current);
-    }
-
-    searchDebounceRef.current = setTimeout(() => {
-      fetchRealTimeAddressSuggestions(query);
-    }, 250);
-  };
-
-  // SELECT ADDRESS SUGGESTION FROM DROPDOWN
-  const selectAddressSuggestion = (item: { street: string; city: string; state: string; zip: string }) => {
-    const fullStr = `${item.street}, ${item.city}, ${item.state} ${item.zip}`;
-    setAddressSearchQuery(fullStr);
-    setSelectedAddressVerified(true);
-    setShowAddressDropdown(false);
-
-    setFormData((prev) => {
-      const updated = {
-        ...prev,
-        searchAddress: fullStr,
-        addressLine1: item.street,
-        city: item.city,
-        state: item.state,
-        zipCode: item.zip,
-      };
-      try {
-        localStorage.setItem(DRAFT_KEY, JSON.stringify({ formData: updated, currentStep }));
-      } catch (e) {}
-      return updated;
-    });
-
-    toast.success(`Verified: ${item.street}, ${item.city}`);
-  };
-
-  const updateField = (field: string, value: any) => {
+  const updateField = <K extends keyof typeof formData,>(
+    field: K,
+    value: (typeof formData)[K]
+  ) => {
     setFormData((prev) => {
       const updated = { ...prev, [field]: value };
       try {
         localStorage.setItem(DRAFT_KEY, JSON.stringify({ formData: updated, currentStep }));
-      } catch (e) {}
+      } catch {}
       return updated;
     });
   };
@@ -283,36 +218,46 @@ export default function RbtApplicationForm() {
       searchAddress: '',
       addressLine1: '',
       addressLine2: '',
-      city: 'New York',
-      state: 'NY',
+      city: '',
+      state: '',
       zipCode: '',
       gender: '',
       courseCompleted: '',
       yearsExperience: '',
-      ageGroups: [],
       languages: [],
       transportation: '',
       weekdays: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
       weekends: ['Saturday'],
       weeklyHours: '15-25 hours/week',
-      earliestStartTime: '14:00',
-      latestEndTime: '19:00',
+      boroughs: [],
+      availableToStart: '',
       workAuth: '',
       backgroundCheck: '',
+      isAdultConfirmed: false,
       cprStatus: '',
       additionalNotes: '',
       resumeFileName: '',
       idFileName: '',
       rbtCertFileName: '',
-      cprCardFileName: '',
     });
-    setAddressSearchQuery('');
-    setSelectedAddressVerified(false);
+    setResumeFile(null);
+    setGovtIdFile(null);
+    setFortyHourCertFile(null);
+    setPreviewUrls((prev) => {
+      if (prev.resume) URL.revokeObjectURL(prev.resume);
+      if (prev.govtId) URL.revokeObjectURL(prev.govtId);
+      if (prev.fortyHourCert) URL.revokeObjectURL(prev.fortyHourCert);
+      return {};
+    });
+    setDocumentSubmissionIssue(null);
     setCurrentStep(1);
     toast.info('Form cleared and reset.');
   };
 
-  const toggleArrayItem = (field: 'ageGroups' | 'languages' | 'weekdays' | 'weekends', item: string) => {
+  const toggleArrayItem = (
+    field: 'languages' | 'weekdays' | 'weekends' | 'boroughs',
+    item: string
+  ) => {
     setFormData((prev) => {
       const current = prev[field];
       const updated = current.includes(item)
@@ -331,8 +276,15 @@ export default function RbtApplicationForm() {
         toast.error('Please fill in all required contact details before proceeding.');
         return;
       }
-      if (!selectedAddressVerified || !formData.addressLine1) {
-        toast.error('Please search and click a valid verified address from the dropdown suggestions before proceeding.');
+      if (
+        !formData.addressLine1.trim() ||
+        !formData.city.trim() ||
+        !formData.state.trim() ||
+        privateApplicantLocation.status === 'UNAVAILABLE'
+      ) {
+        toast.error(
+          'Enter your street, city, state, and a valid 5-digit ZIP. No external address lookup is performed.'
+        );
         return;
       }
     }
@@ -341,10 +293,54 @@ export default function RbtApplicationForm() {
         toast.error('Please select whether you have completed the 40-Hour RBT course.');
         return;
       }
+      if (!formData.transportation) {
+        toast.error('Please tell us about your transportation.');
+        return;
+      }
+    }
+    if (currentStep === 3) {
+      if (formData.weekdays.length + formData.weekends.length === 0) {
+        toast.error('Select at least one available day.');
+        return;
+      }
+      if (!formData.weeklyHours) {
+        toast.error('Please select your preferred weekly hours.');
+        return;
+      }
+      if (formData.boroughs.length === 0) {
+        toast.error('Select at least one preferred borough / area.');
+        return;
+      }
+      if (!formData.availableToStart) {
+        toast.error('Please tell us how soon you can start.');
+        return;
+      }
     }
     if (currentStep === 4) {
       if (!formData.workAuth || !formData.backgroundCheck) {
         toast.error('Please complete the compliance questions to proceed.');
+        return;
+      }
+      if (formData.workAuth === 'No') {
+        toast.error('US work authorization is required for this role.');
+        return;
+      }
+      if (!formData.isAdultConfirmed) {
+        toast.error('Please confirm you are 18 years of age or older.');
+        return;
+      }
+      if (formData.backgroundCheck !== 'Yes') {
+        toast.error('Background check authorization is required to proceed.');
+        return;
+      }
+    }
+    if (currentStep === 5) {
+      if (!resumeFile || !formData.resumeFileName) {
+        toast.error('Please upload your resume before continuing.');
+        return;
+      }
+      if (!govtIdFile || !formData.idFileName) {
+        toast.error('Please upload a government-issued ID before continuing.');
         return;
       }
     }
@@ -365,6 +361,7 @@ export default function RbtApplicationForm() {
 
   const handleSubmit = async () => {
     setIsSubmitting(true);
+    setDocumentSubmissionIssue(null);
     try {
       const res = await submitRbtApplication({
         firstName: formData.firstName,
@@ -373,24 +370,81 @@ export default function RbtApplicationForm() {
         phoneNumber: formData.phoneNumber,
         addressLine1: formData.addressLine1,
         addressLine2: formData.addressLine2,
-        city: formData.city || 'New York',
-        state: formData.state || 'NY',
-        zipCode: formData.zipCode || '10001',
-        gender: formData.gender,
-        ethnicity: 'not_specified',
+        city: formData.city.trim(),
+        state: formData.state.trim(),
+        zipCode:
+          privateApplicantLocation.status === 'ZIP_ONLY'
+            ? privateApplicantLocation.postalCode
+            : formData.zipCode.trim(),
+        gender: formData.gender || undefined,
         rbtStatus: formData.courseCompleted,
-        preferredBoroughs: ['NYC Metro'],
+        cprStatus: formData.cprStatus || undefined,
+        yearsExperience: formData.yearsExperience || undefined,
+        languages: formData.languages,
+        preferredBoroughs: formData.boroughs,
         availabilityHours: formData.weekdays.concat(formData.weekends),
-        isAdult: true,
+        weeklyHours: formData.weeklyHours || undefined,
+        availableToStart: formData.availableToStart || undefined,
+        transportation: formData.transportation || undefined,
+        workAuth: formData.workAuth || undefined,
+        additionalNotes: formData.additionalNotes || undefined,
+        isAdult: formData.isAdultConfirmed,
         backgroundCheckConsent: formData.backgroundCheck === 'Yes',
-        hasTransportation: formData.transportation.includes('Yes'),
         resumeFileName: formData.resumeFileName,
+        govtIdFileName: formData.idFileName,
+        fortyHourCertFileName: formData.rbtCertFileName || undefined,
       });
 
-      if (res.success) {
+      if (res.success && !res.applicantId) {
         try {
           localStorage.removeItem(DRAFT_KEY);
-          // Persist actual submitted form inputs for applicant dossier page
+          localStorage.removeItem('ras_file_data_urls');
+        } catch {
+          // Submission is complete even if local draft cleanup is unavailable.
+        }
+        setDocumentSubmissionIssue(null);
+        setIsSubmitted(true);
+        toast.success(res.message || 'Application received.');
+        return;
+      }
+
+      if (res.success && res.applicantId) {
+        let uploadIssue: string | null = null;
+        if (resumeFile || govtIdFile || fortyHourCertFile) {
+          if (!res.uploadToken) {
+            uploadIssue =
+              'Application saved, but secure document access could not be created. Contact HR before sending files again.';
+          } else {
+            try {
+              const docs = new FormData();
+              if (resumeFile) docs.append('resume', resumeFile);
+              if (govtIdFile) docs.append('govtId', govtIdFile);
+              if (fortyHourCertFile) docs.append('fortyHourCert', fortyHourCertFile);
+              const uploadRes = await attachApplicantDocuments(
+                res.applicantId,
+                res.uploadToken,
+                docs
+              );
+              if (!uploadRes.success) {
+                uploadIssue =
+                  uploadRes.error || 'Application saved, but document upload failed.';
+              } else if (fortyHourCertFile) {
+                toast.success(
+                  '40-Hour certificate saved — that requirement is already complete.'
+                );
+              }
+            } catch {
+              uploadIssue =
+                'Application saved, but the document service could not be reached. Check your connection before trying again.';
+            }
+          }
+        }
+        setDocumentSubmissionIssue(uploadIssue);
+
+        try {
+          localStorage.removeItem(DRAFT_KEY);
+          localStorage.removeItem('ras_file_data_urls');
+          // Metadata-only cache for Dev Tools / same-browser ATS peek (no file blobs)
           const submittedAppPayload = {
             applicantId: res.applicantId,
             fullName: `${formData.firstName} ${formData.lastName}`,
@@ -399,28 +453,35 @@ export default function RbtApplicationForm() {
             address: `${formData.addressLine1}${formData.addressLine2 ? ', ' + formData.addressLine2 : ''}, ${formData.city}, ${formData.state} ${formData.zipCode}`,
             gender: formData.gender,
             rbtStatus: formData.courseCompleted,
-            cprStatus: (formData as any).cprCertified || (formData as any).cprCardFileName ? 'YES' : 'NO',
-            boroughs: Array.isArray((formData as any).boroughs) ? (formData as any).boroughs.join(', ') : '',
+            cprStatus: formData.cprStatus || null,
+            yearsExperience: formData.yearsExperience || null,
+            languages: formData.languages,
+            boroughs: formData.boroughs.join(', '),
+            weeklyHours: formData.weeklyHours || null,
+            availableToStart: formData.availableToStart || null,
             workAuth: formData.workAuth,
             backgroundCheck: formData.backgroundCheck,
             transportation: formData.transportation,
             availability: formData.weekdays.concat(formData.weekends).join(', '),
-            resumeFileName: formData.resumeFileName || 'Resume_Document.pdf',
-            resumeFileDataUrl: fileDataUrls.resumeFileDataUrl || JSON.parse(localStorage.getItem('ras_file_data_urls') || '{}').resumeFileDataUrl || (formData as any).resumeFileDataUrl || null,
-            govtIdFileName: formData.idFileName || (formData as any).govtIdFileName || 'Government_Photo_ID.pdf',
-            govtIdFileDataUrl: fileDataUrls.govtIdFileDataUrl || JSON.parse(localStorage.getItem('ras_file_data_urls') || '{}').govtIdFileDataUrl || (formData as any).govtIdFileDataUrl || null,
-            bacbCertFileName: (formData as any).bacbCertFileName || (formData as any).rbtCertFileName || 'BACB_40Hr_Certificate.pdf',
+            additionalNotes: formData.additionalNotes || null,
+            resumeFileName: formData.resumeFileName || null,
+            govtIdFileName: formData.idFileName || null,
+            fortyHourCertFileName: formData.rbtCertFileName || null,
             submittedAt: new Date().toISOString(),
           };
-          localStorage.setItem(`ras_submitted_app_${res.applicantId || 'c1'}`, JSON.stringify(submittedAppPayload));
+          localStorage.setItem(`ras_submitted_app_${res.applicantId}`, JSON.stringify(submittedAppPayload));
           localStorage.setItem('ras_latest_submitted_app', JSON.stringify(submittedAppPayload));
         } catch (e) {}
         setIsSubmitted(true);
-        toast.success('Your RBT application has been submitted successfully!');
+        if (uploadIssue) {
+          toast.warning('Application saved, but your documents still need attention.');
+        } else {
+          toast.success('Your RBT application has been submitted successfully!');
+        }
       } else {
         toast.error(res.error || 'Failed to submit application.');
       }
-    } catch (err: any) {
+    } catch {
       toast.error('An error occurred while submitting.');
     } finally {
       setIsSubmitting(false);
@@ -436,17 +497,99 @@ export default function RbtApplicationForm() {
     { num: 6, title: 'Review', icon: CheckCircle2 },
   ];
 
-  if (isSubmitted) {
+  if (landingAccessError) {
+    const access = classifyApplicantAccessError(landingAccessError);
     return (
-      <div className="bg-white border-2 border-emerald-300 rounded-3xl p-10 max-w-2xl mx-auto text-center space-y-6 shadow-2xl my-12 animate-fade-in">
-        <div className="w-20 h-20 bg-emerald-100 text-emerald-600 border-2 border-emerald-300 rounded-full flex items-center justify-center mx-auto shadow-lg">
-          <CheckCircle2 className="w-10 h-10" />
+      <section
+        role="alert"
+        aria-live="assertive"
+        className="relative mx-auto my-12 max-w-2xl overflow-hidden rounded-3xl border border-rose-400/20 bg-zinc-950 p-8 text-white shadow-2xl"
+      >
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(244,63,94,0.16),transparent_46%),radial-gradient(circle_at_bottom_right,rgba(249,115,22,0.12),transparent_42%)]" />
+        <div className="relative space-y-6 text-center">
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl border border-rose-400/20 bg-rose-500/10 shadow-[0_0_30px_rgba(244,63,94,0.12)]">
+            <AlertCircle className="h-8 w-8 text-rose-300" aria-hidden="true" />
+          </div>
+          <div>
+            <p className="font-mono text-[10px] font-black uppercase tracking-[0.2em] text-rose-300">
+              Applicant portal
+            </p>
+            <h1 className="mt-2 font-heading text-3xl font-black">{access.title}</h1>
+            <p className="mx-auto mt-3 max-w-lg text-sm font-medium leading-relaxed text-zinc-300">
+              {access.description}
+            </p>
+            <p className="mx-auto mt-3 max-w-lg rounded-xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-xs font-bold leading-relaxed text-amber-200">
+              Do not submit another application from this screen unless HR specifically asks you
+              to apply again.
+            </p>
+          </div>
+          <div className="flex flex-col justify-center gap-3 border-t border-white/10 pt-5 sm:flex-row">
+            <a
+              href="mailto:info@riseandshine.nyc?subject=Applicant%20portal%20access"
+              className="inline-flex cursor-pointer items-center justify-center rounded-xl border border-orange-400/30 bg-orange-500/15 px-5 py-3 text-xs font-black text-orange-200 transition-all hover:border-orange-300/60 hover:bg-orange-500/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-400"
+            >
+              Contact HR for next steps
+            </a>
+            {/* A full navigation intentionally clears any in-memory application state. */}
+            {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+            <a
+              href="/"
+              className="inline-flex cursor-pointer items-center justify-center rounded-xl border border-white/10 bg-white/5 px-5 py-3 text-xs font-black text-zinc-100 transition-all hover:border-white/20 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-400"
+            >
+              Return home
+            </a>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  if (isSubmitted) {
+    const documentIssue = documentSubmissionIssue
+      ? classifyApplicantAccessError(documentSubmissionIssue)
+      : null;
+    return (
+      <div
+        className={`bg-white border-2 rounded-3xl p-10 max-w-2xl mx-auto text-center space-y-6 shadow-2xl my-12 animate-fade-in ${
+          documentIssue ? 'border-amber-300' : 'border-emerald-300'
+        }`}
+      >
+        <div
+          className={`w-20 h-20 border-2 rounded-full flex items-center justify-center mx-auto shadow-lg ${
+            documentIssue
+              ? 'border-amber-300 bg-amber-100 text-amber-700'
+              : 'border-emerald-300 bg-emerald-100 text-emerald-600'
+          }`}
+        >
+          {documentIssue ? (
+            <AlertCircle className="w-10 h-10" aria-hidden="true" />
+          ) : (
+            <CheckCircle2 className="w-10 h-10" aria-hidden="true" />
+          )}
         </div>
         <div className="space-y-3">
-          <h2 className="text-3xl sm:text-4xl font-black text-slate-900 font-heading">Application Submitted!</h2>
+          <h2 className="text-3xl sm:text-4xl font-black text-slate-900 font-heading">
+            {documentIssue ? 'Application Saved — Documents Need Attention' : 'Application Submitted!'}
+          </h2>
           <p className="text-slate-700 text-base max-w-md mx-auto leading-relaxed font-medium">
-            Thank you, <strong className="text-[#F97316] font-bold">{formData.firstName}</strong>! Our HR Recruitment Team has received your RBT application.
+            Thank you,{' '}
+            <strong className="text-[#F97316] font-bold">{formData.firstName}</strong>! Our HR
+            Recruitment Team has received your RBT application.
           </p>
+          {documentIssue && (
+            <div
+              role="alert"
+              className="max-w-md mx-auto rounded-2xl border border-amber-300 bg-amber-50 p-4 text-left"
+            >
+              <p className="text-sm font-black text-amber-950">{documentIssue.title}</p>
+              <p className="mt-1 text-xs font-semibold leading-relaxed text-amber-900">
+                {documentIssue.description}
+              </p>
+              <p className="mt-2 font-mono text-[10px] font-bold text-amber-800">
+                Your application is saved, but HR should not treat the files as received yet.
+              </p>
+            </div>
+          )}
           <div className="bg-orange-50 border border-orange-200 rounded-2xl p-4 text-xs text-slate-800 space-y-1 max-w-md mx-auto text-left">
             <span className="font-mono font-extrabold text-[#F97316] uppercase block">Next Steps • HR Review Gatekeeper:</span>
             <p className="font-medium text-slate-700 leading-relaxed">
@@ -454,12 +597,34 @@ export default function RbtApplicationForm() {
             </p>
           </div>
         </div>
-        <button
-          onClick={() => (window.location.href = '/')}
-          className="bg-[#F97316] hover:bg-orange-600 text-white font-extrabold text-sm px-8 py-3.5 rounded-2xl cursor-pointer shadow-xl shadow-orange-500/30 transition-all hover:scale-105"
-        >
-          Return to Home Page
-        </button>
+        <div className="flex flex-col items-stretch justify-center gap-3 sm:flex-row">
+          {documentIssue?.retryable ? (
+            <button
+              type="button"
+              onClick={() => {
+                setIsSubmitted(false);
+                setCurrentStep(5);
+              }}
+              className="bg-[#F97316] hover:bg-orange-600 text-white font-extrabold text-sm px-6 py-3.5 rounded-2xl cursor-pointer shadow-xl shadow-orange-500/30 transition-all hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2"
+            >
+              Review files and try again
+            </button>
+          ) : documentIssue ? (
+            <a
+              href="mailto:info@riseandshine.nyc?subject=Applicant%20document%20upload"
+              className="inline-flex cursor-pointer items-center justify-center rounded-2xl bg-[#F97316] px-6 py-3.5 text-sm font-extrabold text-white shadow-xl shadow-orange-500/30 transition-all hover:scale-105 hover:bg-orange-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2"
+            >
+              Contact HR
+            </a>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => (window.location.href = '/')}
+            className="cursor-pointer rounded-2xl border border-slate-300 bg-white px-6 py-3.5 text-sm font-extrabold text-slate-700 shadow-sm transition-all hover:scale-105 hover:border-orange-300 hover:text-[#F97316] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2"
+          >
+            Return to Home Page
+          </button>
+        </div>
       </div>
     );
   }
@@ -610,111 +775,98 @@ export default function RbtApplicationForm() {
                 />
               </div>
 
-              {/* REAL-TIME NY GEOCODING ADDRESS SEARCH BAR (STRICT VALIDATION) */}
-              <div className="sm:col-span-2 relative" ref={addressDropdownRef}>
-                <label className="flex items-center justify-between text-xs font-extrabold text-slate-800 mb-1.5">
-                  <span className="flex items-center gap-1.5">
-                    <Search className="w-3.5 h-3.5 text-[#F97316]" />
-                    <span>Search Address (Real NY Geocoding Verification) *</span>
-                  </span>
-                  {selectedAddressVerified && (
-                    <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-0.5 rounded-full font-mono text-[10px] font-bold flex items-center gap-1">
-                      <Check className="w-3 h-3 stroke-[3]" /> Address Verified
-                    </span>
-                  )}
-                </label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={addressSearchQuery}
-                    onChange={(e) => handleAddressInputChange(e.target.value)}
-                    onFocus={() => addressSearchQuery.length >= 3 && setShowAddressDropdown(true)}
-                    placeholder="Type ANY valid NY address (e.g. 2137 33rd St, 150 Court St, 350 5th Ave...)"
-                    suppressHydrationWarning
-                    className={`w-full bg-white border rounded-xl px-4 py-3 text-sm text-slate-900 font-bold focus:outline-none transition-all pr-10 ${
-                      selectedAddressVerified
-                        ? 'border-emerald-500 bg-emerald-50/30 text-slate-900'
-                        : 'border-orange-300 focus:border-[#F97316] focus:ring-2 focus:ring-orange-500/20'
-                    }`}
-                  />
-                  {isSearchingAddress && (
-                    <div className="absolute right-3.5 top-3.5 text-[#F97316] animate-spin">
-                      <Loader2 className="w-4 h-4" />
-                    </div>
-                  )}
-                </div>
-
-                {/* FLOATING DROPDOWN SUGGESTIONS MENU */}
-                {showAddressDropdown && (
-                  <div className="absolute top-full left-0 right-0 mt-1.5 bg-white border-2 border-orange-300 shadow-2xl rounded-2xl z-50 p-2 max-h-64 overflow-y-auto space-y-1 animate-fade-in">
-                    {addressSuggestions.length > 0 ? (
-                      <>
-                        <p className="text-[10px] font-mono font-extrabold text-[#F97316] px-3 py-1 uppercase tracking-wider">
-                          Click to confirm your verified address match:
-                        </p>
-                        {addressSuggestions.map((item, idx) => (
-                          <div
-                            key={idx}
-                            onClick={() => selectAddressSuggestion(item)}
-                            className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-orange-50 cursor-pointer border border-transparent hover:border-orange-200 transition-all group"
-                          >
-                            <div className="w-8 h-8 rounded-xl bg-orange-100 text-[#F97316] flex items-center justify-center shrink-0 group-hover:bg-[#F97316] group-hover:text-white transition-colors">
-                              <MapPin className="w-4 h-4" />
-                            </div>
-                            <div className="flex-1">
-                              <p className="text-xs font-extrabold text-slate-900 group-hover:text-[#F97316] transition-colors">
-                                {item.street}
-                              </p>
-                              <p className="text-[11px] text-slate-500 font-medium">
-                                {item.city}, {item.state} {item.zip}
-                              </p>
-                            </div>
-                            <span className="text-[10px] font-bold text-orange-600 bg-orange-100 px-2.5 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity">
-                              Select ✓
-                            </span>
-                          </div>
-                        ))}
-                      </>
-                    ) : addressSearchQuery.length >= 3 && !isSearchingAddress ? (
-                      <div className="p-4 text-center space-y-1.5 bg-amber-50/90 border border-amber-200 rounded-xl">
-                        <div className="flex items-center justify-center gap-1.5 text-amber-800 font-extrabold text-xs">
-                          <AlertCircle className="w-4 h-4 text-amber-600" />
-                          <span>No verified New York street address found</span>
-                        </div>
-                        <p className="text-[11px] text-amber-700 font-medium">
-                          Please check your typing or enter a valid street address (e.g. &quot;150 Court St&quot; or &quot;350 5th Ave&quot;).
-                        </p>
-                      </div>
-                    ) : null}
+              <div className="sm:col-span-2 rounded-2xl border border-sky-200 bg-sky-50/80 p-4">
+                <div className="flex items-start gap-3">
+                  <Shield className="mt-0.5 h-4 w-4 shrink-0 text-sky-700" aria-hidden="true" />
+                  <div>
+                    <p className="font-mono text-[10px] font-extrabold uppercase tracking-wider text-sky-800">
+                      Private address entry
+                    </p>
+                    <p className="mt-1 text-[11px] font-medium leading-relaxed text-sky-900">
+                      Enter the address manually. The street address is not sent to a public
+                      location service; only the ZIP is evaluated locally for a coarse area.
+                    </p>
                   </div>
-                )}
+                </div>
               </div>
 
-              {/* VERIFIED ADDRESS SUMMARY BANNER */}
-              {selectedAddressVerified && (
-                <div className="sm:col-span-2 bg-emerald-50 border-2 border-emerald-300 rounded-2xl p-4 flex items-center justify-between animate-fade-in shadow-sm">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-emerald-500 text-white flex items-center justify-center font-black shrink-0">
-                      ✓
-                    </div>
-                    <div>
-                      <p className="text-[10px] font-mono font-extrabold text-emerald-800 uppercase tracking-wider">Verified Address Selected</p>
-                      <p className="text-sm font-extrabold text-slate-900">{formData.addressLine1}, {formData.city}, {formData.state} {formData.zipCode}</p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedAddressVerified(false);
-                      setAddressSearchQuery('');
-                      updateField('addressLine1', '');
-                    }}
-                    className="text-xs text-emerald-700 font-bold hover:underline"
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-extrabold text-slate-800 mb-1.5">
+                  Street Address *
+                </label>
+                <input
+                  type="text"
+                  autoComplete="address-line1"
+                  value={formData.addressLine1}
+                  onChange={(e) => updateField('addressLine1', e.target.value)}
+                  placeholder="2137 33rd Street"
+                  suppressHydrationWarning
+                  className="w-full bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-sm text-slate-900 font-bold focus:border-[#F97316] focus:ring-2 focus:ring-orange-500/20 focus:outline-none transition-all"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-extrabold text-slate-800 mb-1.5">
+                  City *
+                </label>
+                <input
+                  type="text"
+                  autoComplete="address-level2"
+                  value={formData.city}
+                  onChange={(e) => updateField('city', e.target.value)}
+                  placeholder="Astoria"
+                  suppressHydrationWarning
+                  className="w-full bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-sm text-slate-900 font-bold focus:border-[#F97316] focus:ring-2 focus:ring-orange-500/20 focus:outline-none transition-all"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-extrabold text-slate-800 mb-1.5">
+                  State *
+                </label>
+                <input
+                  type="text"
+                  autoComplete="address-level1"
+                  maxLength={2}
+                  value={formData.state}
+                  onChange={(e) => updateField('state', e.target.value.toUpperCase())}
+                  placeholder="NY"
+                  suppressHydrationWarning
+                  className="w-full bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-sm uppercase text-slate-900 font-bold focus:border-[#F97316] focus:ring-2 focus:ring-orange-500/20 focus:outline-none transition-all"
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-extrabold text-slate-800 mb-1.5">
+                  ZIP Code *
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="postal-code"
+                  maxLength={10}
+                  value={formData.zipCode}
+                  onChange={(e) => updateField('zipCode', e.target.value)}
+                  placeholder="11105"
+                  suppressHydrationWarning
+                  className="w-full bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-sm text-slate-900 font-bold focus:border-[#F97316] focus:ring-2 focus:ring-orange-500/20 focus:outline-none transition-all"
+                />
+                {formData.zipCode && (
+                  <p
+                    className={`mt-2 text-[11px] font-bold ${
+                      privateApplicantLocation.status === 'ZIP_ONLY'
+                        ? 'text-emerald-700'
+                        : 'text-amber-700'
+                    }`}
                   >
-                    Change
-                  </button>
-                </div>
-              )}
+                    {privateApplicantLocation.status === 'ZIP_ONLY'
+                      ? privateApplicantLocation.borough
+                        ? `ZIP recognized locally · ${privateApplicantLocation.borough}`
+                        : 'ZIP recognized locally · borough unavailable'
+                      : 'Enter a valid 5-digit ZIP. External address verification is unavailable.'}
+                  </p>
+                )}
+              </div>
 
               {/* OPTIONAL APARTMENT / SUITE NUMBER */}
               <div className="sm:col-span-2">
@@ -753,30 +905,38 @@ export default function RbtApplicationForm() {
           <div className="space-y-5 animate-fade-in">
             <div className="space-y-1 border-b border-orange-100 pb-3">
               <h2 className="text-xl font-black text-slate-900 font-heading">RBT Readiness</h2>
-              <p className="text-xs text-slate-600 font-bold">Tell us about your RBT qualifications and experience.</p>
+              <p className="text-xs text-slate-600 font-bold">
+                Quick screening — if you already finished the 40-hour course, you can upload the certificate on the Documents step.
+              </p>
             </div>
 
             <div className="space-y-4">
               <div>
-                <label className="block text-xs font-extrabold text-slate-800 mb-1.5">40-Hour RBT Course Already Completed? *</label>
+                <label className="block text-xs font-extrabold text-slate-800 mb-1.5">
+                  40-Hour RBT Course Already Completed? *
+                </label>
                 <select
                   value={formData.courseCompleted}
                   onChange={(e) => updateField('courseCompleted', e.target.value)}
-                  className="w-full bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-sm text-slate-900 font-bold focus:border-[#F97316] focus:ring-2 focus:ring-orange-500/20 focus:outline-none transition-all"
+                  className="w-full bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-sm text-slate-900 font-bold focus:border-[#F97316] focus:ring-2 focus:ring-orange-500/20 focus:outline-none transition-all cursor-pointer"
                 >
                   <option value="">Select...</option>
-                  <option value="Yes">Yes</option>
-                  <option value="No, but interested in free training">No, but interested in free training</option>
+                  <option value="Yes">Yes — I have my certificate</option>
                   <option value="In Progress">In Progress</option>
+                  <option value="No, but interested in free training">
+                    No — I&apos;ll take the free APF course
+                  </option>
                 </select>
               </div>
 
               <div>
-                <label className="block text-xs font-extrabold text-slate-800 mb-1.5">Years of Experience</label>
+                <label className="block text-xs font-extrabold text-slate-800 mb-1.5">
+                  Years of ABA / childcare experience
+                </label>
                 <select
                   value={formData.yearsExperience}
                   onChange={(e) => updateField('yearsExperience', e.target.value)}
-                  className="w-full bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-sm text-slate-900 font-bold focus:border-[#F97316] focus:ring-2 focus:ring-orange-500/20 focus:outline-none transition-all"
+                  className="w-full bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-sm text-slate-900 font-bold focus:border-[#F97316] focus:ring-2 focus:ring-orange-500/20 focus:outline-none transition-all cursor-pointer"
                 >
                   <option value="">Select...</option>
                   <option value="No Experience">No Experience</option>
@@ -788,37 +948,22 @@ export default function RbtApplicationForm() {
               </div>
 
               <div>
-                <label className="block text-xs font-extrabold text-slate-800 mb-2">Preferred Client Age Groups</label>
-                <div className="space-y-2 text-xs text-slate-800">
-                  {['Toddler (2-4)', 'Preschool (4-6)', 'Elementary (6-10)', 'Pre-teen (10-13)', 'Teen (13+)'].map((group) => {
-                    const isChecked = formData.ageGroups.includes(group);
-                    return (
-                      <label key={group} className="flex items-center gap-2.5 cursor-pointer font-bold hover:text-slate-900">
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={() => toggleArrayItem('ageGroups', group)}
-                          className="w-4 h-4 text-[#F97316] border-slate-300 rounded focus:ring-orange-500"
-                        />
-                        <span>{group}</span>
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-extrabold text-slate-800 mb-2">Languages Spoken</label>
-                <div className="space-y-2 text-xs text-slate-800">
+                <label className="block text-xs font-extrabold text-slate-800 mb-2">
+                  Languages Spoken
+                </label>
+                <div className="flex flex-wrap gap-3 text-xs text-slate-800">
                   {['English', 'Spanish', 'French', 'Mandarin', 'Arabic', 'Other'].map((lang) => {
                     const isChecked = formData.languages.includes(lang);
                     return (
-                      <label key={lang} className="flex items-center gap-2.5 cursor-pointer font-bold hover:text-slate-900">
+                      <label
+                        key={lang}
+                        className="flex items-center gap-2 cursor-pointer font-bold hover:text-slate-900"
+                      >
                         <input
                           type="checkbox"
                           checked={isChecked}
                           onChange={() => toggleArrayItem('languages', lang)}
-                          className="w-4 h-4 text-[#F97316] border-slate-300 rounded focus:ring-orange-500"
+                          className="w-4 h-4 text-[#F97316] border-slate-300 rounded focus:ring-orange-500 cursor-pointer"
                         />
                         <span>{lang}</span>
                       </label>
@@ -828,11 +973,13 @@ export default function RbtApplicationForm() {
               </div>
 
               <div>
-                <label className="block text-xs font-extrabold text-slate-800 mb-1.5">Reliable Transportation?</label>
+                <label className="block text-xs font-extrabold text-slate-800 mb-1.5">
+                  Reliable Transportation? *
+                </label>
                 <select
                   value={formData.transportation}
                   onChange={(e) => updateField('transportation', e.target.value)}
-                  className="w-full bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-sm text-slate-900 font-bold focus:border-[#F97316] focus:ring-2 focus:ring-orange-500/20 focus:outline-none transition-all"
+                  className="w-full bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-sm text-slate-900 font-bold focus:border-[#F97316] focus:ring-2 focus:ring-orange-500/20 focus:outline-none transition-all cursor-pointer"
                 >
                   <option value="">Select...</option>
                   <option value="Yes - Personal Vehicle">Yes - Personal Vehicle</option>
@@ -850,13 +997,16 @@ export default function RbtApplicationForm() {
             <div className="space-y-1 border-b border-orange-100 pb-3">
               <h2 className="text-xl font-black text-slate-900 font-heading">Availability</h2>
               <p className="text-xs text-slate-600 font-bold">
-                Most RBT sessions occur after 2PM on weekdays and on weekends. Please indicate your availability.
+                Most sessions are after 2PM on weekdays and on weekends. You&apos;ll set a detailed hour grid later
+                in the portal — this is just for HR matching.
               </p>
             </div>
 
             <div className="space-y-4">
               <div>
-                <label className="block text-xs font-extrabold text-slate-800 mb-2">Weekday Availability (after 2PM)</label>
+                <label className="block text-xs font-extrabold text-slate-800 mb-2">
+                  Weekday Availability (after 2PM) *
+                </label>
                 <div className="flex flex-wrap gap-4 text-xs text-slate-800 font-bold">
                   {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].map((day) => {
                     const isChecked = formData.weekdays.includes(day);
@@ -866,7 +1016,7 @@ export default function RbtApplicationForm() {
                           type="checkbox"
                           checked={isChecked}
                           onChange={() => toggleArrayItem('weekdays', day)}
-                          className="w-4 h-4 text-[#F97316] border-slate-300 rounded focus:ring-orange-500"
+                          className="w-4 h-4 text-[#F97316] border-slate-300 rounded focus:ring-orange-500 cursor-pointer"
                         />
                         <span>{day}</span>
                       </label>
@@ -886,7 +1036,7 @@ export default function RbtApplicationForm() {
                           type="checkbox"
                           checked={isChecked}
                           onChange={() => toggleArrayItem('weekends', day)}
-                          className="w-4 h-4 text-[#F97316] border-slate-300 rounded focus:ring-orange-500"
+                          className="w-4 h-4 text-[#F97316] border-slate-300 rounded focus:ring-orange-500 cursor-pointer"
                         />
                         <span>{day}</span>
                       </label>
@@ -896,11 +1046,13 @@ export default function RbtApplicationForm() {
               </div>
 
               <div>
-                <label className="block text-xs font-extrabold text-slate-800 mb-1.5">Preferred Weekly Hours Range *</label>
+                <label className="block text-xs font-extrabold text-slate-800 mb-1.5">
+                  Preferred Weekly Hours *
+                </label>
                 <select
                   value={formData.weeklyHours}
                   onChange={(e) => updateField('weeklyHours', e.target.value)}
-                  className="w-full bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-sm text-slate-900 font-bold focus:border-[#F97316] focus:ring-2 focus:ring-orange-500/20 focus:outline-none transition-all"
+                  className="w-full bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-sm text-slate-900 font-bold focus:border-[#F97316] focus:ring-2 focus:ring-orange-500/20 focus:outline-none transition-all cursor-pointer"
                 >
                   <option value="">Select...</option>
                   <option value="10-15 hours/week">10-15 hours/week</option>
@@ -910,26 +1062,51 @@ export default function RbtApplicationForm() {
                 </select>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-extrabold text-slate-800 mb-1.5">Earliest Start Time</label>
-                  <input
-                    type="time"
-                    value={formData.earliestStartTime}
-                    onChange={(e) => updateField('earliestStartTime', e.target.value)}
-                    className="w-full bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-sm text-slate-900 font-bold focus:border-[#F97316] focus:ring-2 focus:ring-orange-500/20 focus:outline-none transition-all"
-                  />
+              <div>
+                <label className="block text-xs font-extrabold text-slate-800 mb-2">
+                  Preferred Boroughs / Areas *
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs text-slate-800 font-bold">
+                  {NYC_BOROUGHS.map((b) => {
+                    const isChecked = formData.boroughs.includes(b);
+                    return (
+                      <label
+                        key={b}
+                        className={`flex items-center gap-2 cursor-pointer rounded-xl border px-3 py-2 transition-all ${
+                          isChecked
+                            ? 'border-[#F97316] bg-orange-50 text-slate-900'
+                            : 'border-slate-200 bg-white hover:border-orange-200'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => toggleArrayItem('boroughs', b)}
+                          className="w-4 h-4 text-[#F97316] border-slate-300 rounded focus:ring-orange-500 cursor-pointer"
+                        />
+                        <span>{b}</span>
+                      </label>
+                    );
+                  })}
                 </div>
+              </div>
 
-                <div>
-                  <label className="block text-xs font-extrabold text-slate-800 mb-1.5">Latest End Time</label>
-                  <input
-                    type="time"
-                    value={formData.latestEndTime}
-                    onChange={(e) => updateField('latestEndTime', e.target.value)}
-                    className="w-full bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-sm text-slate-900 font-bold focus:border-[#F97316] focus:ring-2 focus:ring-orange-500/20 focus:outline-none transition-all"
-                  />
-                </div>
+              <div>
+                <label className="block text-xs font-extrabold text-slate-800 mb-1.5">
+                  How soon can you start? *
+                </label>
+                <select
+                  value={formData.availableToStart}
+                  onChange={(e) => updateField('availableToStart', e.target.value)}
+                  className="w-full bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-sm text-slate-900 font-bold focus:border-[#F97316] focus:ring-2 focus:ring-orange-500/20 focus:outline-none transition-all cursor-pointer"
+                >
+                  <option value="">Select...</option>
+                  <option value="Immediately">Immediately</option>
+                  <option value="Within 1 week">Within 1 week</option>
+                  <option value="1-2 weeks">1–2 weeks</option>
+                  <option value="2-4 weeks">2–4 weeks</option>
+                  <option value="1+ month">1+ month</option>
+                </select>
               </div>
             </div>
           </div>
@@ -958,11 +1135,13 @@ export default function RbtApplicationForm() {
               </div>
 
               <div>
-                <label className="block text-xs font-extrabold text-slate-800 mb-1.5">Can you pass a background check? *</label>
+                <label className="block text-xs font-extrabold text-slate-800 mb-1.5">
+                  Can you authorize a background check? *
+                </label>
                 <select
                   value={formData.backgroundCheck}
                   onChange={(e) => updateField('backgroundCheck', e.target.value)}
-                  className="w-full bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-sm text-slate-900 font-bold focus:border-[#F97316] focus:ring-2 focus:ring-orange-500/20 focus:outline-none transition-all"
+                  className="w-full bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-sm text-slate-900 font-bold focus:border-[#F97316] focus:ring-2 focus:ring-orange-500/20 focus:outline-none transition-all cursor-pointer"
                 >
                   <option value="">Select...</option>
                   <option value="Yes">Yes</option>
@@ -970,12 +1149,26 @@ export default function RbtApplicationForm() {
                 </select>
               </div>
 
+              <label className="flex items-start gap-3 p-4 rounded-2xl border-2 border-slate-200 bg-slate-50 cursor-pointer hover:border-[#F97316]/50 transition-all">
+                <input
+                  type="checkbox"
+                  checked={formData.isAdultConfirmed}
+                  onChange={(e) => updateField('isAdultConfirmed', e.target.checked)}
+                  className="mt-0.5 w-4 h-4 text-[#F97316] border-slate-300 rounded focus:ring-orange-500 cursor-pointer"
+                />
+                <span className="text-xs font-bold text-slate-800">
+                  I confirm that I am <strong>18 years of age or older</strong> *
+                </span>
+              </label>
+
               <div>
-                <label className="block text-xs font-extrabold text-slate-800 mb-1.5">CPR/First Aid Certified?</label>
+                <label className="block text-xs font-extrabold text-slate-800 mb-1.5">
+                  CPR/First Aid Certified?
+                </label>
                 <select
                   value={formData.cprStatus}
                   onChange={(e) => updateField('cprStatus', e.target.value)}
-                  className="w-full bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-sm text-slate-900 font-bold focus:border-[#F97316] focus:ring-2 focus:ring-orange-500/20 focus:outline-none transition-all"
+                  className="w-full bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-sm text-slate-900 font-bold focus:border-[#F97316] focus:ring-2 focus:ring-orange-500/20 focus:outline-none transition-all cursor-pointer"
                 >
                   <option value="">Select...</option>
                   <option value="Yes - Active">Yes - Active</option>
@@ -1003,13 +1196,15 @@ export default function RbtApplicationForm() {
           <div className="space-y-5 animate-fade-in">
             <div className="space-y-1 border-b border-orange-100 pb-3">
               <h2 className="text-xl font-black text-slate-900 font-heading">Resume &amp; Documents</h2>
-              <p className="text-xs text-slate-600 font-bold">Please upload your resume and any relevant documents.</p>
+              <p className="text-xs text-slate-600 font-bold">
+                Resume and government ID are required. Upload a 40-hour certificate only if you already have one.
+              </p>
             </div>
 
             <div className="space-y-4">
               {/* Resume Drag & Drop Zone */}
               <div>
-                <label className="block text-xs font-extrabold text-slate-800 mb-1.5">Resume * (PDF, DOC, or DOCX, max 10MB)</label>
+                <label className="block text-xs font-extrabold text-slate-800 mb-1.5">Resume * (PDF, JPG, PNG, or WEBP, max 10MB)</label>
                 {formData.resumeFileName ? (
                   <div className="border-2 border-slate-200 bg-white rounded-2xl p-4 flex items-center justify-between shadow-sm">
                     <div className="flex items-center gap-3">
@@ -1025,57 +1220,65 @@ export default function RbtApplicationForm() {
                       <button
                         type="button"
                         onClick={() => {
-                          const url = fileDataUrls.resumeFileDataUrl || JSON.parse(localStorage.getItem('ras_file_data_urls') || '{}').resumeFileDataUrl;
-                          if (url) {
-                            setPreviewModal({ name: formData.resumeFileName, url });
+                          if (previewUrls.resume) {
+                            setPreviewModal({
+                              name: formData.resumeFileName,
+                              url: previewUrls.resume,
+                              mimeType: resumeFile?.type || '',
+                            });
                           } else {
                             toast.info(`Resume attached: ${formData.resumeFileName}`);
                           }
                         }}
-                        className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer"
+                        aria-label="Preview attached resume"
+                        className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
                         title="Preview Attached Resume"
                       >
-                        <Eye className="w-4 h-4 text-slate-700" />
+                        <Eye className="w-4 h-4 text-slate-700" aria-hidden="true" />
                       </button>
                       <button
                         type="button"
                         onClick={() => {
                           updateField('resumeFileName', '');
-                          setFileDataUrls(prev => {
-                            const updated = { ...prev, resumeFileDataUrl: undefined };
-                            try { localStorage.setItem('ras_file_data_urls', JSON.stringify(updated)); } catch (e) {}
-                            return updated;
+                          setResumeFile(null);
+                          setPreviewUrls((prev) => {
+                            if (prev.resume) URL.revokeObjectURL(prev.resume);
+                            return { ...prev, resume: undefined };
                           });
                           toast.info('Resume removed. You can now upload a new file.');
                         }}
-                        className="p-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 transition-colors cursor-pointer border border-rose-200"
+                        aria-label="Remove resume and choose another file"
+                        className="p-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 transition-colors cursor-pointer border border-rose-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
                         title="Delete & Re-upload Resume"
                       >
-                        <Trash2 className="w-4 h-4 text-rose-600" />
+                        <Trash2 className="w-4 h-4 text-rose-600" aria-hidden="true" />
                       </button>
                     </div>
                   </div>
                 ) : (
-                  <div className="border-2 border-dashed border-orange-200 hover:border-[#F97316] rounded-2xl p-6 text-center space-y-2 bg-orange-50/40 transition-all relative">
+                  <div className="border-2 border-dashed border-orange-200 hover:border-[#F97316] rounded-2xl p-6 text-center space-y-2 bg-orange-50/40 transition-all relative focus-within:border-[#F97316] focus-within:ring-4 focus-within:ring-orange-300/40">
                     <Upload className="w-7 h-7 text-[#F97316] mx-auto" />
                     <p className="text-xs text-slate-800 font-extrabold">Click to upload or drag and drop</p>
-                    <p className="text-[10px] text-slate-500 uppercase font-mono font-bold">PDF, DOC, OR DOCX (MAX 10MB)</p>
+                    <p className="text-[10px] text-slate-500 uppercase font-mono font-bold">PDF, JPG, PNG, OR WEBP (MAX 10MB)</p>
                     <input
                       type="file"
+                      accept="application/pdf,image/jpeg,image/png,image/webp"
+                      aria-label="Choose required resume"
                       onChange={(e) => {
                         const file = e.target.files?.[0];
                         if (file) {
+                          const validationError = validateDocumentFile(file, { label: 'Resume' });
+                          if (validationError) {
+                            toast.error(validationError.message);
+                            e.target.value = '';
+                            return;
+                          }
                           updateField('resumeFileName', file.name);
-                          const reader = new FileReader();
-                          reader.onload = () => {
-                            const url = reader.result as string;
-                            setFileDataUrls(prev => {
-                              const updated = { ...prev, resumeFileDataUrl: url };
-                              try { localStorage.setItem('ras_file_data_urls', JSON.stringify(updated)); } catch (e) {}
-                              return updated;
-                            });
-                          };
-                          reader.readAsDataURL(file);
+                          setResumeFile(file);
+                          setPreviewUrls((prev) => {
+                            if (prev.resume) URL.revokeObjectURL(prev.resume);
+                            return { ...prev, resume: URL.createObjectURL(file) };
+                          });
                           toast.success(`Attached ${file.name}`);
                         }
                       }}
@@ -1087,7 +1290,7 @@ export default function RbtApplicationForm() {
 
               {/* ID Drag & Drop Zone */}
               <div>
-                <label className="block text-xs font-extrabold text-slate-800 mb-1.5">Government-issued ID * (PDF, JPG, PNG, HEIC, or WEBP, max 10MB)</label>
+                <label className="block text-xs font-extrabold text-slate-800 mb-1.5">Government-issued ID * (PDF, JPG, PNG, or WEBP, max 10MB)</label>
                 {formData.idFileName ? (
                   <div className="border-2 border-slate-200 bg-white rounded-2xl p-4 flex items-center justify-between shadow-sm">
                     <div className="flex items-center gap-3">
@@ -1103,57 +1306,67 @@ export default function RbtApplicationForm() {
                       <button
                         type="button"
                         onClick={() => {
-                          const url = fileDataUrls.govtIdFileDataUrl || JSON.parse(localStorage.getItem('ras_file_data_urls') || '{}').govtIdFileDataUrl;
-                          if (url) {
-                            setPreviewModal({ name: formData.idFileName, url });
+                          if (previewUrls.govtId) {
+                            setPreviewModal({
+                              name: formData.idFileName,
+                              url: previewUrls.govtId,
+                              mimeType: govtIdFile?.type || '',
+                            });
                           } else {
                             toast.info(`ID attached: ${formData.idFileName}`);
                           }
                         }}
-                        className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer"
+                        aria-label="Preview attached government-issued ID"
+                        className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
                         title="Preview Attached Photo ID"
                       >
-                        <Eye className="w-4 h-4 text-slate-700" />
+                        <Eye className="w-4 h-4 text-slate-700" aria-hidden="true" />
                       </button>
                       <button
                         type="button"
                         onClick={() => {
                           updateField('idFileName', '');
-                          setFileDataUrls(prev => {
-                            const updated = { ...prev, govtIdFileDataUrl: undefined };
-                            try { localStorage.setItem('ras_file_data_urls', JSON.stringify(updated)); } catch (e) {}
-                            return updated;
+                          setGovtIdFile(null);
+                          setPreviewUrls((prev) => {
+                            if (prev.govtId) URL.revokeObjectURL(prev.govtId);
+                            return { ...prev, govtId: undefined };
                           });
                           toast.info('Photo ID removed. You can now upload a new file.');
                         }}
-                        className="p-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 transition-colors cursor-pointer border border-rose-200"
+                        aria-label="Remove government-issued ID and choose another file"
+                        className="p-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 transition-colors cursor-pointer border border-rose-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
                         title="Delete & Re-upload Photo ID"
                       >
-                        <Trash2 className="w-4 h-4 text-rose-600" />
+                        <Trash2 className="w-4 h-4 text-rose-600" aria-hidden="true" />
                       </button>
                     </div>
                   </div>
                 ) : (
-                  <div className="border-2 border-dashed border-orange-200 hover:border-[#F97316] rounded-2xl p-6 text-center space-y-2 bg-orange-50/40 transition-all relative">
+                  <div className="border-2 border-dashed border-orange-200 hover:border-[#F97316] rounded-2xl p-6 text-center space-y-2 bg-orange-50/40 transition-all relative focus-within:border-[#F97316] focus-within:ring-4 focus-within:ring-orange-300/40">
                     <Upload className="w-7 h-7 text-[#F97316] mx-auto" />
                     <p className="text-xs text-slate-800 font-extrabold">Click to upload or drag and drop</p>
-                    <p className="text-[10px] text-slate-500 uppercase font-mono font-bold">PDF, JPG, PNG, HEIC, OR WEBP (MAX 10MB)</p>
+                    <p className="text-[10px] text-slate-500 uppercase font-mono font-bold">PDF, JPG, PNG, OR WEBP (MAX 10MB)</p>
                     <input
                       type="file"
+                      accept="application/pdf,image/jpeg,image/png,image/webp"
+                      aria-label="Choose required government-issued ID"
                       onChange={(e) => {
                         const file = e.target.files?.[0];
                         if (file) {
+                          const validationError = validateDocumentFile(file, {
+                            label: 'Government-issued ID',
+                          });
+                          if (validationError) {
+                            toast.error(validationError.message);
+                            e.target.value = '';
+                            return;
+                          }
                           updateField('idFileName', file.name);
-                          const reader = new FileReader();
-                          reader.onload = () => {
-                            const url = reader.result as string;
-                            setFileDataUrls(prev => {
-                              const updated = { ...prev, govtIdFileDataUrl: url };
-                              try { localStorage.setItem('ras_file_data_urls', JSON.stringify(updated)); } catch (e) {}
-                              return updated;
-                            });
-                          };
-                          reader.readAsDataURL(file);
+                          setGovtIdFile(file);
+                          setPreviewUrls((prev) => {
+                            if (prev.govtId) URL.revokeObjectURL(prev.govtId);
+                            return { ...prev, govtId: URL.createObjectURL(file) };
+                          });
                           toast.success(`Attached ID: ${file.name}`);
                         }
                       }}
@@ -1163,25 +1376,118 @@ export default function RbtApplicationForm() {
                 )}
               </div>
 
-              {/* Optional RBT Cert */}
+              {/* Optional 40-Hour BACB Certificate — skips REQ 5 if uploaded */}
               <div>
-                <label className="block text-xs font-extrabold text-slate-800 mb-1.5">RBT Certificate (Optional)</label>
-                <input
-                  type="file"
-                  onChange={(e) => updateField('rbtCertFileName', e.target.files?.[0]?.name || '')}
-                  className="w-full bg-white border border-slate-300 rounded-xl px-4 py-2 text-xs text-slate-800 font-bold"
-                />
+                <div className="flex flex-wrap items-center gap-2 mb-1.5">
+                  <label className="block text-xs font-extrabold text-slate-800">
+                    40-Hour BACB Course Certificate (Optional)
+                  </label>
+                  <span className="text-[9px] font-mono font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300 px-1.5 py-0.5 rounded">
+                    Skip later if you upload now
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-600 font-medium mb-2">
+                  Already finished the free APF (or any BACB-approved) 40-hour course? Upload the
+                  certificate PDF here and you won&apos;t need to redo that step in the portal.
+                </p>
+                {formData.rbtCertFileName ? (
+                  <div className="border-2 border-emerald-200 bg-emerald-50/60 rounded-2xl p-4 flex items-center justify-between shadow-sm">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-600 shrink-0">
+                        <CheckCircle2 className="w-5 h-5" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-xs font-black text-slate-900 truncate">
+                          {formData.rbtCertFileName}
+                        </p>
+                        <p className="text-[10px] font-mono text-emerald-700">
+                          40-Hour cert attached · Will clear REQ 5 on submit
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (previewUrls.fortyHourCert) {
+                            setPreviewModal({
+                              name: formData.rbtCertFileName,
+                              url: previewUrls.fortyHourCert,
+                              mimeType: fortyHourCertFile?.type || '',
+                            });
+                          } else {
+                            toast.info(`Certificate attached: ${formData.rbtCertFileName}`);
+                          }
+                        }}
+                        aria-label="Preview attached 40-hour certificate"
+                        className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
+                        title="Preview certificate"
+                      >
+                        <Eye className="w-4 h-4 text-slate-700" aria-hidden="true" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          updateField('rbtCertFileName', '');
+                          setFortyHourCertFile(null);
+                          setPreviewUrls((prev) => {
+                            if (prev.fortyHourCert) URL.revokeObjectURL(prev.fortyHourCert);
+                            return { ...prev, fortyHourCert: undefined };
+                          });
+                          toast.info('40-Hour certificate removed.');
+                        }}
+                        aria-label="Remove 40-hour certificate"
+                        className="p-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 transition-colors cursor-pointer border border-rose-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
+                        title="Remove certificate"
+                      >
+                        <Trash2 className="w-4 h-4 text-rose-600" aria-hidden="true" />
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="border-2 border-dashed border-emerald-200 hover:border-emerald-500 rounded-2xl p-6 text-center space-y-2 bg-emerald-50/40 transition-all relative focus-within:border-emerald-500 focus-within:ring-4 focus-within:ring-emerald-300/40">
+                    <Upload className="w-7 h-7 text-emerald-600 mx-auto" />
+                    <p className="text-xs text-slate-800 font-extrabold">
+                      {formData.courseCompleted === 'Yes'
+                        ? 'Upload your 40-Hour certificate to skip that requirement'
+                        : 'Click to upload 40-Hour certificate (optional)'}
+                    </p>
+                    <p className="text-[10px] text-slate-500 uppercase font-mono font-bold">
+                      PDF, JPG, PNG, OR WEBP (MAX 10MB)
+                    </p>
+                    <input
+                      type="file"
+                      accept="application/pdf,image/jpeg,image/png,image/webp"
+                      aria-label="Choose optional 40-hour course certificate"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          const validationError = validateDocumentFile(file, {
+                            label: '40-hour certificate',
+                          });
+                          if (validationError) {
+                            toast.error(validationError.message);
+                            e.target.value = '';
+                            return;
+                          }
+                          updateField('rbtCertFileName', file.name);
+                          setFortyHourCertFile(file);
+                          if (formData.courseCompleted !== 'Yes') {
+                            updateField('courseCompleted', 'Yes');
+                          }
+                          setPreviewUrls((prev) => {
+                            if (prev.fortyHourCert) URL.revokeObjectURL(prev.fortyHourCert);
+                            return { ...prev, fortyHourCert: URL.createObjectURL(file) };
+                          });
+                          toast.success(`Attached 40-Hour cert: ${file.name}`);
+                        }
+                      }}
+                      className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                    />
+                  </div>
+                )}
               </div>
 
-              {/* Optional CPR Card */}
-              <div>
-                <label className="block text-xs font-extrabold text-slate-800 mb-1.5">CPR/First Aid Card (Optional)</label>
-                <input
-                  type="file"
-                  onChange={(e) => updateField('cprCardFileName', e.target.files?.[0]?.name || '')}
-                  className="w-full bg-white border border-slate-300 rounded-xl px-4 py-2 text-xs text-slate-800 font-bold"
-                />
-              </div>
             </div>
           </div>
         )}
@@ -1211,16 +1517,57 @@ export default function RbtApplicationForm() {
                 <div>
                   <span className="font-mono text-[#F97316] uppercase font-bold block">40-Hr RBT Status:</span>
                   <span className="font-bold text-[#F97316]">{formData.courseCompleted || 'Not Specified'}</span>
+                  {formData.rbtCertFileName ? (
+                    <span className="block text-[10px] font-bold text-emerald-700 mt-1">
+                      Cert attached: {formData.rbtCertFileName}
+                    </span>
+                  ) : (
+                    <span className="block text-[10px] font-medium text-slate-500 mt-1">
+                      No certificate uploaded — can complete later in portal
+                    </span>
+                  )}
                 </div>
                 <div>
-                  <span className="font-mono text-[#F97316] uppercase font-bold block">Verified Address:</span>
+                  <span className="font-mono text-[#F97316] uppercase font-bold block">Applicant Address:</span>
                   <span className="font-bold text-slate-900">{formData.addressLine1}, {formData.city} {formData.state} {formData.zipCode}</span>
                 </div>
               </div>
 
+              <div className="grid grid-cols-2 gap-3 pb-3 border-b border-orange-200">
+                <div>
+                  <span className="font-mono text-[#F97316] uppercase font-bold block">Boroughs:</span>
+                  <span className="font-bold text-slate-900">
+                    {formData.boroughs.join(', ') || '—'}
+                  </span>
+                </div>
+                <div>
+                  <span className="font-mono text-[#F97316] uppercase font-bold block">Start / Hours:</span>
+                  <span className="font-bold text-slate-900">
+                    {formData.availableToStart || '—'} · {formData.weeklyHours || '—'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 pb-3 border-b border-orange-200">
+                <div>
+                  <span className="font-mono text-[#F97316] uppercase font-bold block">Availability:</span>
+                  <span className="font-bold text-slate-900">
+                    {formData.weekdays.concat(formData.weekends).join(', ') || '—'}
+                  </span>
+                </div>
+                <div>
+                  <span className="font-mono text-[#F97316] uppercase font-bold block">Transport / CPR:</span>
+                  <span className="font-bold text-slate-900">
+                    {formData.transportation || '—'} · {formData.cprStatus || 'CPR n/a'}
+                  </span>
+                </div>
+              </div>
+
               <div>
-                <span className="font-mono text-[#F97316] uppercase font-bold block">Availability &amp; Hours:</span>
-                <span className="font-bold text-slate-900">{formData.weekdays.concat(formData.weekends).join(', ') || 'Flexible'} • {formData.weeklyHours || 'Flexible Hours'}</span>
+                <span className="font-mono text-[#F97316] uppercase font-bold block">Documents:</span>
+                <span className="font-bold text-slate-900">
+                  Resume: {formData.resumeFileName || 'Missing'} · ID: {formData.idFileName || 'Missing'}
+                </span>
               </div>
             </div>
           </div>
@@ -1266,33 +1613,66 @@ export default function RbtApplicationForm() {
 
       {/* APPLICANT DOCUMENT PREVIEW MODAL */}
       {previewModal && (
-        <div className="fixed inset-0 z-[999999] bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-zinc-950 border border-white/10 rounded-3xl max-w-2xl w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden text-white relative">
+        <div
+          className="fixed inset-0 z-[999999] bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setPreviewModal(null);
+          }}
+        >
+          <div
+            ref={previewDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="applicant-document-preview-title"
+            className="bg-zinc-950 border border-white/10 rounded-3xl max-w-2xl w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden text-white relative"
+          >
             <div className="p-4 border-b border-white/10 flex items-center justify-between bg-zinc-900">
               <div className="flex items-center gap-2.5">
-                <FileText className="w-5 h-5 text-[#F97316]" />
-                <h3 className="font-extrabold text-white text-xs">{previewModal.name}</h3>
+                <FileText className="w-5 h-5 text-[#F97316]" aria-hidden="true" />
+                <h3
+                  id="applicant-document-preview-title"
+                  className="font-extrabold text-white text-xs"
+                >
+                  {previewModal.name}
+                </h3>
               </div>
               <button
+                ref={previewCloseButtonRef}
                 type="button"
+                aria-label="Close document preview"
                 onClick={() => setPreviewModal(null)}
-                className="p-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors cursor-pointer"
+                className="p-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-400"
               >
-                <XCircle className="w-5 h-5" />
+                <XCircle className="w-5 h-5" aria-hidden="true" />
               </button>
             </div>
             <div className="flex-1 overflow-hidden p-0 bg-zinc-950 flex items-center justify-center min-h-[400px]">
-              {previewModal.url.startsWith('data:image/') || !previewModal.url.startsWith('data:application/pdf') ? (
-                <img src={previewModal.url} alt="Attached Document Preview" className="max-w-full max-h-[600px] object-contain rounded-xl border border-white/10 shadow-lg" />
+              {previewModal.mimeType.startsWith('image/') ? (
+                <img
+                  src={previewModal.url}
+                  alt={`Preview of ${previewModal.name}`}
+                  className="max-w-full max-h-[600px] object-contain rounded-xl border border-white/10 shadow-lg"
+                />
               ) : (
-                <iframe src={`${previewModal.url}#toolbar=0&navpanes=0`} className="w-full h-[550px] rounded-xl border-0" title="Attached PDF Document" />
+                <iframe
+                  src={`${previewModal.url}#toolbar=0&navpanes=0`}
+                  className="w-full h-[550px] rounded-xl border-0"
+                  title={`Preview of ${previewModal.name}`}
+                />
               )}
             </div>
-            <div className="p-3.5 border-t border-white/10 bg-zinc-950 flex justify-end">
+            <div className="p-3.5 border-t border-white/10 bg-zinc-950 flex flex-wrap justify-end gap-2">
+              <a
+                href={previewModal.url}
+                download={previewModal.name}
+                className="px-4 py-2 rounded-xl bg-orange-500/15 hover:bg-orange-500/25 text-orange-300 text-xs font-bold transition-colors cursor-pointer border border-orange-400/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-400"
+              >
+                Download copy
+              </a>
               <button
                 type="button"
                 onClick={() => setPreviewModal(null)}
-                className="px-4 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 text-xs font-bold transition-colors cursor-pointer border border-white/10"
+                className="px-4 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 text-xs font-bold transition-colors cursor-pointer border border-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-400"
               >
                 Close Preview
               </button>

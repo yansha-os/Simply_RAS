@@ -1,20 +1,10 @@
 'use client';
 
-import React, { useState } from 'react';
-import { 
-  AlertTriangle, 
-  CheckCircle2, 
-  FileText, 
-  UserCheck, 
-  Clock, 
-  MapPin, 
-  ShieldCheck, 
-  X, 
-  Send,
-  Sparkles
-} from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { AlertTriangle, X } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { toast } from 'sonner';
+import { validatePracticeRepair } from '@/components/emr/rbtSimulationTraining';
 
 export interface IncompleteSessionItem {
   id: string;
@@ -33,6 +23,7 @@ export interface IncompleteSessionItem {
 }
 
 interface FixIncompleteSessionDrawerProps {
+  mode?: 'SIMULATION' | 'LIVE';
   session: IncompleteSessionItem | null;
   isOpen: boolean;
   onClose: () => void;
@@ -40,34 +31,74 @@ interface FixIncompleteSessionDrawerProps {
 }
 
 export function FixIncompleteSessionDrawer({
+  mode = 'LIVE',
   session,
   isOpen,
   onClose,
   onFixComplete
 }: FixIncompleteSessionDrawerProps) {
-  if (!isOpen || !session) return null;
-
-  const [parentSignature, setParentSignature] = useState(session.parentSignature || '');
-  const [soapSummary, setSoapSummary] = useState(
-    session.soapSummary || 'Client engaged in manding and receptive identification tasks. 15 total DTT trials completed with 85% accuracy.'
+  const [parentSignature, setParentSignature] = useState(
+    session?.parentSignature || ''
   );
+  const [soapSummary, setSoapSummary] = useState(
+    session?.soapSummary ||
+      'Fictional learner engaged in sample manding and receptive-identification trials.'
+  );
+  const drawerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isOpen || !session) return;
+    drawerRef.current?.focus();
+  }, [isOpen, session]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', closeOnEscape);
+    return () => document.removeEventListener('keydown', closeOnEscape);
+  }, [isOpen, onClose]);
+
+  if (!isOpen || !session) return null;
 
   const handleSubmitFix = (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (session.missingReason === 'MISSING_PARENT_SIGNATURE' && !parentSignature.trim()) {
-      toast.error('Caregiver / Parent E-Signature is required to render claim!');
+    const validationError = validatePracticeRepair(
+      session.missingReason,
+      parentSignature,
+      soapSummary
+    );
+    if (validationError === 'PRACTICE_ACKNOWLEDGMENT_REQUIRED') {
+      toast.error('Type the fictional caregiver acknowledgment to complete this practice fix.');
+      return;
+    }
+    if (validationError === 'PRACTICE_NARRATIVE_REQUIRED') {
+      toast.error('Add a fictional practice narrative before resolving this sample.');
       return;
     }
 
-    toast.success(`✓ Session note fixed & CMS-1500 claim rendered for ${session.client}!`);
+    toast.info(
+      mode === 'SIMULATION'
+        ? `Practice sample resolved for ${session.client}. No note or claim was changed.`
+        : `Local incomplete-note status updated for ${session.client}.`
+    );
     onFixComplete(session.id);
     onClose();
   };
 
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[9999999] flex justify-end animate-fade-in text-slate-900">
-      <div className="bg-white max-w-lg w-full h-full p-6 sm:p-8 space-y-6 overflow-y-auto custom-scrollbar shadow-2xl relative">
+      <div
+        ref={drawerRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="practice-fix-title"
+        aria-describedby="practice-fix-description"
+        className="bg-white max-w-lg w-full h-full p-6 sm:p-8 space-y-6 overflow-y-auto custom-scrollbar shadow-2xl relative outline-none"
+      >
         {/* Drawer Header */}
         <div className="flex items-center justify-between border-b border-orange-200 pb-4">
           <div className="flex items-center gap-3">
@@ -75,13 +106,19 @@ export function FixIncompleteSessionDrawer({
               <AlertTriangle className="w-5 h-5 text-amber-600 animate-pulse" />
             </div>
             <div>
-              <span className="text-[10px] font-mono font-bold text-amber-700 uppercase tracking-wider block">Incomplete Session Fix</span>
-              <h3 className="text-lg font-black text-slate-900 font-heading">{session.client}</h3>
+              <span className="text-[10px] font-mono font-bold text-amber-700 uppercase tracking-wider block">
+                {mode === 'SIMULATION' ? 'Simulation · local practice fix' : 'Incomplete Session Fix'}
+              </span>
+              <h3 id="practice-fix-title" className="text-lg font-black text-slate-900 font-heading">
+                {session.client}{mode === 'SIMULATION' ? ' · fictional' : ''}
+              </h3>
             </div>
           </div>
 
           <button
+            type="button"
             onClick={onClose}
+            aria-label="Close practice fix drawer"
             className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-800 flex items-center justify-center cursor-pointer"
           >
             <X className="w-4 h-4" />
@@ -94,8 +131,10 @@ export function FixIncompleteSessionDrawer({
             <AlertTriangle className="w-4 h-4 text-amber-600" />
             <span>Missing Requirement: {session.missingReason.replace(/_/g, ' ')}</span>
           </div>
-          <p className="text-[11px] text-amber-800 leading-relaxed">
-            This session was clocked out via EVV, but insurance claim payouts (CMS-1500) require all mandatory documentation to be signed and submitted.
+          <p id="practice-fix-description" className="text-[11px] text-amber-800 leading-relaxed">
+            {mode === 'SIMULATION'
+              ? 'Repair this fictional sample to practice the workflow. Submitting removes only this local card; it does not alter a session note, claim, or payroll hold.'
+              : 'Review the missing documentation before returning to Session Studio.'}
           </p>
         </div>
 
@@ -122,8 +161,11 @@ export function FixIncompleteSessionDrawer({
         {/* Fix Form */}
         <form onSubmit={handleSubmitFix} className="space-y-4">
           <div className="space-y-2">
-            <label className="text-xs font-bold text-slate-800 block">SOAP Note Objective Narrative</label>
+            <label htmlFor="practice-fix-narrative" className="text-xs font-bold text-slate-800 block">
+              Fictional SOAP objective narrative
+            </label>
             <textarea
+              id="practice-fix-narrative"
               value={soapSummary}
               onChange={(e) => setSoapSummary(e.target.value)}
               rows={3}
@@ -132,16 +174,17 @@ export function FixIncompleteSessionDrawer({
           </div>
 
           <div className="space-y-2">
-            <label className="text-xs font-bold text-slate-800 block flex items-center justify-between">
-              <span>Caregiver / Parent E-Signature *</span>
-              <span className="text-[10px] text-rose-600 font-black font-mono">MANDATORY</span>
+            <label htmlFor="practice-fix-acknowledgment" className="text-xs font-bold text-slate-800 block flex items-center justify-between">
+              <span>Fictional caregiver acknowledgment *</span>
+              <span className="text-[10px] text-orange-600 font-black font-mono">TRAINING ONLY</span>
             </label>
             <input
+              id="practice-fix-acknowledgment"
               type="text"
               value={parentSignature}
               onChange={(e) => setParentSignature(e.target.value)}
               data-scribe-id="input-parent-signature-fix"
-              placeholder="Type parent full name (e.g. Elena Miller)..."
+              placeholder="Type the sample name Elena Miller…"
               className="w-full bg-[#F0F7FF] border-2 border-[#BFDBFE] rounded-2xl p-3 text-xs text-slate-900 font-bold outline-none focus:border-[#F97316]"
             />
           </div>
@@ -160,7 +203,7 @@ export function FixIncompleteSessionDrawer({
               data-scribe-id="btn-submit-incomplete-fix"
               className="bg-[#F97316] hover:bg-orange-600 text-white font-black text-xs px-6 py-3.5 rounded-2xl shadow-xl cursor-pointer"
             >
-              ✓ Fix &amp; Render Audit-Proof Claim
+              {mode === 'SIMULATION' ? 'Resolve Practice Sample Locally' : 'Return to Session Studio'}
             </Button>
           </div>
         </form>

@@ -1,38 +1,25 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { 
-  Clock, 
-  MapPin, 
-  ShieldCheck, 
-  CheckCircle2, 
-  Activity, 
-  FileText, 
-  Sparkles, 
-  UserCheck, 
-  PenTool, 
-  ChevronRight, 
-  BookOpen, 
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  Clock,
+  ShieldCheck,
+  Activity,
+  FileText,
+  BookOpen,
   AlertTriangle,
   Flame,
-  Award,
-  RefreshCw,
-  HelpCircle,
-  Play,
-  Pause,
-  RotateCcw,
   Timer as TimerIcon,
-  Check,
-  Plus,
   ListOrdered,
   Layers,
-  CheckSquare,
-  Grid,
-  Zap
+  Grid
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { toast } from 'sonner';
-import { ScribeGuideMeEngine } from './ScribeGuideMeEngine';
+import {
+  getSimulationReadiness,
+  type SimulationEvidence,
+} from './rbtSimulationTraining';
 
 export type PromptLevel = 'IND' | 'VERBAL' | 'GESTURAL' | 'MODEL' | 'PARTIAL_PHYSICAL' | 'FULL_PHYSICAL';
 
@@ -60,20 +47,35 @@ export interface AbcEvent {
   timestamp: string;
 }
 
+type ProcedureTab =
+  | 'DTT'
+  | 'TASK_ANALYSIS'
+  | 'FREQUENCY_LATENCY'
+  | 'INTERVAL'
+  | 'ABC';
+
+const PROCEDURE_TABS: ProcedureTab[] = [
+  'DTT',
+  'TASK_ANALYSIS',
+  'FREQUENCY_LATENCY',
+  'INTERVAL',
+  'ABC',
+];
+
 interface RbtDataCollectionEngineProps {
   mode?: 'SIMULATION' | 'LIVE_SESSION';
-  onSimulationComplete?: () => void;
+  onSimulationComplete?: () => void | Promise<void>;
 }
 
 export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationComplete }: RbtDataCollectionEngineProps) {
-  // ⏱️ Real Ticking Session Timer State (EVV Clock)
+  // ⏱️ Real Ticking Session Timer State (EVV Clock) — SIMULATION only rendered for LIVE gate below
   const [sessionSeconds, setSessionSeconds] = useState(6320); // ~1h 45m initial
   const [isSessionTimerRunning, setIsSessionTimerRunning] = useState(true);
   const [locationCode, setLocationCode] = useState('12 - Home');
-  const [cptCode, setCptCode] = useState('97153-HM - Adaptive Behavior Treatment (RBT Level)');
+  const [cptCode] = useState('97153-HM - Adaptive Behavior Treatment (RBT Level)');
   
   // Active Data Procedure Tab
-  const [activeProcedureTab, setActiveProcedureTab] = useState<'DTT' | 'TASK_ANALYSIS' | 'FREQUENCY_LATENCY' | 'INTERVAL' | 'ABC'>('DTT');
+  const [activeProcedureTab, setActiveProcedureTab] = useState<ProcedureTab>('DTT');
 
   // ⏱️ ABC Behavior Incident Duration Timer State (Stopwatch)
   const [behaviorTimerSeconds, setBehaviorTimerSeconds] = useState(0);
@@ -131,6 +133,7 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
 
   // BIP Reference Drawer
   const [showBipDrawer, setShowBipDrawer] = useState(false);
+  const bipDrawerRef = useRef<HTMLDivElement>(null);
 
   // SOAP Note AI Assistant Quick Chips State
   const [subjectiveNote, setSubjectiveNote] = useState('Client arrived alert and engaged. Caregiver reported good morning routine and adequate sleep.');
@@ -141,50 +144,86 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
   const [rbtSignature, setRbtSignature] = useState('Sarah Jenkins, BT');
   const [parentSignature, setParentSignature] = useState('');
   const [isNoteSubmitted, setIsNoteSubmitted] = useState(false);
+  const [practiceEvidence, setPracticeEvidence] = useState<Omit<SimulationEvidence, 'acknowledgment'>>({
+    dtt: false,
+    taskAnalysis: false,
+    measurement: false,
+    interval: false,
+    abc: false,
+  });
+
+  const markPracticeEvidence = (
+    key: keyof Omit<SimulationEvidence, 'acknowledgment'>
+  ) => {
+    setPracticeEvidence((current) =>
+      current[key] ? current : { ...current, [key]: true }
+    );
+  };
+
+  const handleProcedureTabKeyDown = (
+    event: React.KeyboardEvent<HTMLButtonElement>,
+    currentTab: ProcedureTab
+  ) => {
+    const currentIndex = PROCEDURE_TABS.indexOf(currentTab);
+    let nextIndex: number | null = null;
+
+    if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % PROCEDURE_TABS.length;
+    if (event.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + PROCEDURE_TABS.length) % PROCEDURE_TABS.length;
+    if (event.key === 'Home') nextIndex = 0;
+    if (event.key === 'End') nextIndex = PROCEDURE_TABS.length - 1;
+    if (nextIndex === null) return;
+
+    event.preventDefault();
+    const nextTab = PROCEDURE_TABS[nextIndex];
+    setActiveProcedureTab(nextTab);
+    document.getElementById(`simulation-procedure-tab-${nextTab}`)?.focus();
+  };
 
   // Ticking Session Clock Effect
   useEffect(() => {
-    let interval: any = null;
-    if (isSessionTimerRunning) {
-      interval = setInterval(() => {
-        setSessionSeconds(prev => prev + 1);
-      }, 1000);
-    }
-    return () => clearInterval(interval);
+    if (!isSessionTimerRunning) return;
+    const interval = window.setInterval(() => {
+      setSessionSeconds(prev => prev + 1);
+    }, 1000);
+    return () => window.clearInterval(interval);
   }, [isSessionTimerRunning]);
 
   // Ticking Behavior Duration Stopwatch Effect
   useEffect(() => {
-    let interval: any = null;
-    if (isBehaviorTimerRunning) {
-      interval = setInterval(() => {
-        setBehaviorTimerSeconds(prev => prev + 1);
-      }, 1000);
-    }
-    return () => clearInterval(interval);
+    if (!isBehaviorTimerRunning) return;
+    const interval = window.setInterval(() => {
+      setBehaviorTimerSeconds(prev => prev + 1);
+    }, 1000);
+    return () => window.clearInterval(interval);
   }, [isBehaviorTimerRunning]);
 
   // Ticking Latency Stopwatch Effect
   useEffect(() => {
-    let interval: any = null;
-    if (isLatencyTimerRunning) {
-      interval = setInterval(() => {
-        setLatencySeconds(prev => prev + 1);
-      }, 1000);
-    }
-    return () => clearInterval(interval);
+    if (!isLatencyTimerRunning) return;
+    const interval = window.setInterval(() => {
+      setLatencySeconds(prev => prev + 1);
+    }, 1000);
+    return () => window.clearInterval(interval);
   }, [isLatencyTimerRunning]);
 
   // Inter-Trial Countdown Effect
   useEffect(() => {
-    let interval: any = null;
-    if (itiCountdown > 0) {
-      interval = setInterval(() => {
-        setItiCountdown(prev => prev - 1);
-      }, 1000);
-    }
-    return () => clearInterval(interval);
+    if (itiCountdown <= 0) return;
+    const interval = window.setInterval(() => {
+      setItiCountdown(prev => prev - 1);
+    }, 1000);
+    return () => window.clearInterval(interval);
   }, [itiCountdown]);
+
+  useEffect(() => {
+    if (!showBipDrawer) return;
+    bipDrawerRef.current?.focus();
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setShowBipDrawer(false);
+    };
+    document.addEventListener('keydown', closeOnEscape);
+    return () => document.removeEventListener('keydown', closeOnEscape);
+  }, [showBipDrawer]);
 
   // Format Seconds to HH:MM:SS
   const formatSeconds = (sec: number) => {
@@ -219,13 +258,15 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
     };
 
     setTrials(prev => [...prev, newTrial]);
+    markPracticeEvidence('dtt');
     setItiCountdown(3);
-    toast.success(`Logged trial: ${response} ${response === 'PROMPTED' ? `(${activePromptLevel})` : ''}`);
+    toast.success(`Practice trial logged: ${response} ${response === 'PROMPTED' ? `(${activePromptLevel})` : ''}`);
   };
 
   const handleUpdateTaStep = (stepId: string, status: 'INDEPENDENT' | 'PROMPTED') => {
     setTaSteps(prev => prev.map(s => s.id === stepId ? { ...s, status } : s));
-    toast.success(`Updated Task Analysis Step: ${status}`);
+    markPracticeEvidence('taskAnalysis');
+    toast.success(`Practice task-analysis step updated: ${status}`);
   };
 
   const handleToggleLatencyTimer = () => {
@@ -235,7 +276,8 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
       toast.info('⏱️ Latency Stopwatch started (Instruction given)!');
     } else {
       setIsLatencyTimerRunning(false);
-      toast.success(`⏱️ Latency recorded: ${latencySeconds}s to initiation!`);
+      markPracticeEvidence('measurement');
+      toast.success(`Practice latency recorded: ${latencySeconds}s to initiation.`);
     }
   };
 
@@ -262,88 +304,114 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
     };
 
     setAbcEvents(prev => [...prev, newAbc]);
+    markPracticeEvidence('abc');
     setBehaviorTimerSeconds(0);
     setIsBehaviorTimerRunning(false);
-    toast.success(`Logged ABC Behavior Incident: ${behavior} (${duration}s duration)`);
+    toast.success(`Practice ABC event logged: ${behavior} (${duration}s duration).`);
   };
 
-  const handleSubmitBillingClaimNote = async (e: React.FormEvent) => {
+  const handleFinishPracticeAttempt = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (mode !== 'SIMULATION') {
+      toast.error('No live session is bound to this training collector.');
+      return;
+    }
+
     if (!parentSignature.trim()) {
-      toast.error('Mandatory Caregiver / Parent E-Signature required for insurance claim payout!');
+      toast.error('Type the fictional caregiver name to acknowledge this practice note.');
+      return;
+    }
+
+    if (!simulationReadiness.ready) {
+      toast.error(`Complete all practice checks first (${simulationReadiness.completed}/${simulationReadiness.total}).`);
       return;
     }
 
     setIsNoteSubmitted(true);
-
-    if (mode === 'LIVE_SESSION') {
-      try {
-        const { submitHrmSessionEmrNote } = await import('@/app/actions/sessionEmrActions');
-        const res = await submitHrmSessionEmrNote({
-          clientName: 'Leo Miller',
-          cptCode,
-          locationCode,
-          sessionSeconds,
-          billableUnits,
-          trials: trials.map(t => ({
-            targetGoal: t.targetGoal,
-            response: t.response,
-            promptLevel: t.promptLevel,
-            timestamp: t.timestamp
-          })),
-          taSteps: taSteps.map(s => ({
-            instruction: s.instruction,
-            status: s.status === 'PENDING' ? 'PROMPTED' : s.status
-          })),
-          abcEvents: abcEvents.map(a => ({
-            antecedent: a.antecedent,
-            behavior: a.behavior,
-            consequence: a.consequence,
-            durationSeconds: a.durationSeconds
-          })),
-          subjectiveNote,
-          assessmentNote,
-          planNote,
-          rbtSignature,
-          parentSignature
-        });
-
-        if (res.success) {
-          toast.success(`✓ ${res.message}`);
-        } else {
-          toast.error(res.error || 'Failed to sync session note to CRM.');
-        }
-      } catch (err: any) {
-        console.warn('Session EMR Note saved to state (Simulated fallback):', err?.message);
-        toast.success('CMS-1500 / 837P Insurance Billing Claim Generated & Synced to CRM!');
-      }
-    } else {
-      toast.success('CMS-1500 / 837P Insurance Billing Claim Generated & Note Signed!');
-    }
-
-    if (mode === 'SIMULATION' && onSimulationComplete) {
-      onSimulationComplete();
+    toast.info('Practice note validated locally. No clinical note, EVV record, or claim was created.');
+    try {
+      await onSimulationComplete?.();
+    } catch {
+      setIsNoteSubmitted(false);
+      toast.error('The practice attempt could not be recorded. No live records were changed.');
     }
   };
 
-  // Compute accuracy
+  // Descriptive practice metrics only — these are not competency or mastery scores.
   const totalGoalTrials = trials.filter(t => t.targetGoal === selectedGoal);
-  const correctGoalTrials = totalGoalTrials.filter(t => t.response === 'CORRECT' || t.response === 'PROMPTED').length;
-  const accuracyPercent = totalGoalTrials.length > 0 ? Math.round((correctGoalTrials / totalGoalTrials.length) * 100) : 0;
+  const successfulGoalTrials = totalGoalTrials.filter(t => t.response === 'CORRECT' || t.response === 'PROMPTED').length;
+  const responseRatePercent = totalGoalTrials.length > 0 ? Math.round((successfulGoalTrials / totalGoalTrials.length) * 100) : 0;
+  const scoredTaSteps = taSteps.filter((step) => step.status !== 'PENDING');
+  const independentTaSteps = scoredTaSteps.filter((step) => step.status === 'INDEPENDENT').length;
+  const taIndependentPercent = scoredTaSteps.length > 0
+    ? Math.round((independentTaSteps / scoredTaSteps.length) * 100)
+    : 0;
 
-  // 5-Point Insurance Claim Audit Shield Checks
-  const isEvv8MinValid = sessionMinutes >= 8;
-  const isPaBalanceValid = true; // PA Active (80/120 units)
-  const isTrialThresholdMet = trials.length >= 5;
-  const isParentSigValid = parentSignature.trim().length > 0;
-  const isModifierValid = true; // CPT 97153 HM modifier verified
+  const simulationReadiness = getSimulationReadiness({
+    ...practiceEvidence,
+    acknowledgment: parentSignature.trim().length >= 2,
+  });
 
-  const auditPassedCount = [isEvv8MinValid, isPaBalanceValid, isTrialThresholdMet, isParentSigValid, isModifierValid].filter(Boolean).length;
-  const is100PercentAuditProof = auditPassedCount === 5;
+  // LIVE: never show Leo Miller / fake EVV — Session Studio owns real sessions
+  if (mode === 'LIVE_SESSION') {
+    return (
+      <div className="relative overflow-hidden rounded-3xl border-2 border-orange-200 bg-gradient-to-br from-white via-orange-50/70 to-amber-50/50 p-8 sm:p-12 text-center shadow-xl">
+        <div className="pointer-events-none absolute -right-12 -top-12 h-44 w-44 rounded-full bg-[#F97316]/15 blur-3xl" />
+        <div className="relative mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl border-2 border-orange-200 bg-white text-[#F97316] shadow-md">
+          <ShieldCheck className="h-8 w-8" />
+        </div>
+        <h2 className="font-heading text-2xl font-black tracking-tight text-slate-900">
+          No live session bound here
+        </h2>
+        <p className="mx-auto mt-3 max-w-lg text-xs font-semibold leading-relaxed text-slate-600">
+          This legacy collector no longer invents a demo client for LIVE mode. Start EVV from{' '}
+          <strong>My Schedule</strong> / Session Studio when Case Coord assigns a CRM session, or use the
+          practice simulation for Leo Miller training data.
+        </p>
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+          <a
+            href="/rbt/schedule"
+            className="inline-flex cursor-pointer items-center gap-2 rounded-2xl bg-[#F97316] px-5 py-3 text-xs font-black text-white shadow-lg transition-all hover:bg-orange-600"
+          >
+            Open My Schedule →
+          </a>
+          <a
+            href="/rbt/simulation"
+            className="inline-flex cursor-pointer items-center gap-2 rounded-2xl border-2 border-orange-200 bg-white px-5 py-3 text-xs font-black text-slate-800 shadow-sm transition-all hover:bg-orange-50"
+          >
+            Practice Simulation
+          </a>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6 text-slate-900 select-none relative">
-      {/* 🌟 1. REAL TICKING SESSION TIMER & EVV HEADER */}
+    <div className="space-y-6 text-slate-900 relative">
+      <div
+        className="relative overflow-hidden rounded-3xl border border-white/10 bg-slate-950 p-5 text-white shadow-2xl"
+        role="note"
+        aria-label="Simulation safety boundary"
+      >
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.16),_transparent_48%)]" />
+        <div className="relative flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+          <div>
+            <span className="font-mono text-[10px] font-black uppercase tracking-[0.18em] text-emerald-300">
+              Simulation sandbox
+            </span>
+            <h2 className="mt-1 font-heading text-lg font-black">
+              Fictional training data only
+            </h2>
+            <p className="mt-1 max-w-2xl text-xs font-semibold leading-relaxed text-slate-300">
+              Controls on this screen update only this in-memory practice attempt. They do not write a client chart, EVV visit, session note, authorization, billing claim, or payroll record.
+            </p>
+          </div>
+          <span className="shrink-0 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1.5 font-mono text-[10px] font-black uppercase text-emerald-300">
+            No live writes
+          </span>
+        </div>
+      </div>
+
       <div className="bg-white border-2 border-orange-200 rounded-3xl p-6 shadow-xl space-y-4">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-orange-100 pb-4">
           <div className="flex items-center gap-3">
@@ -353,24 +421,23 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-xl font-black text-slate-900 font-heading">
-                  {mode === 'SIMULATION' ? 'Practice Session Data Collector' : 'Live RBT Session Data Collector'}
+                  Practice Session Data Collector
                 </h2>
-                <span className="bg-emerald-100 text-emerald-800 border border-emerald-300 text-[10px] font-black px-2.5 py-0.5 rounded-full flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> EVV GPS VERIFIED
+                <span className="bg-sky-100 text-sky-800 border border-sky-300 text-[10px] font-black px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                  SAMPLE EVV · NOT VERIFIED
                 </span>
               </div>
               <p className="text-xs text-slate-600 font-semibold mt-0.5">
-                Client: <strong>Leo Miller (ID: #CLM-9042)</strong> · BCBA: <strong>Dr. Sarah Jenkins, BCBA</strong>
+                Fictional learner: <strong>Leo Miller (sample ID #SIM-9042)</strong> · Fictional supervisor: <strong>Dr. Sarah Jenkins</strong>
               </p>
             </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            {/* REAL TICKING EVV SESSION TIMER WITH EXPLICIT START & STOP BUTTONS */}
             <div className="bg-orange-50/90 border-2 border-[#F97316] p-2.5 rounded-2xl text-center shadow-md flex items-center gap-3">
               <Clock className="w-5 h-5 text-[#F97316] animate-pulse shrink-0" />
               <div>
-                <span className="text-[9px] font-mono font-black text-[#F97316] uppercase block">Active EVV Clock</span>
+                <span className="text-[9px] font-mono font-black text-[#F97316] uppercase block">Practice timer</span>
                 <span className="text-sm font-mono font-black text-slate-900">{formatSeconds(sessionSeconds)}</span>
               </div>
 
@@ -379,8 +446,9 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
                   type="button"
                   onClick={() => {
                     setIsSessionTimerRunning(true);
-                    toast.success('▶️ EVV Session Clock Started!');
+                    toast.info('Practice timer started. No EVV visit was opened.');
                   }}
+                  aria-pressed={isSessionTimerRunning}
                   data-scribe-id="btn-evv-timer-start"
                   className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase transition-all cursor-pointer ${
                     isSessionTimerRunning ? 'bg-emerald-600 text-white shadow-sm' : 'bg-slate-200 text-slate-700 hover:bg-emerald-600 hover:text-white'
@@ -392,8 +460,9 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
                   type="button"
                   onClick={() => {
                     setIsSessionTimerRunning(false);
-                    toast.info('⏹️ EVV Session Clock Paused/Stopped.');
+                    toast.info('Practice timer paused.');
                   }}
+                  aria-pressed={!isSessionTimerRunning}
                   className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase transition-all cursor-pointer ${
                     !isSessionTimerRunning ? 'bg-rose-600 text-white shadow-sm' : 'bg-slate-200 text-slate-700 hover:bg-rose-600 hover:text-white'
                   }`}
@@ -404,20 +473,20 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
             </div>
 
             <div className="bg-[#F0F7FF] border-2 border-[#BFDBFE] px-4 py-2 rounded-2xl text-center">
-              <span className="text-[10px] font-mono font-bold text-slate-500 uppercase block">Calculated CPT 97153-HM Units (8-Min Rule)</span>
-              <span className="text-sm font-black text-[#F97316]">{billableUnits}.0 Units ({sessionMinutes} mins)</span>
+              <span className="text-[10px] font-mono font-bold text-slate-500 uppercase block">Sample 97153-HM unit estimate</span>
+              <span className="text-sm font-black text-[#F97316]">{billableUnits}.0 practice units ({sessionMinutes} mins)</span>
             </div>
 
             <button
               type="button"
               onClick={() => {
-                toast.success('🚨 Supervisory Alert Sent to Dr. Sarah Jenkins, BCBA! She has been notified to join your live session feed.');
+                toast.info('Supervisor signal practiced. No person was contacted.');
               }}
               data-scribe-id="btn-signal-bcba"
               className="bg-rose-50 hover:bg-rose-100 text-rose-800 border-2 border-rose-200 font-extrabold text-xs px-3.5 py-2.5 rounded-2xl flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
             >
               <AlertTriangle className="w-4 h-4 text-rose-600 animate-pulse" />
-              <span>🚨 Signal BCBA Supervisor</span>
+              <span>Practice supervisor signal</span>
             </button>
 
             <button
@@ -432,16 +501,16 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
           </div>
         </div>
 
-        {/* CPT & LOCATION AUDIT STRIP */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs font-semibold">
           <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 flex justify-between items-center">
-            <span className="text-slate-500">Service CPT Code:</span>
+            <span className="text-slate-500">Sample CPT code:</span>
             <strong className="text-slate-900">{cptCode}</strong>
           </div>
 
           <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 flex justify-between items-center">
-            <span className="text-slate-500">Location Code:</span>
+            <label htmlFor="simulation-location-code" className="text-slate-500">Sample location:</label>
             <select
+              id="simulation-location-code"
               value={locationCode}
               onChange={(e) => setLocationCode(e.target.value)}
               className="bg-transparent font-bold text-slate-900 outline-none cursor-pointer"
@@ -453,18 +522,28 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
           </div>
 
           <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 flex justify-between items-center">
-            <span className="text-slate-500">Auth Status:</span>
-            <strong className="text-emerald-700 font-black">✓ PA Active (80 / 120 Units)</strong>
+            <span className="text-slate-500">Authorization example:</span>
+            <strong className="text-sky-700 font-black">Sample only · no balance checked</strong>
           </div>
         </div>
       </div>
 
       {/* 🌟 2. FULL 5-PROCEDURE ABA DATA COLLECTION SUITE */}
       <div className="bg-white border-2 border-orange-200 rounded-3xl p-6 shadow-xl space-y-6">
-        {/* PROCEDURE SELECTOR TABS */}
-        <div className="flex flex-wrap border-b border-orange-100 pb-3 gap-2">
+        <div
+          className="flex flex-wrap border-b border-orange-100 pb-3 gap-2"
+          role="tablist"
+          aria-label="Practice data collection procedures"
+        >
           <button
+            id="simulation-procedure-tab-DTT"
+            type="button"
+            role="tab"
+            aria-selected={activeProcedureTab === 'DTT'}
+            aria-controls="simulation-procedure-panel-DTT"
+            tabIndex={activeProcedureTab === 'DTT' ? 0 : -1}
             onClick={() => setActiveProcedureTab('DTT')}
+            onKeyDown={(event) => handleProcedureTabKeyDown(event, 'DTT')}
             data-scribe-id="tab-proc-dtt"
             className={`px-4 py-2 rounded-2xl font-heading font-black text-xs transition-all cursor-pointer flex items-center gap-1.5 ${
               activeProcedureTab === 'DTT'
@@ -477,7 +556,14 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
           </button>
 
           <button
+            id="simulation-procedure-tab-TASK_ANALYSIS"
+            type="button"
+            role="tab"
+            aria-selected={activeProcedureTab === 'TASK_ANALYSIS'}
+            aria-controls="simulation-procedure-panel-TASK_ANALYSIS"
+            tabIndex={activeProcedureTab === 'TASK_ANALYSIS' ? 0 : -1}
             onClick={() => setActiveProcedureTab('TASK_ANALYSIS')}
+            onKeyDown={(event) => handleProcedureTabKeyDown(event, 'TASK_ANALYSIS')}
             data-scribe-id="tab-proc-ta"
             className={`px-4 py-2 rounded-2xl font-heading font-black text-xs transition-all cursor-pointer flex items-center gap-1.5 ${
               activeProcedureTab === 'TASK_ANALYSIS'
@@ -490,7 +576,14 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
           </button>
 
           <button
+            id="simulation-procedure-tab-FREQUENCY_LATENCY"
+            type="button"
+            role="tab"
+            aria-selected={activeProcedureTab === 'FREQUENCY_LATENCY'}
+            aria-controls="simulation-procedure-panel-FREQUENCY_LATENCY"
+            tabIndex={activeProcedureTab === 'FREQUENCY_LATENCY' ? 0 : -1}
             onClick={() => setActiveProcedureTab('FREQUENCY_LATENCY')}
+            onKeyDown={(event) => handleProcedureTabKeyDown(event, 'FREQUENCY_LATENCY')}
             data-scribe-id="tab-proc-freq"
             className={`px-4 py-2 rounded-2xl font-heading font-black text-xs transition-all cursor-pointer flex items-center gap-1.5 ${
               activeProcedureTab === 'FREQUENCY_LATENCY'
@@ -503,7 +596,14 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
           </button>
 
           <button
+            id="simulation-procedure-tab-INTERVAL"
+            type="button"
+            role="tab"
+            aria-selected={activeProcedureTab === 'INTERVAL'}
+            aria-controls="simulation-procedure-panel-INTERVAL"
+            tabIndex={activeProcedureTab === 'INTERVAL' ? 0 : -1}
             onClick={() => setActiveProcedureTab('INTERVAL')}
+            onKeyDown={(event) => handleProcedureTabKeyDown(event, 'INTERVAL')}
             data-scribe-id="tab-proc-interval"
             className={`px-4 py-2 rounded-2xl font-heading font-black text-xs transition-all cursor-pointer flex items-center gap-1.5 ${
               activeProcedureTab === 'INTERVAL'
@@ -516,7 +616,14 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
           </button>
 
           <button
+            id="simulation-procedure-tab-ABC"
+            type="button"
+            role="tab"
+            aria-selected={activeProcedureTab === 'ABC'}
+            aria-controls="simulation-procedure-panel-ABC"
+            tabIndex={activeProcedureTab === 'ABC' ? 0 : -1}
             onClick={() => setActiveProcedureTab('ABC')}
+            onKeyDown={(event) => handleProcedureTabKeyDown(event, 'ABC')}
             data-scribe-id="tab-proc-abc"
             className={`px-4 py-2 rounded-2xl font-heading font-black text-xs transition-all cursor-pointer flex items-center gap-1.5 ${
               activeProcedureTab === 'ABC'
@@ -529,14 +636,20 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
           </button>
         </div>
 
-        {/* PROCEDURE 1: DTT SKILL ACQUISITION */}
         {activeProcedureTab === 'DTT' && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div
+            id="simulation-procedure-panel-DTT"
+            role="tabpanel"
+            aria-labelledby="simulation-procedure-tab-DTT"
+            className="grid grid-cols-1 lg:grid-cols-3 gap-6"
+          >
             <div className="lg:col-span-2 space-y-5">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
                 <div>
                   <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider block">Active Skill Target:</span>
                   <select
+                    id="simulation-goal-select"
+                    aria-label="Fictional practice skill target"
                     value={selectedGoal}
                     onChange={(e) => setSelectedGoal(e.target.value)}
                     data-scribe-id="dtt-goal-select"
@@ -556,8 +669,8 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
                   )}
 
                   <div data-scribe-id="dtt-mastery-box" className="bg-emerald-50 border-2 border-emerald-200 px-3.5 py-1.5 rounded-2xl text-right shrink-0">
-                    <span className="text-[10px] font-mono font-bold text-emerald-700 block">Target Mastery</span>
-                    <span className="text-xs font-black text-emerald-800">{accuracyPercent}% ({correctGoalTrials}/{totalGoalTrials.length} Trials)</span>
+                    <span className="text-[10px] font-mono font-bold text-emerald-700 block">Practice response rate</span>
+                    <span className="text-xs font-black text-emerald-800">{responseRatePercent}% ({successfulGoalTrials}/{totalGoalTrials.length} Trials)</span>
                   </div>
                 </div>
               </div>
@@ -571,6 +684,7 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
                       key={level}
                       type="button"
                       onClick={() => setActivePromptLevel(level)}
+                      aria-pressed={activePromptLevel === level}
                       data-scribe-id={level === 'VERBAL' ? 'prompt-level-verbal' : undefined}
                       className={`p-2.5 rounded-xl border-2 transition-all cursor-pointer text-[11px] ${
                         activePromptLevel === level
@@ -643,14 +757,19 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
 
         {/* PROCEDURE 2: TASK ANALYSIS STEP-CHAINING */}
         {activeProcedureTab === 'TASK_ANALYSIS' && (
-          <div className="space-y-4">
+          <div
+            id="simulation-procedure-panel-TASK_ANALYSIS"
+            role="tabpanel"
+            aria-labelledby="simulation-procedure-tab-TASK_ANALYSIS"
+            className="space-y-4"
+          >
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
                 <h4 className="text-sm font-black text-slate-900 font-heading">Handwashing 7-Step Task Analysis Chain</h4>
                 <p className="text-xs text-slate-500 font-semibold">Score each step as Independent (+) or Prompted (+P) during the handwashing routine.</p>
               </div>
               <span className="bg-blue-100 text-blue-800 font-mono text-[10px] font-black px-2.5 py-0.5 rounded-full">
-                CHAIN MASTERY: 85%
+                PRACTICE INDEPENDENCE: {taIndependentPercent}%
               </span>
             </div>
 
@@ -694,15 +813,23 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
 
         {/* PROCEDURE 3: FREQUENCY & LATENCY TIMERS */}
         {activeProcedureTab === 'FREQUENCY_LATENCY' && (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div
+            id="simulation-procedure-panel-FREQUENCY_LATENCY"
+            role="tabpanel"
+            aria-labelledby="simulation-procedure-tab-FREQUENCY_LATENCY"
+            className="grid grid-cols-1 sm:grid-cols-3 gap-4"
+          >
             <div className="p-5 bg-slate-50 border-2 border-slate-200 rounded-3xl space-y-3 text-center">
               <span className="text-xs font-mono font-bold text-slate-500 uppercase block">Spontaneous Vocal Mands</span>
               <span className="text-4xl font-black font-mono text-[#F97316]">{mandCount}</span>
               <div className="flex justify-center gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setMandCount(prev => Math.max(0, prev - 1))}
-                  className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 font-black rounded-xl text-xs"
+                  onClick={() => {
+                    setMandCount(prev => Math.max(0, prev - 1));
+                    markPracticeEvidence('measurement');
+                  }}
+                  className="cursor-pointer px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 font-black rounded-xl text-xs"
                 >
                   - 1
                 </button>
@@ -710,9 +837,10 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
                   type="button"
                   onClick={() => {
                     setMandCount(prev => prev + 1);
-                    toast.success('+1 Spontaneous Mand Logged!');
+                    markPracticeEvidence('measurement');
+                    toast.success('+1 practice spontaneous mand logged.');
                   }}
-                  className="px-6 py-2 bg-[#F97316] hover:bg-orange-600 text-white font-black rounded-xl text-xs shadow-md"
+                  className="cursor-pointer px-6 py-2 bg-[#F97316] hover:bg-orange-600 text-white font-black rounded-xl text-xs shadow-md"
                 >
                   + 1 Mand
                 </button>
@@ -725,8 +853,11 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
               <div className="flex justify-center gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setVocalInitCount(prev => Math.max(0, prev - 1))}
-                  className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 font-black rounded-xl text-xs"
+                  onClick={() => {
+                    setVocalInitCount(prev => Math.max(0, prev - 1));
+                    markPracticeEvidence('measurement');
+                  }}
+                  className="cursor-pointer px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 font-black rounded-xl text-xs"
                 >
                   - 1
                 </button>
@@ -734,9 +865,10 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
                   type="button"
                   onClick={() => {
                     setVocalInitCount(prev => prev + 1);
-                    toast.success('+1 Peer Vocalization Logged!');
+                    markPracticeEvidence('measurement');
+                    toast.success('+1 practice peer vocalization logged.');
                   }}
-                  className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-xl text-xs shadow-md"
+                  className="cursor-pointer px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-xl text-xs shadow-md"
                 >
                   + 1 Vocalization
                 </button>
@@ -751,6 +883,7 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
                 <button
                   type="button"
                   onClick={handleToggleLatencyTimer}
+                  aria-pressed={isLatencyTimerRunning}
                   className={`w-full py-2.5 rounded-xl font-black text-xs transition-all cursor-pointer ${
                     isLatencyTimerRunning
                       ? 'bg-purple-700 text-white animate-pulse'
@@ -766,7 +899,12 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
 
         {/* PROCEDURE 4: DISCONTINUOUS INTERVAL RECORDING (PIR/WIR/MTS) */}
         {activeProcedureTab === 'INTERVAL' && (
-          <div className="space-y-4">
+          <div
+            id="simulation-procedure-panel-INTERVAL"
+            role="tabpanel"
+            aria-labelledby="simulation-procedure-tab-INTERVAL"
+            className="space-y-4"
+          >
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
               <div>
                 <h4 className="text-sm font-black text-slate-900 font-heading">Discontinuous Interval Recording Grid</h4>
@@ -779,7 +917,8 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
                     key={mode}
                     type="button"
                     onClick={() => setIntervalMode(mode)}
-                    className={`px-3 py-1 rounded-xl text-[10px] font-mono font-black ${
+                    aria-pressed={intervalMode === mode}
+                    className={`cursor-pointer px-3 py-1 rounded-xl text-[10px] font-mono font-black ${
                       intervalMode === mode ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-700'
                     }`}
                   >
@@ -796,8 +935,10 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
                   type="button"
                   onClick={() => {
                     setIntervalGrid(prev => prev.map(x => x.id === item.id ? { ...x, active: !x.active } : x));
-                    toast.info(`Interval #${item.id} toggled ${!item.active ? 'PRESENT (+)' : 'ABSENT (-)'}`);
+                    markPracticeEvidence('interval');
+                    toast.info(`Practice interval #${item.id}: ${!item.active ? 'PRESENT (+)' : 'ABSENT (-)'}.`);
                   }}
+                  aria-pressed={item.active}
                   className={`p-4 rounded-2xl border-2 text-center transition-all cursor-pointer ${
                     item.active
                       ? 'bg-purple-600 border-purple-700 text-white shadow-md'
@@ -814,7 +955,12 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
 
         {/* PROCEDURE 5: ABC MALADAPTIVE BEHAVIOR LOGGER */}
         {activeProcedureTab === 'ABC' && (
-          <div className="space-y-4">
+          <div
+            id="simulation-procedure-panel-ABC"
+            role="tabpanel"
+            aria-labelledby="simulation-procedure-tab-ABC"
+            className="space-y-4"
+          >
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
               <h3 className="text-sm font-black text-slate-900 font-heading flex items-center gap-2">
                 <Flame className="w-5 h-5 text-rose-500" /> ABC Incident Logger &amp; Incident Stopwatch
@@ -824,6 +970,7 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
                 <button
                   type="button"
                   onClick={handleToggleBehaviorTimer}
+                  aria-pressed={isBehaviorTimerRunning}
                   className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer ${
                     isBehaviorTimerRunning
                       ? 'bg-rose-600 text-white animate-pulse'
@@ -839,8 +986,9 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-800 block">Antecedent (A)</label>
+                <label htmlFor="simulation-abc-antecedent" className="text-xs font-bold text-slate-800 block">Antecedent (A)</label>
                 <select
+                  id="simulation-abc-antecedent"
                   value={antecedent}
                   onChange={(e) => setAntecedent(e.target.value)}
                   className="w-full bg-[#F0F7FF] border-2 border-[#BFDBFE] rounded-2xl p-3 text-xs text-slate-900 font-bold outline-none focus:border-[#F97316]"
@@ -853,8 +1001,9 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-800 block">Behavior (B)</label>
+                <label htmlFor="simulation-abc-behavior" className="text-xs font-bold text-slate-800 block">Behavior (B)</label>
                 <select
+                  id="simulation-abc-behavior"
                   value={behavior}
                   onChange={(e) => setBehavior(e.target.value)}
                   className="w-full bg-[#F0F7FF] border-2 border-[#BFDBFE] rounded-2xl p-3 text-xs text-slate-900 font-bold outline-none focus:border-[#F97316]"
@@ -867,8 +1016,9 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-800 block">Consequence (C)</label>
+                <label htmlFor="simulation-abc-consequence" className="text-xs font-bold text-slate-800 block">Consequence (C)</label>
                 <select
+                  id="simulation-abc-consequence"
                   value={consequence}
                   onChange={(e) => setConsequence(e.target.value)}
                   className="w-full bg-[#F0F7FF] border-2 border-[#BFDBFE] rounded-2xl p-3 text-xs text-slate-900 font-bold outline-none focus:border-[#F97316]"
@@ -895,67 +1045,69 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
         )}
       </div>
 
-      {/* 🌟 3. LIVE 5-POINT PRE-SUBMISSION INSURANCE CLAIM AUDIT SHIELD */}
       <div className="bg-white border-2 border-orange-200 rounded-3xl p-6 shadow-xl space-y-4">
         <div className="flex items-center justify-between border-b border-orange-100 pb-3">
           <div className="flex items-center gap-2">
             <ShieldCheck className="w-6 h-6 text-emerald-600" />
             <h3 className="text-base font-black text-slate-900 font-heading">
-              5-Point Pre-Submission Insurance Claim Audit Shield
+              Training completion checklist
             </h3>
           </div>
 
           <span className={`text-xs font-mono font-black px-3.5 py-1 rounded-full border ${
-            is100PercentAuditProof
+            simulationReadiness.ready
               ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
               : 'bg-amber-100 text-amber-900 border-amber-300'
           }`}>
-            {is100PercentAuditProof ? '✓ 100% AUDIT-PROOF SHIELD PASSED' : `⚠️ AUDIT CHECK: ${auditPassedCount}/5 PASSED`}
+            {simulationReadiness.ready
+              ? '6/6 PRACTICE CHECKS COMPLETE'
+              : `${simulationReadiness.completed}/${simulationReadiness.total} PRACTICE CHECKS`}
           </span>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-5 gap-3 text-xs font-semibold">
-          <div className={`p-3 rounded-2xl border ${isEvv8MinValid ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-rose-50 border-rose-200 text-rose-900'}`}>
-            <span className="block text-[10px] font-mono font-bold">1. EVV 8-Min Rule</span>
-            <strong>{isEvv8MinValid ? `✓ Verified (${billableUnits} Units)` : '⚠️ Need 8+ Mins'}</strong>
-          </div>
+        <p className="text-xs font-semibold leading-relaxed text-slate-600">
+          Seeded examples do not count. Use each practice tool at least once, then type the fictional caregiver acknowledgment below.
+        </p>
 
-          <div className={`p-3 rounded-2xl border ${isPaBalanceValid ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-rose-50 border-rose-200 text-rose-900'}`}>
-            <span className="block text-[10px] font-mono font-bold">2. PA Unit Balance</span>
-            <strong>✓ 80 Units Avail</strong>
-          </div>
-
-          <div className={`p-3 rounded-2xl border ${isTrialThresholdMet ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-amber-50 border-amber-200 text-amber-900'}`}>
-            <span className="block text-[10px] font-mono font-bold">3. Trial Threshold</span>
-            <strong>{trials.length} / 5 Logged</strong>
-          </div>
-
-          <div className={`p-3 rounded-2xl border ${isParentSigValid ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-rose-50 border-rose-200 text-rose-900'}`}>
-            <span className="block text-[10px] font-mono font-bold">4. Parent Signature</span>
-            <strong>{isParentSigValid ? '✓ E-Signed' : '⚠️ Required'}</strong>
-          </div>
-
-          <div className={`p-3 rounded-2xl border ${isModifierValid ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-rose-50 border-rose-200 text-rose-900'}`}>
-            <span className="block text-[10px] font-mono font-bold">5. CPT Modifier</span>
-            <strong>✓ 97153-HM Valid</strong>
-          </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-xs font-semibold">
+          {[
+            { label: '1. Log a new DTT trial', done: practiceEvidence.dtt },
+            { label: '2. Score a task-analysis step', done: practiceEvidence.taskAnalysis },
+            { label: '3. Use frequency or latency', done: practiceEvidence.measurement },
+            { label: '4. Toggle an interval', done: practiceEvidence.interval },
+            { label: '5. Log a practice ABC event', done: practiceEvidence.abc },
+            { label: '6. Type practice acknowledgment', done: parentSignature.trim().length >= 2 },
+          ].map((item) => (
+            <div
+              key={item.label}
+              className={`rounded-2xl border p-3 ${
+                item.done
+                  ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+                  : 'border-slate-200 bg-slate-50 text-slate-600'
+              }`}
+            >
+              <span className="block font-mono text-[10px] font-bold">
+                {item.done ? '✓ COMPLETE' : '○ NOT YET'}
+              </span>
+              <strong>{item.label}</strong>
+            </div>
+          ))}
         </div>
       </div>
 
-      {/* 🌟 4. 1-TAP AI SOAP NOTE ASSISTANT WITH CLINICAL QUICK-CHIPS */}
-      <form onSubmit={handleSubmitBillingClaimNote} className="bg-white border-2 border-orange-200 rounded-3xl p-6 sm:p-8 space-y-6 shadow-xl">
+      <form onSubmit={handleFinishPracticeAttempt} className="bg-white border-2 border-orange-200 rounded-3xl p-6 sm:p-8 space-y-6 shadow-xl">
         <div className="flex items-center justify-between border-b border-orange-100 pb-4">
           <div>
             <h3 className="text-lg font-black text-slate-900 font-heading flex items-center gap-2">
-              <FileText className="w-5 h-5 text-[#F97316]" /> AI-Compiled SOAP Note &amp; Dual E-Signature
+              <FileText className="w-5 h-5 text-[#F97316]" /> Practice SOAP Note Builder
             </h3>
             <p className="text-xs text-slate-600 font-semibold mt-0.5">
-              Tap clinical quick-chips to auto-draft audit-proof SOAP narratives in seconds.
+              Edit the fictional narrative to practice the workflow. Nothing here becomes part of a client chart.
             </p>
           </div>
 
           <span className="bg-blue-100 text-blue-900 border border-blue-300 text-[10px] font-black px-3 py-1 rounded-full uppercase">
-            CMS-1500 Claim Ready
+            Local draft · not a chart note
           </span>
         </div>
 
@@ -963,7 +1115,7 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
         <div className="space-y-4">
           {/* SUBJECTIVE (S) */}
           <div className="space-y-2">
-            <label className="text-xs font-bold text-slate-800 block">S (Subjective) Narrative &amp; Quick-Chips</label>
+            <label htmlFor="simulation-subjective-note" className="text-xs font-bold text-slate-800 block">S (Subjective) Sample Narrative &amp; Quick-Chips</label>
             <div className="flex flex-wrap gap-1.5 text-[11px] font-semibold">
               <button
                 type="button"
@@ -982,6 +1134,7 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
               </button>
             </div>
             <textarea
+              id="simulation-subjective-note"
               value={subjectiveNote}
               onChange={(e) => setSubjectiveNote(e.target.value)}
               rows={2}
@@ -991,16 +1144,16 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
 
           {/* OBJECTIVE (O) AUTO-CALCULATED */}
           <div className="space-y-2">
-            <label className="text-xs font-bold text-slate-800 block">O (Objective) Auto-Calculated Summary</label>
+            <p className="text-xs font-bold text-slate-800">O (Objective) Practice Summary</p>
             <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs text-slate-800 font-semibold space-y-1">
-              <p>Logged <strong>{trials.length} DTT trials</strong> across active goals with <strong>{accuracyPercent}% overall accuracy</strong>.</p>
-              <p>Completed <strong>Handwashing Task Analysis</strong> with 85% chain mastery score. Logged <strong>{mandCount} spontaneous mands</strong> and <strong>{abcEvents.length} ABC behavior incidents</strong>.</p>
+              <p>Practice log contains <strong>{trials.length} DTT trials</strong>; the selected target has a <strong>{responseRatePercent}% prompted-or-independent response rate</strong>.</p>
+              <p>The sample handwashing chain is <strong>{taIndependentPercent}% independent</strong>. Practice counters show <strong>{mandCount} spontaneous mands</strong> and <strong>{abcEvents.length} ABC events</strong>.</p>
             </div>
           </div>
 
           {/* ASSESSMENT (A) */}
           <div className="space-y-2">
-            <label className="text-xs font-bold text-slate-800 block">A (Assessment) Clinical Progress</label>
+            <label htmlFor="simulation-assessment-note" className="text-xs font-bold text-slate-800 block">A (Assessment) Sample Interpretation</label>
             <div className="flex flex-wrap gap-1.5 text-[11px] font-semibold">
               <button
                 type="button"
@@ -1018,6 +1171,7 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
               </button>
             </div>
             <textarea
+              id="simulation-assessment-note"
               value={assessmentNote}
               onChange={(e) => setAssessmentNote(e.target.value)}
               rows={2}
@@ -1027,8 +1181,9 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
 
           {/* PLAN (P) */}
           <div className="space-y-2">
-            <label className="text-xs font-bold text-slate-800 block">P (Plan) Future Session Direction</label>
+            <label htmlFor="simulation-plan-note" className="text-xs font-bold text-slate-800 block">P (Plan) Sample Next Step</label>
             <textarea
+              id="simulation-plan-note"
               value={planNote}
               onChange={(e) => setPlanNote(e.target.value)}
               rows={2}
@@ -1040,8 +1195,9 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
         {/* DUAL E-SIGNATURES */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-2 border-t border-slate-100">
           <div className="space-y-2">
-            <label className="text-xs font-bold text-slate-800 block">RBT Provider Digital Signature</label>
+            <label htmlFor="simulation-rbt-name" className="text-xs font-bold text-slate-800 block">Fictional trainee name</label>
             <input
+              id="simulation-rbt-name"
               type="text"
               value={rbtSignature}
               onChange={(e) => setRbtSignature(e.target.value)}
@@ -1050,16 +1206,17 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
           </div>
 
           <div className="space-y-2">
-            <label className="text-xs font-bold text-slate-800 block flex items-center justify-between">
-              <span>Caregiver / Parent E-Signature *</span>
-              <span className="text-[10px] text-rose-600 font-black font-mono">MANDATORY FOR CLAIM</span>
+            <label htmlFor="simulation-caregiver-name" className="text-xs font-bold text-slate-800 block flex items-center justify-between">
+              <span>Fictional caregiver acknowledgment *</span>
+              <span className="text-[10px] text-orange-600 font-black font-mono">TRAINING INPUT ONLY</span>
             </label>
             <input
+              id="simulation-caregiver-name"
               type="text"
               value={parentSignature}
               onChange={(e) => setParentSignature(e.target.value)}
               data-scribe-id="input-parent-signature"
-              placeholder="Type parent full name (e.g. Elena Miller)..."
+              placeholder="Type the sample name Elena Miller…"
               className="w-full bg-[#F0F7FF] border-2 border-[#BFDBFE] rounded-2xl p-3 text-xs text-slate-900 font-bold outline-none focus:border-[#F97316]"
             />
           </div>
@@ -1068,11 +1225,15 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
         <div className="flex justify-end pt-2">
           <Button
             type="submit"
-            disabled={isNoteSubmitted || !is100PercentAuditProof}
-            data-scribe-id="btn-submit-claim"
-            className="bg-[#F97316] hover:bg-orange-600 text-white font-black text-sm px-8 py-4 rounded-2xl shadow-xl transition-all cursor-pointer disabled:opacity-50"
+            disabled={isNoteSubmitted || !simulationReadiness.ready}
+            data-scribe-id="btn-finish-simulation"
+            className="bg-[#F97316] hover:bg-orange-600 text-white font-black text-sm px-8 py-4 rounded-2xl shadow-xl transition-all cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 disabled:pointer-events-auto"
           >
-            {isNoteSubmitted ? '✓ Session Note & Billing Claim Submitted' : 'Submit Audit-Proof Billing Claim & Note'}
+            {isNoteSubmitted
+              ? 'Saving training progress…'
+              : simulationReadiness.ready
+                ? 'Finish Practice Attempt (No Live Submission)'
+                : `Complete Practice Checks (${simulationReadiness.completed}/${simulationReadiness.total})`}
           </Button>
         </div>
       </form>
@@ -1080,23 +1241,40 @@ export function RbtDataCollectionEngine({ mode = 'LIVE_SESSION', onSimulationCom
       {/* SLIDE-OUT BIP PROTOCOL DRAWER */}
       {showBipDrawer && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex justify-end">
-          <div className="bg-white max-w-md w-full h-full p-6 space-y-6 overflow-y-auto custom-scrollbar shadow-2xl animate-fade-in text-slate-900">
+          <div
+            ref={bipDrawerRef}
+            tabIndex={-1}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="simulation-bip-title"
+            className="bg-white max-w-md w-full h-full p-6 space-y-6 overflow-y-auto custom-scrollbar shadow-2xl animate-fade-in text-slate-900 outline-none"
+          >
             <div className="flex items-center justify-between border-b border-orange-200 pb-4">
-              <h3 className="text-lg font-black text-slate-900 font-heading flex items-center gap-2">
-                <BookOpen className="w-5 h-5 text-amber-600" /> BCBA BIP Protocol Reference Sheet
+              <h3 id="simulation-bip-title" className="text-lg font-black text-slate-900 font-heading flex items-center gap-2">
+                <BookOpen className="w-5 h-5 text-amber-600" /> Fictional BIP Training Example
               </h3>
-              <button onClick={() => setShowBipDrawer(false)} className="text-slate-400 hover:text-slate-700 font-bold text-lg cursor-pointer">✕</button>
+              <button
+                type="button"
+                onClick={() => setShowBipDrawer(false)}
+                aria-label="Close fictional BIP example"
+                className="text-slate-400 hover:text-slate-700 font-bold text-lg cursor-pointer"
+              >
+                ✕
+              </button>
             </div>
 
             <div className="space-y-4 text-xs font-semibold text-slate-800">
+              <p className="rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sky-900">
+                Simulation only. This sample is not a client plan and must never guide live care.
+              </p>
               <div className="p-4 bg-orange-50 rounded-2xl border border-orange-200 space-y-1">
                 <h4 className="font-black text-[#F97316]">Goal 1: Manding for Items</h4>
-                <p>Provide 3-second delay after SD. If no response, prompt with Verbal model ("I want toy"). Fading rule: Fade to Gestural after 3 consecutive independent successes.</p>
+                <p>Provide 3-second delay after SD. If no response, prompt with Verbal model (&quot;I want toy&quot;). Fading rule: Fade to Gestural after 3 consecutive independent successes.</p>
               </div>
 
               <div className="p-4 bg-rose-50 rounded-2xl border border-rose-200 space-y-1">
                 <h4 className="font-black text-rose-700">Elopement De-escalation Protocol</h4>
-                <p>Antecedent strategy: Give 2-minute transition countdown warnings. Consequence: Block path calmly without eye contact, prompt FCT "I need break".</p>
+                <p>Antecedent strategy: Give 2-minute transition countdown warnings. Consequence: Block path calmly without eye contact, prompt FCT &quot;I need break&quot;.</p>
               </div>
             </div>
           </div>

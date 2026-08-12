@@ -2,19 +2,17 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useHrmRole, HrmRole } from '@/lib/useHrmRole';
 import { useTheme } from '@/components/layout/ThemeContext';
+import { ensureActiveApplicantId, getActiveApplicantName } from '@/lib/syncAtsProgress';
 import { 
   LayoutDashboard, 
   Users, 
   FileText, 
-  ClipboardCheck, 
   Activity, 
   Calendar,
   ClipboardList,
-  Timer,
-  BookOpen,
   Video,
   MessageSquare,
   Clock,
@@ -23,16 +21,15 @@ import {
   Briefcase,
   UserCheck,
   CreditCard,
-  Lock,
   ChevronRight,
-  ChevronDown,
-  Sparkles
+  ChevronDown
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 
 interface NavItem {
   name: string;
   href?: string;
-  icon?: any;
+  icon?: LucideIcon;
   isHeader?: boolean;
   isSubItem?: boolean;
   hasSubItems?: boolean;
@@ -42,8 +39,9 @@ export function HrmSidebar() {
   const { role } = useHrmRole();
   const { colorMode } = useTheme();
   const pathname = usePathname();
+  const router = useRouter();
   
-  const [isRbtCleared, setIsRbtCleared] = useState(false);
+  const [isHired, setIsHired] = useState(false);
   const [isSimCompleted, setIsSimCompleted] = useState(false);
   const [isInterviewDone, setIsInterviewDone] = useState(false);
   const [isAvailabilitySet, setIsAvailabilitySet] = useState(false);
@@ -55,56 +53,86 @@ export function HrmSidebar() {
   const isRbtLightMode = (role === 'RBT' || role === 'APPLICANT') && colorMode === 'light';
 
   useEffect(() => {
-    const checkClearanceAndSim = () => {
-      const cleared = localStorage.getItem('ras_rbt_cleared') === 'true';
-      const simDone = localStorage.getItem('ras_rbt_sim_completed') === 'true' || localStorage.getItem('ras_rbt_simulation_completed') === 'true';
-      const interviewPassed = localStorage.getItem('ras_rbt_interview_passed') === 'true';
-      const availDone = localStorage.getItem('ras_rbt_availability_set') === 'true';
-      const tasksDone = localStorage.getItem('ras_rbt_tasks_done') === 'true';
-
-      setIsRbtCleared(cleared);
-      setIsSimCompleted(simDone);
-      setIsInterviewDone(interviewPassed);
-      setIsAvailabilitySet(availDone);
-      setIsTasksDone(tasksDone);
+    const loadFromDb = (force = false) => {
+      void import('@/lib/syncAtsProgress').then(({ loadAtsProgress, isLiveStaffRbtUnlocked }) =>
+        loadAtsProgress(force).then((data) => {
+          if (!data) {
+            // Seed Active RBT (David Miller) has no ATS candidate — still staff
+            if (isLiveStaffRbtUnlocked()) setIsHired(true);
+            return;
+          }
+          setIsHired(isLiveStaffRbtUnlocked(data.stage));
+          setIsSimCompleted(data.simulationDone);
+          setIsInterviewDone(data.interviewPassed || data.interviewBooked);
+          setIsAvailabilitySet(data.availabilityDone);
+          setIsTasksDone(data.tasksDone);
+        })
+      );
     };
 
-    checkClearanceAndSim();
-    window.addEventListener('storage', checkClearanceAndSim);
-    window.addEventListener('rbt_clearance_changed', checkClearanceAndSim);
-    window.addEventListener('rbt_sim_changed', checkClearanceAndSim);
-    window.addEventListener('rbt_tasks_changed', checkClearanceAndSim);
-    window.addEventListener('rbt_interview_changed', checkClearanceAndSim);
-    window.addEventListener('rbt_availability_changed', checkClearanceAndSim);
+    loadFromDb(false);
+    const onChange = () => loadFromDb(true);
+    window.addEventListener('rbt_clearance_changed', onChange);
+    window.addEventListener('rbt_sim_changed', onChange);
+    window.addEventListener('rbt_tasks_changed', onChange);
+    window.addEventListener('rbt_interview_changed', onChange);
+    window.addEventListener('rbt_availability_changed', onChange);
+    window.addEventListener('rbt_progress_synced', onChange);
 
     return () => {
-      window.removeEventListener('storage', checkClearanceAndSim);
-      window.removeEventListener('rbt_clearance_changed', checkClearanceAndSim);
-      window.removeEventListener('rbt_sim_changed', checkClearanceAndSim);
-      window.removeEventListener('rbt_tasks_changed', checkClearanceAndSim);
-      window.removeEventListener('rbt_interview_changed', checkClearanceAndSim);
-      window.removeEventListener('rbt_availability_changed', checkClearanceAndSim);
+      window.removeEventListener('rbt_clearance_changed', onChange);
+      window.removeEventListener('rbt_sim_changed', onChange);
+      window.removeEventListener('rbt_tasks_changed', onChange);
+      window.removeEventListener('rbt_interview_changed', onChange);
+      window.removeEventListener('rbt_availability_changed', onChange);
+      window.removeEventListener('rbt_progress_synced', onChange);
     };
   }, []);
 
-  const interviewDoneOrBooked = isInterviewDone || (typeof window !== 'undefined' && (localStorage.getItem('ras_rbt_interview_done') === 'true' || !!localStorage.getItem('ras_rbt_interview_payload')));
-  const allRequirementsDone = isTasksDone && isSimCompleted && isAvailabilitySet && interviewDoneOrBooked;
-
-  const rbtNavItems: NavItem[] = [
-    { name: isTasksDone ? '✓ 1. Tasks & Consent' : '1. My Tasks & Onboarding', href: '/rbt', icon: ClipboardList },
-    { name: isSimCompleted ? '✓ 2. Data Simulator' : '2. Data Simulator', href: '/rbt/simulation', icon: Activity },
-    { name: isAvailabilitySet ? '✓ 3. My Availability' : '3. My Availability', href: '/rbt/availability', icon: Clock },
-    { name: interviewDoneOrBooked ? '✓ 4. HR Interview' : '4. HR Interview', href: '/rbt/interview', icon: Video },
-    { name: '5. 40-Hr Course Upload', href: '/rbt/documents', icon: FileText },
-    { name: 'Help Desk', href: '/rbt/help-desk', icon: MessageSquare },
-  ];
-
-  if (allRequirementsDone) {
-    rbtNavItems.push(
-      { name: 'Schedule', href: '/rbt/schedule', icon: Calendar },
-      { name: 'Job Board', href: '/rbt/job-board', icon: Briefcase }
+  // Hired candidates are official RBTs — promote UI role off APPLICANT
+  useEffect(() => {
+    if (!isHired) return;
+    void import('@/lib/syncAtsProgress').then(({ ensureHiredAsRbtStaff }) =>
+      ensureHiredAsRbtStaff()
     );
-  }
+  }, [isHired]);
+
+  const interviewDoneOrBooked = isInterviewDone;
+
+  // After hire OR seed Active RBT: staff surfaces only. Applicant tabs 1–5 are hidden.
+  const showStaffRbtNav = isHired || role === 'RBT';
+  const rbtNavItems: NavItem[] = showStaffRbtNav
+    ? [
+        { name: 'Schedule', href: '/rbt/schedule', icon: Calendar },
+        { name: 'Job Board', href: '/rbt/job-board', icon: Briefcase },
+        { name: 'Communication', href: '/rbt/communication', icon: MessageSquare },
+        { name: 'Payroll', href: '/rbt/payroll', icon: CreditCard },
+        { name: 'Help Desk', href: '/rbt/help-desk', icon: HeartHandshake },
+      ]
+    : [
+        { name: isTasksDone ? '✓ 1. Tasks & Consent' : '1. My Tasks & Onboarding', href: '/rbt', icon: ClipboardList },
+        { name: isSimCompleted ? '✓ 2. Data Simulator' : '2. Data Simulator', href: '/rbt/simulation', icon: Activity },
+        { name: isAvailabilitySet ? '✓ 3. My Availability' : '3. My Availability', href: '/rbt/availability', icon: Clock },
+        { name: interviewDoneOrBooked ? '✓ 4. HR Interview' : '4. HR Interview', href: '/rbt/interview', icon: Video },
+        { name: '5. 40-Hr Course Upload', href: '/rbt/documents', icon: FileText },
+        { name: 'Help Desk', href: '/rbt/help-desk', icon: MessageSquare },
+      ];
+
+  // Bounce deeper onboarding tabs after hire — but NEVER bounce `/rbt` itself.
+  // assertApplicantHired redirects failures to `/rbt`; bouncing that to `/rbt/schedule`
+  // (which also asserts) caused an infinite tab loop.
+  useEffect(() => {
+    if (!isHired || !pathname) return;
+    if (role !== 'RBT' && role !== 'APPLICANT') return;
+    const onApplicantTab =
+      pathname.startsWith('/rbt/simulation') ||
+      pathname.startsWith('/rbt/availability') ||
+      pathname.startsWith('/rbt/interview') ||
+      pathname.startsWith('/rbt/documents');
+    if (onApplicantTab) {
+      router.replace('/rbt/schedule');
+    }
+  }, [isHired, pathname, role, router]);
 
   const roleNavItems: Record<HrmRole, NavItem[]> = {
     HEAD_HR: [
@@ -112,7 +140,8 @@ export function HrmSidebar() {
       { name: 'ATS Applicants', href: '/ats', icon: FileText, hasSubItems: true },
       { name: 'Help Tickets', href: '/ats/help-tickets', icon: MessageSquare, isSubItem: true },
       { name: 'RBT Staff Manager', href: '/rbt-manager', icon: UserCheck },
-      { name: 'Staffing Queue', href: '/clients', icon: Users },
+      { name: 'Staff Credentials', href: '/hr-dashboard/credentials', icon: Shield },
+      { name: 'Case staffing note', href: '/clients', icon: Users },
       { name: 'Session EMR & Notes', href: '/session-emr', icon: Activity },
       { name: 'Payroll & Comp', href: '/payroll', icon: Calendar },
     ],
@@ -121,7 +150,7 @@ export function HrmSidebar() {
       { name: 'ATS Applicant Pipeline', href: '/ats', icon: FileText, hasSubItems: true },
       { name: 'Help Tickets', href: '/ats/help-tickets', icon: MessageSquare, isSubItem: true },
       { name: 'RBT Staff Manager', href: '/rbt-manager', icon: UserCheck },
-      { name: 'Staffing Requests Queue', href: '/clients', icon: Users },
+      { name: 'Case staffing note', href: '/clients', icon: Users },
     ],
     FINANCE: [
       { name: 'Payroll & Compensation', href: '/payroll', icon: Calendar },
@@ -132,13 +161,20 @@ export function HrmSidebar() {
     NONE: [],
   };
 
-  const navItems = roleNavItems[role] || roleNavItems.HEAD_HR;
+  const navItems = roleNavItems[role] ?? [];
 
-  // Active route checking helper
+  // Active route checking helper — exact /rbt must not match all /rbt/* children
   const isRouteActive = (href?: string) => {
     if (!href || !pathname) return false;
     if (href === '/') return pathname === '/';
-    return pathname === href || (href !== '/' && pathname.startsWith(href) && href !== '/ats');
+    if (href === '/rbt') return pathname === '/rbt';
+    // /ats parent covers applicant detail pages, but not help-tickets (its own nav sub-item)
+    if (href === '/ats')
+      return (
+        (pathname === '/ats' || pathname.startsWith('/ats/')) &&
+        !pathname.startsWith('/ats/help-tickets')
+      );
+    return pathname === href || pathname.startsWith(`${href}/`);
   };
 
   const [applicantName, setApplicantName] = useState<string>('Jane Doe');
@@ -146,7 +182,7 @@ export function HrmSidebar() {
   useEffect(() => {
     function loadName() {
       try {
-        const impName = localStorage.getItem('ras_active_impersonated_applicant_name');
+        const impName = getActiveApplicantName();
         if (impName) {
           setApplicantName(impName);
           return;
@@ -159,14 +195,17 @@ export function HrmSidebar() {
             return;
           }
         }
-      } catch (e) {}
+      } catch {}
     }
+    void ensureActiveApplicantId().then(() => loadName());
     loadName();
     window.addEventListener('storage', loadName);
     window.addEventListener('hrm_role_changed', loadName);
+    window.addEventListener('ras_applicant_session_changed', loadName);
     return () => {
       window.removeEventListener('storage', loadName);
       window.removeEventListener('hrm_role_changed', loadName);
+      window.removeEventListener('ras_applicant_session_changed', loadName);
     };
   }, []);
 
@@ -174,7 +213,7 @@ export function HrmSidebar() {
     HEAD_HR: 'Eleanor Vance',
     HR_AGENT: 'Marcus Vance',
     FINANCE: 'Robert Sterling',
-    RBT: 'David Miller',
+    RBT: applicantName || 'RBT Staff',
     APPLICANT: applicantName,
   };
 
@@ -222,7 +261,7 @@ export function HrmSidebar() {
                 <div key={`header-${idx}`} className={`font-mono text-[10px] font-extrabold tracking-widest uppercase px-3 mb-2 mt-5 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-300 whitespace-nowrap min-w-[200px] ${
                   isRbtLightMode ? 'text-brand-orange-600' : 'text-zinc-500'
                 }`}>
-                  <span className="opacity-50">//</span> {item.name}
+                  <span className="opacity-50">{'//'}</span> {item.name}
                 </div>
               );
             }
@@ -307,11 +346,11 @@ export function HrmSidebar() {
         }`}>
           <div className="p-2.5 rounded-2xl bg-zinc-900/80 border border-white/10 flex items-center gap-2.5 text-xs">
             <div className="w-8 h-8 rounded-xl bg-brand-orange-500/20 border border-brand-orange-500/40 text-brand-orange-400 flex items-center justify-center font-black text-xs shrink-0">
-              {hrAgentNames[role]?.[0] || 'H'}
+              {hrAgentNames[role]?.[0] || (role === 'RBT' || role === 'APPLICANT' ? 'R' : '·')}
             </div>
             <div className="overflow-hidden">
               <span className="block font-bold text-white text-[11px] truncate">
-                {hrAgentNames[role] || 'HR Specialist'}
+                {hrAgentNames[role] || (role === 'NONE' ? '…' : 'Staff')}
               </span>
               <span className="block text-[9px] font-mono text-zinc-400 uppercase tracking-wider">
                 {role.replace('_', ' ')} Persona

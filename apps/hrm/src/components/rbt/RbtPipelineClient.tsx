@@ -1,105 +1,251 @@
 'use client';
 
-import React, { useActionState } from 'react';
-import { Card, CardContent } from '@/components/ui/Card';
-import { Badge } from '@/components/ui/Badge';
-import { Button } from '@/components/ui/Button';
-import { logSession, fixDeficiency } from '@/app/(dashboard)/rbt/actions';
-import { Clock, AlertTriangle, Send } from 'lucide-react';
+import React from 'react';
+import Link from 'next/link';
+import {
+  AlertTriangle,
+  Clock3,
+  FileCheck2,
+  Sparkles,
+  UserRoundCheck,
+} from 'lucide-react';
 
-const logInitialState: { error?: string; success?: boolean } = {};
-const fixInitialState: { error?: string; success?: boolean } = {};
+type AssignedBcba = {
+  firstName: string;
+  lastName: string;
+};
 
-export default function RbtPipelineClient({ activeClients, returnedNotes, rbtId }: any) {
-  const [logState, logAction, isLogging] = useActionState<any, FormData>(logSession, logInitialState);
-  const [fixState, fixAction, isFixing] = useActionState<any, FormData>(fixDeficiency, fixInitialState);
+type ActiveClient = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  rbtId?: string | null;
+  bcbaId?: string | null;
+  bcba?: AssignedBcba | null;
+};
 
+type ReturnedNote = {
+  id: string;
+  description: string;
+  note: {
+    id: string;
+    session: {
+      scheduledStart: string | Date;
+      client: {
+        firstName: string;
+        lastName: string;
+      };
+    };
+  };
+};
+
+type RbtPipelineClientProps = {
+  activeClients?: ActiveClient[];
+  returnedNotes?: ReturnedNote[];
+  rbtId?: string | null;
+};
+
+function formatSessionDate(value: string | Date) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Date unavailable';
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(date);
+}
+
+export default function RbtPipelineClient({
+  activeClients = [],
+  returnedNotes = [],
+}: RbtPipelineClientProps) {
   return (
-    <div className="mt-8 space-y-8 max-w-3xl">
+    <div className="relative mx-auto mt-8 max-w-6xl space-y-8">
+      <div
+        className="pointer-events-none absolute -left-24 top-10 h-64 w-64 rounded-full bg-brand-orange-500/[0.07] blur-3xl"
+        aria-hidden="true"
+      />
 
-      {/* SECTION 1: RETURNED NOTES (DEFICIENCIES) */}
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-bold font-heading text-red-600">Action Required: Returned Notes</h2>
-          <Badge variant="danger">{returnedNotes?.length || 0}</Badge>
-        </div>
-
-        <div className="grid gap-4 md:grid-cols-2">
-          {returnedNotes?.map((def: any) => (
-            <Card key={def.id} className="border-red-300 bg-red-50/30 shadow-sm">
-              <CardContent className="p-4 space-y-4">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <p className="font-semibold">{def.note.session.client.firstName} {def.note.session.client.lastName}</p>
-                    <p className="text-xs text-slate-500">Session: {new Date(def.note.session.scheduledStart).toLocaleDateString()}</p>
-                  </div>
-                  <Badge variant="danger">Returned</Badge>
-                </div>
-
-                <div className="text-xs bg-red-100/50 p-2 rounded border border-red-200 text-red-800">
-                  <strong>Notes Coordinator Says:</strong> "{def.description}"
-                </div>
-                
-                <form action={fixAction} className="space-y-3 border-t pt-3 border-red-200">
-                  <input type="hidden" name="deficiencyId" value={def.id} />
-                  <input type="hidden" name="noteId" value={def.note.id} />
-                  
-                  <Button type="submit" size="sm" variant="outline" className="w-full h-8 text-xs text-red-700 border-red-300 hover:bg-red-50" isLoading={isFixing}>
-                    <Send className="w-3 h-3 mr-2" />
-                    I confirm I fixed this in Artemis
-                  </Button>
-                </form>
-              </CardContent>
-            </Card>
-          ))}
-
-          {(!returnedNotes || returnedNotes.length === 0) && (
-            <div className="col-span-2 text-center p-6 text-slate-500 border rounded-xl border-dashed">
-              No returned notes. Great job!
+      <section className="relative space-y-4" aria-labelledby="returned-notes-heading">
+        <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-rose-500/25 bg-rose-500/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-rose-300">
+              <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+              Action queue
             </div>
-          )}
-        </div>
-      </div>
+            <h2
+              id="returned-notes-heading"
+              className="font-heading text-2xl font-black tracking-tight text-white"
+            >
+              Returned session notes
+            </h2>
+            <p className="mt-1 text-xs leading-5 text-zinc-400">
+              Reopen the scheduled session in Session Studio, correct the content, and submit a
+              new signed revision. The deficiency closes only through that canonical submission.
+            </p>
+          </div>
+          <span className="inline-flex w-fit items-center rounded-full border border-rose-500/25 bg-rose-500/10 px-3 py-1 font-mono text-xs font-black text-rose-300">
+            {returnedNotes.length} open
+          </span>
+        </header>
 
-      {/* SECTION 2: LOG SESSIONS */}
-      <div className="space-y-4 border-t pt-8">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-bold font-heading">7. Active Therapy & Session Logging</h2>
-        </div>
-
-        <div className="grid gap-4 md:grid-cols-2">
-          {activeClients.map((client: any) => (
-            <Card key={client.id} className="border-green-200 dark:border-green-900 shadow-sm">
-              <CardContent className="p-4 space-y-4">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <p className="font-semibold text-lg">{client.firstName} {client.lastName}</p>
-                    <p className="text-xs text-slate-500">BCBA: {client.bcba ? `${client.bcba.firstName} ${client.bcba.lastName}` : 'Unassigned'}</p>
-                  </div>
-                  <Badge variant="success">Active</Badge>
-                </div>
-                
-                <form action={logAction} className="space-y-3 border-t pt-3 border-green-100">
-                  <input type="hidden" name="clientId" value={client.id} />
-                  <input type="hidden" name="rbtId" value={rbtId || client.rbtId} />
-                  <input type="hidden" name="bcbaId" value={client.bcbaId} />
-                  
-                  <Button type="submit" size="sm" variant="primary" className="w-full h-8 text-xs bg-green-600 hover:bg-green-700" isLoading={isLogging}>
-                    <Clock className="w-3 h-3 mr-2" />
-                    Confirm session logged in Artemis
-                  </Button>
-                </form>
-              </CardContent>
-            </Card>
-          ))}
-
-          {activeClients.length === 0 && (
-            <div className="col-span-2 text-center p-8 text-slate-500 border rounded-xl border-dashed">
-              No active clients assigned.
+        {returnedNotes.length === 0 ? (
+          <div className="relative overflow-hidden rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.06] p-8 text-center backdrop-blur-xl">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-emerald-500/20 bg-emerald-500/10 text-emerald-400">
+              <FileCheck2 className="h-6 w-6" aria-hidden="true" />
             </div>
-          )}
-        </div>
-      </div>
+            <h3 className="mt-4 font-heading text-base font-black text-white">
+              Documentation queue clear
+            </h3>
+            <p className="mt-1 text-xs text-zinc-400">No returned notes require attention.</p>
+          </div>
+        ) : (
+          <div className="grid gap-4 md:grid-cols-2">
+            {returnedNotes.map((deficiency) => {
+              const clientName = `${deficiency.note.session.client.firstName} ${deficiency.note.session.client.lastName}`;
+              return (
+                <article
+                  key={deficiency.id}
+                  className="group relative overflow-hidden rounded-2xl border border-rose-500/20 bg-zinc-950/80 p-5 shadow-xl shadow-black/10 backdrop-blur-xl transition-all duration-300 hover:scale-[1.01] hover:border-rose-500/40 hover:shadow-2xl"
+                >
+                  <div
+                    className="pointer-events-none absolute -right-12 -top-12 h-28 w-28 rounded-full bg-rose-500/10 blur-3xl"
+                    aria-hidden="true"
+                  />
+                  <div className="relative flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h3 className="truncate font-heading text-base font-black text-white">
+                        {clientName}
+                      </h3>
+                      <p className="mt-1 font-mono text-[10px] text-zinc-500">
+                        Session {formatSessionDate(deficiency.note.session.scheduledStart)}
+                      </p>
+                    </div>
+                    <span className="shrink-0 rounded-full border border-rose-500/25 bg-rose-500/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-rose-300">
+                      Returned
+                    </span>
+                  </div>
+
+                  <blockquote className="relative mt-4 rounded-xl border border-rose-500/20 bg-rose-500/[0.07] p-3 text-xs leading-5 text-rose-100/90">
+                    <span className="mb-1 block text-[10px] font-black uppercase tracking-wider text-rose-300">
+                      Coordinator feedback
+                    </span>
+                    “{deficiency.description}”
+                  </blockquote>
+
+                  <Link
+                    href="/rbt/schedule"
+                    aria-label={`Open Session Studio correction for ${clientName}`}
+                    className="relative mt-4 inline-flex h-10 w-full cursor-pointer items-center justify-center rounded-md border border-rose-500/30 bg-rose-500/10 px-3 text-xs font-black text-rose-200 transition-all duration-300 hover:border-rose-400/50 hover:bg-rose-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
+                  >
+                    <Clock3 className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
+                    Correct in Session Studio
+                  </Link>
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      <section
+        className="relative space-y-4 border-t border-white/10 pt-8"
+        aria-labelledby="therapy-work-heading"
+      >
+        <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-brand-orange-500/25 bg-brand-orange-500/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-brand-orange-300">
+              <Sparkles className="h-3 w-3" aria-hidden="true" />
+              Staff workspace
+            </div>
+            <h2
+              id="therapy-work-heading"
+              className="font-heading text-2xl font-black tracking-tight text-white"
+            >
+              Active therapy assignments
+            </h2>
+            <p className="mt-1 text-xs leading-5 text-zinc-400">
+              Open assigned scheduled sessions from Schedule and document them in Session Studio.
+            </p>
+          </div>
+          <span className="inline-flex w-fit items-center rounded-full border border-emerald-500/25 bg-emerald-500/10 px-3 py-1 font-mono text-xs font-black text-emerald-300">
+            {activeClients.length} assigned
+          </span>
+        </header>
+
+        {activeClients.length === 0 ? (
+          <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-zinc-950/70 p-8 text-center backdrop-blur-xl">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-zinc-400">
+              <UserRoundCheck className="h-6 w-6" aria-hidden="true" />
+            </div>
+            <h3 className="mt-4 font-heading text-base font-black text-white">
+              No active client assignments
+            </h3>
+            <p className="mt-1 text-xs text-zinc-400">
+              Assigned therapy clients will appear here after staffing is complete.
+            </p>
+          </div>
+        ) : (
+          <div className="grid gap-4 md:grid-cols-2">
+            {activeClients.map((client) => {
+              const clientName = `${client.firstName} ${client.lastName}`;
+              return (
+                <article
+                  key={client.id}
+                  className="group relative overflow-hidden rounded-2xl border border-emerald-500/20 bg-zinc-950/80 p-5 shadow-xl shadow-black/10 backdrop-blur-xl transition-all duration-300 hover:scale-[1.01] hover:border-brand-orange-500/40 hover:shadow-2xl"
+                >
+                  <div
+                    className="pointer-events-none absolute -right-12 -top-12 h-28 w-28 rounded-full bg-emerald-500/[0.08] blur-3xl"
+                    aria-hidden="true"
+                  />
+                  <div className="relative flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h3 className="truncate font-heading text-lg font-black text-white">
+                        {clientName}
+                      </h3>
+                      <p className="mt-1 text-xs text-zinc-400">
+                        Supervising BCBA:{' '}
+                        <span className="font-bold text-zinc-200">
+                          {client.bcba
+                            ? `${client.bcba.firstName} ${client.bcba.lastName}`
+                            : 'Not assigned'}
+                        </span>
+                      </p>
+                    </div>
+                    <span className="flex shrink-0 items-center gap-1.5 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-emerald-300">
+                      <span className="dot-live h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                      Active
+                    </span>
+                  </div>
+
+                  {!client.rbtId && (
+                    <div
+                      role="alert"
+                      className="relative mt-4 flex items-start gap-2 rounded-xl border border-amber-500/25 bg-amber-500/10 p-3 text-xs text-amber-100"
+                    >
+                      <AlertTriangle
+                        className="mt-0.5 h-4 w-4 shrink-0 text-amber-400"
+                        aria-hidden="true"
+                      />
+                      RBT assignment is missing. Ask Case Coordination to assign the client
+                      before opening Session Studio.
+                    </div>
+                  )}
+
+                  <Link
+                    href="/rbt/schedule"
+                    aria-label={`Open assigned schedule for ${clientName}`}
+                    className="relative mt-4 inline-flex h-10 w-full cursor-pointer items-center justify-center rounded-md bg-emerald-600 px-3 text-xs font-black text-white transition-all duration-300 hover:bg-emerald-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
+                  >
+                    <Clock3 className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
+                    Open scheduled Session Studio
+                  </Link>
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </section>
     </div>
   );
 }

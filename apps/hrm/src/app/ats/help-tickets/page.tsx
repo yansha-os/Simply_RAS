@@ -2,32 +2,40 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
-import { 
-  MessageSquare, 
-  UserCheck, 
-  CheckCircle2, 
-  ShieldCheck, 
-  Send, 
-  Clock, 
-  ArrowLeft, 
-  User, 
-  Mail, 
-  Phone, 
-  FileText, 
+import {
+  MessageSquare,
+  UserCheck,
+  CheckCircle2,
+  Send,
+  ArrowLeft,
+  Mail,
+  Phone,
+  FileText,
   LifeBuoy,
   Check,
   Plus,
   Video,
   Paperclip,
   X,
-  Minimize2,
-  Maximize2,
-  ExternalLink,
   AlertTriangle,
-  Sparkles,
-  Download
+  Download,
+  Loader2,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import {
+  claimHelpTicket,
+  listHelpTickets,
+  resolveHelpTicket,
+  sendHelpMessage,
+  type HelpTicketDto,
+} from '@/app/actions/helpDeskActions';
+
+function getInitials(name: string) {
+  if (!name?.trim()) return '??';
+  const parts = name.trim().split(/\s+/);
+  if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  return name.slice(0, 2).toUpperCase();
+}
 
 interface TicketMessage {
   id: string;
@@ -64,181 +72,170 @@ export default function HrHelpTicketsPage() {
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
   const [replyInput, setReplyInput] = useState('');
   const [confirmingResolveTicketId, setConfirmingResolveTicketId] = useState<string | null>(null);
+  const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // iMessage / Discord '+' Media Attachment Drawer State
   const [showPlusMenu, setShowPlusMenu] = useState(false);
   const [pendingCallRoom, setPendingCallRoom] = useState<{ roomName: string; roomUrl: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const mapDto = (t: HelpTicketDto): HelpTicket => ({
+    id: t.id,
+    ticketNumber: t.ticketNumber,
+    category: t.category,
+    categoryLabel: t.categoryLabel,
+    subject: t.subject,
+    message: t.message,
+    status: (t.status === 'CLOSED' ? 'RESOLVED' : t.status) as HelpTicket['status'],
+    createdAt: t.createdAt,
+    assignedHrAgent: t.assignedHrAgent,
+    candidateName: t.candidateName,
+    candidateEmail: t.candidateEmail,
+    candidatePhone: t.candidatePhone,
+    messages: t.messages.map((m) => ({
+      id: m.id,
+      sender: m.sender === 'CANDIDATE' ? 'CANDIDATE' : 'HR_AGENT',
+      senderName: m.senderName,
+      text: m.text,
+      timestamp: m.timestamp,
+      type: m.type,
+      callRoomUrl: m.callRoomUrl,
+      callRoomName: m.callRoomName,
+      isHostJoined: m.isHostJoined,
+      fileName: m.fileName,
+      fileUrl: m.fileUrl,
+    })),
+  });
 
   useEffect(() => {
-    const loadTickets = () => {
-      try {
-        const saved = JSON.parse(localStorage.getItem('ras_rbt_help_tickets') || '[]');
-        let candidateName = 'azm karim';
-        let candidateEmail = 'adawdzkarim05@gmail.com';
-        let candidatePhone = '(929) 501-1117';
+    const loadTickets = (force = false) => {
+      void (async () => {
+        const { CACHE_KEYS, cachedFetch, getCachedStale } = await import(
+          '@/lib/clientDataCache'
+        );
 
-        const storedApp = localStorage.getItem('ras_submitted_app_c1') || localStorage.getItem('ras_latest_submitted_app');
-        if (storedApp) {
-          const parsed = JSON.parse(storedApp);
-          if (parsed.fullName) candidateName = parsed.fullName;
-          else if (parsed.name) candidateName = parsed.name;
-          if (parsed.email) candidateEmail = parsed.email;
-          if (parsed.phoneNumber || parsed.phone) candidatePhone = parsed.phoneNumber || parsed.phone;
-        }
-
-        if (Array.isArray(saved) && saved.length > 0) {
-          const activeOnly = saved.filter((t: any) => t.status !== 'RESOLVED');
-          if (activeOnly.length !== saved.length) {
-            localStorage.setItem('ras_rbt_help_tickets', JSON.stringify(activeOnly));
-          }
-
-          const formatted = activeOnly.map((t: any) => ({
-            ...t,
-            candidateName: (!t.candidateName || t.candidateName.includes('Jane')) ? candidateName : t.candidateName,
-            candidateEmail: t.candidateEmail || candidateEmail,
-            candidatePhone: t.candidatePhone || candidatePhone,
-            messages: (t.messages || []).map((m: any) => ({
-              ...m,
-              senderName: m.sender === 'CANDIDATE' && (!m.senderName || m.senderName.includes('Jane')) ? candidateName : m.senderName,
-            })),
-          }));
-          setTickets(formatted);
-          if (formatted.length > 0) {
-            if (!selectedTicketId || !formatted.some(t => t.id === selectedTicketId)) {
-              setSelectedTicketId(formatted[0].id);
+        if (!force) {
+          const stale = getCachedStale<Awaited<ReturnType<typeof listHelpTickets>>>(
+            CACHE_KEYS.helpTicketsActive
+          );
+          if (stale?.value?.success && stale.value.data) {
+            const mapped = stale.value.data.map(mapDto);
+            setTickets(mapped);
+            setLoadState('ready');
+            setLoadError(null);
+            if (mapped.length > 0) {
+              setSelectedTicketId((prev) =>
+                prev && mapped.some((t) => t.id === prev) ? prev : mapped[0].id
+              );
+            } else {
+              setSelectedTicketId(null);
             }
-          } else {
-            setSelectedTicketId(null);
-          }
-        } else {
-          const latestTicket = localStorage.getItem('ras_latest_help_ticket');
-          if (latestTicket) {
-            try {
-              const parsed = JSON.parse(latestTicket);
-              const defaultTicket: HelpTicket = {
-                id: parsed.ticketId || 't-active',
-                ticketNumber: 'TICK-4819',
-                category: parsed.category || 'GENERAL_QUESTION',
-                categoryLabel: 'Onboarding & Support Request',
-                subject: parsed.subject || 'Candidate Onboarding Assistance Request',
-                message: parsed.message || 'Applicant requested assistance from HR Recruiter.',
-                status: 'OPEN',
-                createdAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' }),
-                candidateName,
-                candidateEmail,
-                candidatePhone,
-                messages: [
-                  {
-                    id: 'm-1',
-                    sender: 'CANDIDATE',
-                    senderName: candidateName,
-                    text: parsed.message || 'Applicant requested assistance from HR Recruiter.',
-                    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                    type: 'TEXT'
-                  }
-                ]
-              };
-              setTickets([defaultTicket]);
-              setSelectedTicketId(defaultTicket.id);
-            } catch (e) {}
-          } else {
-            setTickets([]);
+            if (stale.fresh) return;
           }
         }
-      } catch (e) {}
+
+        const res = await cachedFetch(
+          CACHE_KEYS.helpTicketsActive,
+          () => listHelpTickets({ activeOnly: true }),
+          { ttlMs: 30_000, force }
+        );
+        if (!res.success) {
+          setLoadState('error');
+          setLoadError(res.error || 'Failed to load help tickets from the database.');
+          setTickets([]);
+          setSelectedTicketId(null);
+          return;
+        }
+        const mapped = res.data.map(mapDto);
+        setTickets(mapped);
+        setLoadState('ready');
+        setLoadError(null);
+        if (mapped.length > 0) {
+          setSelectedTicketId((prev) =>
+            prev && mapped.some((t) => t.id === prev) ? prev : mapped[0].id
+          );
+        } else {
+          setSelectedTicketId(null);
+        }
+      })();
     };
 
-    loadTickets();
-    window.addEventListener('storage', loadTickets);
-    return () => window.removeEventListener('storage', loadTickets);
+    loadTickets(false);
+    const onSync = () => {
+      void import('@/lib/clientDataCache').then(({ CACHE_KEYS, invalidateCache }) => {
+        invalidateCache(CACHE_KEYS.helpTicketsActive);
+        loadTickets(true);
+      });
+    };
+    const onFocus = () => {
+      void import('@/lib/clientDataCache').then(({ CACHE_KEYS, getCachedStale }) => {
+        const hit = getCachedStale(CACHE_KEYS.helpTicketsActive);
+        if (!hit?.fresh) loadTickets(true);
+      });
+    };
+    window.addEventListener('rbt_progress_synced', onSync);
+    window.addEventListener('focus', onFocus);
+    return () => {
+      window.removeEventListener('rbt_progress_synced', onSync);
+      window.removeEventListener('focus', onFocus);
+    };
   }, []);
 
   const selectedTicket = tickets.find(t => t.id === selectedTicketId) || tickets[0];
 
-  // Helper to save tickets to localStorage and dispatch sync event
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [selectedTicketId, selectedTicket?.messages?.length]);
+
   const saveAndSyncTickets = (updated: HelpTicket[]) => {
     setTickets(updated);
-    localStorage.setItem('ras_rbt_help_tickets', JSON.stringify(updated));
-    window.dispatchEvent(new Event('storage'));
+    window.dispatchEvent(new Event('rbt_progress_synced'));
   };
 
-  const handleClaimTicket = (ticketId: string) => {
-    const updated = tickets.map(t => {
-      if (t.id === ticketId) {
-        const claimMessage: TicketMessage = {
-          id: `m-${Date.now()}`,
-          sender: 'HR_AGENT',
-          senderName: 'Marcus Vance (HR Recruiter)',
-          text: 'Hello! I have claimed your help ticket and am reviewing your onboarding file now. How can I assist you?',
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          type: 'TEXT'
-        };
-        return {
-          ...t,
-          status: 'CLAIMED' as const,
-          assignedHrAgent: 'Marcus Vance (HR Recruiter)',
-          messages: [...t.messages, claimMessage]
-        };
-      }
-      return t;
-    });
-
-    saveAndSyncTickets(updated);
-    toast.success('✋ Ticket claimed! You can now message the candidate live.');
+  const handleClaimTicket = async (ticketId: string) => {
+    const res = await claimHelpTicket(ticketId);
+    if (!res.success || !res.ticket) {
+      toast.error(res.error || 'Failed to claim ticket');
+      return;
+    }
+    const mapped = mapDto(res.ticket);
+    saveAndSyncTickets(tickets.map((t) => (t.id === mapped.id ? mapped : t)));
+    toast.success('Ticket claimed! You can now message the candidate live.');
   };
 
-  const handleResolveTicket = (ticketId: string) => {
-    const updated = tickets.filter(t => t.id !== ticketId);
-
+  const handleResolveTicket = async (ticketId: string) => {
+    const res = await resolveHelpTicket(ticketId);
+    if (!res.success) {
+      toast.error(res.error || 'Failed to resolve ticket');
+      return;
+    }
+    const updated = tickets.filter((t) => t.id !== ticketId);
     saveAndSyncTickets(updated);
-
     if (selectedTicketId === ticketId) {
       setSelectedTicketId(updated.length > 0 ? updated[0].id : null);
     }
-
-    try {
-      const customStages = JSON.parse(localStorage.getItem('ras_ats_custom_stages') || '{}');
-      const payload = { stage: 'PHONE_SCREEN', activationStatus: 'INVITATION_SENT' };
-      customStages['c1'] = payload;
-      customStages['cand-1'] = payload;
-      customStages['usr-applicant-1'] = payload;
-      localStorage.setItem('ras_ats_custom_stages', JSON.stringify(customStages));
-      localStorage.removeItem('ras_latest_help_ticket');
-      window.dispatchEvent(new Event('storage'));
-    } catch (e) {}
-
-    toast.success('✓ Ticket resolved & deleted! Candidate moved back to "In Progress" column on ATS board.');
+    toast.success('Ticket resolved! Candidate moved back on the ATS board.');
   };
 
-  const handleSendReply = (e: React.FormEvent) => {
+  const handleSendReply = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!replyInput.trim() || !selectedTicket) return;
 
-    const newMsg: TicketMessage = {
-      id: `m-${Date.now()}`,
-      sender: 'HR_AGENT',
-      senderName: 'Marcus Vance (HR Recruiter)',
+    const res = await sendHelpMessage(selectedTicket.id, {
       text: replyInput.trim(),
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      type: 'TEXT'
-    };
-
-    const updated = tickets.map(t => {
-      if (t.id === selectedTicket.id) {
-        return {
-          ...t,
-          status: 'CLAIMED' as const,
-          assignedHrAgent: 'Marcus Vance (HR Recruiter)',
-          messages: [...t.messages, newMsg]
-        };
-      }
-      return t;
+      type: 'TEXT',
+      senderSide: 'HR',
+      senderName: selectedTicket.assignedHrAgent || 'HR Agent',
     });
-
-    saveAndSyncTickets(updated);
+    if (!res.success || !res.ticket) {
+      toast.error(res.error || 'Failed to send message');
+      return;
+    }
+    const mapped = mapDto(res.ticket);
+    saveAndSyncTickets(tickets.map((t) => (t.id === mapped.id ? mapped : t)));
     setReplyInput('');
-    toast.success('Message sent!');
   };
 
   const launchJitsiMeetingWindow = (roomUrl: string) => {
@@ -277,102 +274,87 @@ export default function HrHelpTicketsPage() {
   };
 
   // STEP 2: HR joins as host -> unlocks call card & posts to candidate chat
-  const handleHostJoinAndDispatchCall = () => {
+  const handleHostJoinAndDispatchCall = async () => {
     if (!pendingCallRoom || !selectedTicket) return;
 
-    // Launch standalone window for HR Host (bypasses 5-min iframe limit)
     launchJitsiMeetingWindow(pendingCallRoom.roomUrl);
 
-    // Create host-verified Jitsi call invite message bubble
-    const callMsg: TicketMessage = {
-      id: `m-${Date.now()}`,
-      sender: 'HR_AGENT',
-      senderName: 'Marcus Vance (HR Recruiter)',
-      text: '📞 HR Recruiter Marcus Vance started a live video/voice call. Click below to join instant session!',
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    const res = await sendHelpMessage(selectedTicket.id, {
+      text: 'HR Recruiter started a live video/voice call. Click below to join instant session!',
       type: 'JITSI_CALL',
+      senderSide: 'HR',
+      senderName: selectedTicket.assignedHrAgent || 'HR Agent',
       callRoomUrl: pendingCallRoom.roomUrl,
       callRoomName: pendingCallRoom.roomName,
-      isHostJoined: true
-    };
-
-    const updated = tickets.map(t => {
-      if (t.id === selectedTicket.id) {
-        return {
-          ...t,
-          status: 'CLAIMED' as const,
-          assignedHrAgent: 'Marcus Vance (HR Recruiter)',
-          messages: [...t.messages, callMsg]
-        };
-      }
-      return t;
+      isHostJoined: true,
     });
-
-    saveAndSyncTickets(updated);
+    if (!res.success || !res.ticket) {
+      toast.error(res.error || 'Failed to dispatch call invite');
+      return;
+    }
+    saveAndSyncTickets(tickets.map((t) => (t.id === res.ticket!.id ? mapDto(res.ticket!) : t)));
     setPendingCallRoom(null);
-    toast.success('👑 Host connected! Live Call Invite dispatched to candidate.');
+    toast.success('Host connected! Live Call Invite dispatched to candidate.');
   };
 
   // Document/PDF Upload Attachment Handler
-  const handleDocumentUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleDocumentUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     setShowPlusMenu(false);
     const file = e.target.files?.[0];
     if (!file || !selectedTicket) return;
 
-    const fileMsg: TicketMessage = {
-      id: `m-${Date.now()}`,
-      sender: 'HR_AGENT',
-      senderName: 'Marcus Vance (HR Recruiter)',
-      text: `📄 Attached Document: ${file.name}`,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    const res = await sendHelpMessage(selectedTicket.id, {
+      text: `Attached Document: ${file.name}`,
       type: 'DOCUMENT',
+      senderSide: 'HR',
+      senderName: selectedTicket.assignedHrAgent || 'HR Agent',
       fileName: file.name,
-      fileUrl: '#'
-    };
-
-    const updated = tickets.map(t => {
-      if (t.id === selectedTicket.id) {
-        return {
-          ...t,
-          messages: [...t.messages, fileMsg]
-        };
-      }
-      return t;
+      fileUrl: '#',
     });
-
-    saveAndSyncTickets(updated);
+    if (!res.success || !res.ticket) {
+      toast.error(res.error || 'Failed to attach document');
+      return;
+    }
+    saveAndSyncTickets(tickets.map((t) => (t.id === res.ticket!.id ? mapDto(res.ticket!) : t)));
     toast.success(`Attached ${file.name} to chat thread!`);
   };
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 select-none animate-fade-in text-white pb-16 relative">
+      <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(ellipse_at_top,_rgba(249,115,22,0.12),_transparent_55%)]" />
+
       {/* TOP NAVIGATION BAR */}
       <div className="flex items-center justify-between border-b border-white/10 pb-4">
-        <Link href="/ats" className="inline-flex items-center gap-2 text-xs font-bold text-zinc-400 hover:text-brand-orange-400 transition-colors">
+        <Link
+          href="/ats"
+          className="inline-flex items-center gap-2 text-xs font-bold text-zinc-400 hover:text-brand-orange-400 transition-colors cursor-pointer"
+        >
           <ArrowLeft className="w-4 h-4" /> Back to ATS Candidate Pipeline
         </Link>
         <span className="text-xs font-mono font-bold text-brand-orange-400 bg-brand-orange-500/10 px-3 py-1 rounded-full border border-brand-orange-500/20">
-          DISCORD/IMESSAGE ULTRA-PREMIUM MESSENGER
+          Prisma · AtsHelpTicket
         </span>
       </div>
 
       {/* HEADER BANNER */}
-      <div className="bg-zinc-950 p-6 sm:p-8 rounded-3xl border border-white/10 shadow-2xl flex flex-col md:flex-row md:items-center justify-between gap-6 relative overflow-hidden">
+      <div className="bg-zinc-950/80 backdrop-blur-xl p-6 sm:p-8 rounded-3xl border border-white/10 shadow-2xl flex flex-col md:flex-row md:items-center justify-between gap-6 relative overflow-hidden">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(244,63,94,0.12),transparent_45%)] pointer-events-none" />
         <div className="flex items-center gap-4 relative z-10">
           <div className="w-14 h-14 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-400 flex items-center justify-center font-bold shadow-lg shrink-0">
             <MessageSquare className="w-7 h-7" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-2xl sm:text-3xl font-black font-heading text-white tracking-tight">
                 HR Candidate Help Ticket Messenger
               </h1>
-              <span className="bg-rose-500/10 text-rose-400 border border-rose-500/20 text-[10px] font-mono font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider">
-                LIVE MESSAGING &amp; CALLS
+              <span className="bg-rose-500/10 text-rose-400 border border-rose-500/20 text-[10px] font-mono font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider inline-flex items-center gap-1.5">
+                <span className="dot-live w-1.5 h-1.5 rounded-full bg-rose-400" />
+                Live queue
               </span>
             </div>
             <p className="text-xs text-zinc-400 font-medium mt-1">
-              Communicate live with candidates, host instant Jitsi voice/video sessions, and review onboarding files.
+              Real DB tickets only — claim, chat, host Jitsi, resolve. No demo seed in LIVE.
             </p>
           </div>
         </div>
@@ -381,15 +363,30 @@ export default function HrHelpTicketsPage() {
       {/* MAIN MESSENGER CONTAINER */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* TICKETS DRAWER SIDEBAR */}
-        <div className="bg-zinc-950 border border-white/10 rounded-3xl p-5 space-y-4 shadow-2xl h-fit">
+        <div className="bg-zinc-950/80 backdrop-blur-xl border border-white/10 rounded-3xl p-5 space-y-4 shadow-2xl h-fit">
           <h3 className="text-sm font-black font-heading text-white uppercase tracking-wider flex items-center gap-2 border-b border-white/10 pb-3">
             <LifeBuoy className="w-4 h-4 text-brand-orange-400" /> Active Tickets ({tickets.length})
           </h3>
 
           <div className="space-y-3">
-            {tickets.length === 0 ? (
-              <div className="p-8 text-center text-zinc-500 font-mono text-xs border border-dashed border-white/10 rounded-2xl space-y-2">
-                <p>No active candidate support tickets in queue.</p>
+            {loadState === 'loading' ? (
+              <div className="p-8 text-center text-zinc-400 font-mono text-xs border border-dashed border-white/10 rounded-2xl flex flex-col items-center gap-2">
+                <Loader2 className="w-5 h-5 animate-spin text-brand-orange-400" />
+                Loading tickets from database…
+              </div>
+            ) : loadState === 'error' ? (
+              <div className="p-6 text-center space-y-2 border border-dashed border-rose-500/30 bg-rose-500/5 rounded-2xl">
+                <AlertTriangle className="w-6 h-6 text-rose-400 mx-auto" />
+                <p className="text-xs font-bold text-rose-300">Could not load tickets</p>
+                <p className="text-[11px] font-mono text-zinc-500">{loadError}</p>
+              </div>
+            ) : tickets.length === 0 ? (
+              <div className="p-8 text-center space-y-2 border border-dashed border-white/10 rounded-2xl bg-zinc-900/40">
+                <LifeBuoy className="w-8 h-8 text-zinc-600 mx-auto" />
+                <p className="text-xs font-bold text-zinc-300">Queue is empty</p>
+                <p className="text-[11px] font-mono text-zinc-500 leading-relaxed">
+                  No open AtsHelpTicket rows. Candidates open tickets from RBT Help Desk — nothing is faked here.
+                </p>
               </div>
             ) : (
               tickets.map((t) => {
@@ -398,10 +395,10 @@ export default function HrHelpTicketsPage() {
                   <div
                     key={t.id}
                     onClick={() => setSelectedTicketId(t.id)}
-                    className={`p-4 rounded-2xl border transition-all cursor-pointer space-y-2 ${
+                    className={`p-4 rounded-2xl border transition-all duration-300 cursor-pointer space-y-2 hover:scale-[1.01] hover:shadow-2xl ${
                       isSelected
                         ? 'bg-brand-orange-500/10 border-brand-orange-500/60 shadow-lg'
-                        : 'bg-zinc-900/80 border-white/5 hover:border-white/20'
+                        : 'bg-zinc-900/80 border-white/5 hover:border-brand-orange-500/40'
                     }`}
                   >
                     <div className="flex items-center justify-between">
@@ -424,7 +421,7 @@ export default function HrHelpTicketsPage() {
                     </h4>
 
                     <p className="text-[11px] text-zinc-400 font-mono line-clamp-2 italic">
-                      "{t.message}"
+                      &quot;{t.message}&quot;
                     </p>
 
                     <div className="flex items-center justify-between text-[10px] font-mono text-zinc-500 pt-1 border-t border-white/5">
@@ -439,11 +436,11 @@ export default function HrHelpTicketsPage() {
         </div>
 
         {/* LIVE DISCORD/IMESSAGE MESSENGER CHAT THREAD */}
-        <div className="lg:col-span-2 bg-zinc-950 border border-white/10 rounded-3xl shadow-2xl flex flex-col overflow-hidden min-h-[580px] relative">
+        <div className="lg:col-span-2 bg-zinc-950/80 backdrop-blur-xl border border-white/10 rounded-3xl shadow-2xl flex flex-col overflow-hidden min-h-[580px] relative">
           {selectedTicket ? (
             <>
               {/* CHAT HEADER */}
-              <div className="p-5 border-b border-white/10 bg-zinc-900/90 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="p-5 border-b border-white/10 bg-zinc-900/80 backdrop-blur-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-xs font-black text-brand-orange-400 bg-brand-orange-500/10 border border-brand-orange-500/20 px-2.5 py-0.5 rounded-full">
@@ -523,8 +520,17 @@ export default function HrHelpTicketsPage() {
 
               {/* LIVE CONVERSATION MESSAGES (DISCORD/IMESSAGE STYLED) */}
               <div className="flex-1 p-6 space-y-4 overflow-y-auto bg-zinc-950/60 max-h-[380px]">
+                {selectedTicket.messages.length === 0 ? (
+                  <div className="h-full min-h-[160px] flex flex-col items-center justify-center text-center gap-2 text-zinc-500">
+                    <MessageSquare className="w-8 h-8 text-zinc-700" />
+                    <p className="text-xs font-bold text-zinc-400">No messages yet</p>
+                    <p className="text-[11px] font-mono max-w-xs">
+                      Claim the ticket or reply below to start the thread.
+                    </p>
+                  </div>
+                ) : null}
                 {selectedTicket.messages.map((msg) => {
-                  const isHr = msg.sender === 'HR_AGENT';
+                  const isHr = msg.sender !== 'CANDIDATE';
 
                   return (
                     <div
@@ -534,13 +540,13 @@ export default function HrHelpTicketsPage() {
                       <div className={`w-8 h-8 rounded-2xl flex items-center justify-center font-bold text-xs shrink-0 shadow-md ${
                         isHr ? 'bg-brand-orange-500 text-white' : 'bg-zinc-800 text-zinc-300 border border-white/10'
                       }`}>
-                        {isHr ? 'HR' : 'CD'}
+                        {isHr ? getInitials(msg.senderName || 'HR') : getInitials(msg.senderName || selectedTicket.candidateName)}
                       </div>
 
                       <div className={`p-4 rounded-2xl space-y-2 text-xs shadow-md backdrop-blur-xl ${
                         isHr
-                          ? 'bg-brand-orange-500 text-white rounded-tr-none'
-                          : 'bg-zinc-900 text-zinc-200 border border-white/10 rounded-tl-none'
+                          ? 'bg-brand-orange-500/90 text-white rounded-tr-none border border-brand-orange-400/30'
+                          : 'bg-zinc-900/80 text-zinc-200 border border-white/10 rounded-tl-none'
                       }`}>
                         <div className="flex items-center justify-between gap-4 border-b border-white/20 pb-1 mb-1">
                           <span className="font-extrabold text-[11px]">{msg.senderName}</span>
@@ -573,20 +579,32 @@ export default function HrHelpTicketsPage() {
                               </button>
                             ) : (
                               <button
-                                onClick={() => {
-                                  // Mark host as joined and save to localStorage
-                                  const updated = tickets.map(t => ({
-                                    ...t,
-                                    messages: (t.messages || []).map(m => m.id === msg.id ? { ...m, isHostJoined: true } : m)
-                                  }));
-                                  saveAndSyncTickets(updated);
+                                onClick={async () => {
+                                  const { updateHelpMessageMeta } = await import('@/app/actions/helpDeskActions');
+                                  const res = await updateHelpMessageMeta(msg.id, { isHostJoined: true });
+                                  if (res.success && res.ticket) {
+                                    saveAndSyncTickets(
+                                      tickets.map((t) => (t.id === res.ticket!.id ? mapDto(res.ticket!) : t))
+                                    );
+                                  } else {
+                                    const updated = tickets.map((t) => ({
+                                      ...t,
+                                      messages: (t.messages || []).map((m) =>
+                                        m.id === msg.id ? { ...m, isHostJoined: true } : m
+                                      ),
+                                    }));
+                                    saveAndSyncTickets(updated);
+                                  }
 
                                   if (msg.callRoomUrl) {
-                                    const returnUrl = typeof window !== 'undefined' ? `${window.location.origin}/ats/help-tickets` : '';
+                                    const returnUrl =
+                                      typeof window !== 'undefined'
+                                        ? `${window.location.origin}/ats/help-tickets`
+                                        : '';
                                     const easyUrl = `${msg.callRoomUrl}#config.prejoinPageEnabled=false&config.requireDisplayName=false&config.leaveRedirectUrl=${encodeURIComponent(returnUrl)}`;
                                     launchJitsiMeetingWindow(easyUrl);
                                   }
-                                  toast.success('👑 You joined as Host! Candidate/Parent can now connect to the video call.');
+                                  toast.success('You joined as Host! Candidate can now connect to the video call.');
                                 }}
                                 className="w-full bg-amber-500 hover:bg-amber-400 text-black font-black text-xs py-2.5 rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-2"
                               >
@@ -603,7 +621,14 @@ export default function HrHelpTicketsPage() {
                               <span className="font-bold truncate max-w-[180px]">{msg.fileName}</span>
                             </div>
                             <button
-                              onClick={() => toast.success(`Downloading ${msg.fileName}...`)}
+                              type="button"
+                              onClick={() => {
+                                if (msg.fileUrl && msg.fileUrl !== '#') {
+                                  window.open(msg.fileUrl, '_blank');
+                                } else {
+                                  toast.message('Document preview unavailable for this attachment.');
+                                }
+                              }}
                               className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white cursor-pointer"
                             >
                               <Download className="w-3.5 h-3.5" />
@@ -617,6 +642,7 @@ export default function HrHelpTicketsPage() {
                     </div>
                   );
                 })}
+                <div ref={messagesEndRef} />
               </div>
 
               {/* HOST-LOCKED CALL PREVIEW BOX ABOVE INPUT BAR */}
@@ -636,8 +662,9 @@ export default function HrHelpTicketsPage() {
                       <span>👑 Join as Host First →</span>
                     </button>
                     <button
+                      type="button"
                       onClick={() => setPendingCallRoom(null)}
-                      className="text-zinc-400 hover:text-white p-1"
+                      className="text-zinc-400 hover:text-white p-1 cursor-pointer"
                     >
                       <X className="w-4 h-4" />
                     </button>
@@ -714,7 +741,8 @@ export default function HrHelpTicketsPage() {
 
                 <button
                   type="submit"
-                  className="bg-brand-orange-500 hover:bg-orange-600 text-white font-black text-xs px-5 py-3 rounded-2xl shadow-lg transition-all cursor-pointer flex items-center gap-1.5 shrink-0"
+                  disabled={!replyInput.trim()}
+                  className="bg-brand-orange-500 hover:bg-orange-600 disabled:opacity-40 disabled:hover:bg-brand-orange-500 text-white font-black text-xs px-5 py-3 rounded-2xl shadow-lg transition-all cursor-pointer disabled:cursor-not-allowed flex items-center gap-1.5 shrink-0"
                 >
                   <Send className="w-4 h-4" />
                   <span>Send</span>
@@ -724,8 +752,18 @@ export default function HrHelpTicketsPage() {
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-3 text-zinc-500">
               <LifeBuoy className="w-12 h-12 text-zinc-700" />
-              <h4 className="font-black text-white text-sm">No Ticket Selected</h4>
-              <p className="text-xs text-zinc-400 max-w-xs font-mono">Select a candidate ticket from the left panel to start chatting live.</p>
+              <h4 className="font-black text-white text-sm">
+                {loadState === 'loading'
+                  ? 'Loading queue…'
+                  : loadState === 'error'
+                    ? 'Tickets unavailable'
+                    : 'No active tickets'}
+              </h4>
+              <p className="text-xs text-zinc-400 max-w-sm font-mono leading-relaxed">
+                {loadState === 'error'
+                  ? loadError || 'Database load failed.'
+                  : 'When a candidate submits a ticket from /rbt/help-desk, it appears here for claim and reply.'}
+              </p>
             </div>
           )}
         </div>

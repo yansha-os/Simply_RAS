@@ -1,12 +1,17 @@
 'use server';
 
+import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
 import { createNotification } from './notifications';
+import { requireStaff } from '@/lib/auth-guard';
 
 export async function getActionItems(coordinatorId?: string) {
   try {
-    const where: any = {};
+    const gate = await requireStaff();
+    if (!gate.ok) return { success: false, actionItems: [], error: gate.error };
+
+    const where: Prisma.ActionItemWhereInput = {};
     if (coordinatorId) {
       where.assigneeId = coordinatorId;
     }
@@ -48,6 +53,9 @@ export async function createActionItem(data: {
   dueDate?: Date;
 }) {
   try {
+    const gate = await requireStaff();
+    if (!gate.ok) return { success: false, error: gate.error };
+
     const actionItem = await prisma.actionItem.create({
       data: {
         title: data.title,
@@ -78,6 +86,9 @@ export async function createActionItem(data: {
 
 export async function resolveActionItem(id: string) {
   try {
+    const gate = await requireStaff();
+    if (!gate.ok) return { success: false, error: gate.error };
+
     const actionItem = await prisma.actionItem.update({
       where: { id },
       data: {

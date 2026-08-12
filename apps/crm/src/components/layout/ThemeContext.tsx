@@ -1,10 +1,22 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import ThemeBackground from '@/components/theme/ThemeBackground';
+import {
+  clampSpeed,
+  getTheme,
+  isIntensity,
+  isThemeId,
+  randomThemeId,
+  type AccentColor as RegistryAccentColor,
+  type EngineIntensity,
+  type ThemeId,
+} from '@/components/theme/themeRegistry';
 
-export type AnimationMode = 'professional-matte' | 'cosmic-stars' | 'liquid-aurora' | 'cyberpunk-grid';
-export type AccentColor = 'orange' | 'cyan' | 'purple' | 'emerald' | 'rose' | 'amber';
+export type AnimationMode = ThemeId;
+export type AccentColor = RegistryAccentColor;
 export type ColorMode = 'light' | 'dark';
+export type { EngineIntensity };
 
 interface ThemeContextType {
   mode: AnimationMode;
@@ -15,45 +27,81 @@ interface ThemeContextType {
   setGlassOpacity: (opacity: number) => void;
   colorMode: ColorMode;
   setColorMode: (mode: ColorMode) => void;
+  intensity: EngineIntensity;
+  setIntensity: (intensity: EngineIntensity) => void;
+  speed: number;
+  setSpeed: (speed: number) => void;
+  accentSync: boolean;
+  setAccentSync: (sync: boolean) => void;
+  randomizeTheme: () => void;
   isSettingsOpen: boolean;
   setIsSettingsOpen: (open: boolean) => void;
 }
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
+function applyThemeAttributes(m: AnimationMode, a: AccentColor, o: number, c: ColorMode) {
+  const theme = getTheme(m);
+  document.documentElement.setAttribute('data-mode', m);
+  document.documentElement.setAttribute('data-accent', a);
+  document.documentElement.setAttribute('data-color-mode', c);
+  // v2 engine themes silence the legacy fog/star layers via CSS.
+  document.documentElement.setAttribute(
+    'data-engine',
+    theme.engine === 'css' || theme.engine === 'canvas' ? 'v2' : 'v1'
+  );
+  document.documentElement.style.setProperty('--glass-opacity', `${o / 100}`);
+}
+
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [mode, setModeState] = useState<AnimationMode>('professional-matte');
   const [accent, setAccentState] = useState<AccentColor>('orange');
   const [glassOpacity, setGlassOpacityState] = useState<number>(35);
   const [colorMode, setColorModeState] = useState<ColorMode>('light');
+  const [intensity, setIntensityState] = useState<EngineIntensity>('normal');
+  const [speed, setSpeedState] = useState<number>(1);
+  const [accentSync, setAccentSyncState] = useState<boolean>(true);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   useEffect(() => {
-    const savedMode = (localStorage.getItem('ras_theme_mode') as AnimationMode) || 'professional-matte';
+    const storedMode = localStorage.getItem('ras_theme_mode');
+    const savedMode: AnimationMode = isThemeId(storedMode) ? storedMode : 'professional-matte';
     const savedAccent = (localStorage.getItem('ras_theme_accent') as AccentColor) || 'orange';
     const savedOpacity = parseInt(localStorage.getItem('ras_theme_opacity') || '35', 10);
     // RBT default is ALWAYS 'light' mode unless explicitly saved as 'dark' in settings
     const savedColorMode = (localStorage.getItem('ras_rbt_color_mode') as ColorMode) || 'light';
+    const storedIntensity = localStorage.getItem('ras_theme_intensity');
+    const savedIntensity: EngineIntensity = isIntensity(storedIntensity) ? storedIntensity : 'normal';
+    const savedSpeed = clampSpeed(parseFloat(localStorage.getItem('ras_theme_speed') || '1'));
+    const savedAccentSync = localStorage.getItem('ras_theme_accent_sync') !== 'off';
 
     setModeState(savedMode);
     setAccentState(savedAccent);
     setGlassOpacityState(savedOpacity);
     setColorModeState(savedColorMode);
+    setIntensityState(savedIntensity);
+    setSpeedState(savedSpeed);
+    setAccentSyncState(savedAccentSync);
 
     applyThemeAttributes(savedMode, savedAccent, savedOpacity, savedColorMode);
   }, []);
 
-  const applyThemeAttributes = (m: AnimationMode, a: AccentColor, o: number, c: ColorMode) => {
-    document.documentElement.setAttribute('data-mode', m);
-    document.documentElement.setAttribute('data-accent', a);
-    document.documentElement.setAttribute('data-color-mode', c);
-    document.documentElement.style.setProperty('--glass-opacity', `${o / 100}`);
-  };
-
   const setMode = (newMode: AnimationMode) => {
     setModeState(newMode);
     localStorage.setItem('ras_theme_mode', newMode);
-    applyThemeAttributes(newMode, accent, glassOpacity, colorMode);
+    let nextAccent = accent;
+    // Per-theme accent sync: adopting a theme also adopts its paired accent.
+    const theme = getTheme(newMode);
+    if (accentSync && (theme.engine === 'css' || theme.engine === 'canvas')) {
+      nextAccent = theme.accent;
+      setAccentState(nextAccent);
+      localStorage.setItem('ras_theme_accent', nextAccent);
+    }
+    applyThemeAttributes(newMode, nextAccent, glassOpacity, colorMode);
+  };
+
+  const randomizeTheme = () => {
+    setMode(randomThemeId(mode));
   };
 
   const setAccent = (newAccent: AccentColor) => {
@@ -74,6 +122,22 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     applyThemeAttributes(mode, accent, glassOpacity, newColorMode);
   };
 
+  const setIntensity = (newIntensity: EngineIntensity) => {
+    setIntensityState(newIntensity);
+    localStorage.setItem('ras_theme_intensity', newIntensity);
+  };
+
+  const setSpeed = (newSpeed: number) => {
+    const clamped = clampSpeed(newSpeed);
+    setSpeedState(clamped);
+    localStorage.setItem('ras_theme_speed', `${clamped}`);
+  };
+
+  const setAccentSync = (sync: boolean) => {
+    setAccentSyncState(sync);
+    localStorage.setItem('ras_theme_accent_sync', sync ? 'on' : 'off');
+  };
+
   return (
     <ThemeContext.Provider
       value={{
@@ -85,10 +149,18 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
         setGlassOpacity,
         colorMode,
         setColorMode,
+        intensity,
+        setIntensity,
+        speed,
+        setSpeed,
+        accentSync,
+        setAccentSync,
+        randomizeTheme,
         isSettingsOpen,
         setIsSettingsOpen,
       }}
     >
+      <ThemeBackground mode={mode} intensity={intensity} speed={speed} accent={accent} />
       {children}
     </ThemeContext.Provider>
   );

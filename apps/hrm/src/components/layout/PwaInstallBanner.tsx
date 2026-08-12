@@ -1,15 +1,89 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { Smartphone, Download, X, Share, PlusSquare, CheckCircle2, ShieldCheck, AlertCircle } from 'lucide-react';
+import React, { useEffect, useState, useSyncExternalStore } from 'react';
+import { Smartphone, Download, X, Share, PlusSquare, ShieldCheck, AlertCircle } from 'lucide-react';
 import { useHrmRole } from '@/lib/useHrmRole';
 import { toast } from 'sonner';
 
+interface BeforeInstallPromptEvent extends Event {
+  readonly userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
+  prompt(): Promise<void>;
+}
+
+interface IosStandaloneNavigator extends Navigator {
+  readonly standalone: boolean;
+}
+
+function isBeforeInstallPromptEvent(event: Event): event is BeforeInstallPromptEvent {
+  return (
+    'prompt' in event &&
+    typeof event.prompt === 'function' &&
+    'userChoice' in event &&
+    event.userChoice instanceof Promise
+  );
+}
+
+function isIosStandaloneNavigator(
+  navigator: Navigator
+): navigator is IosStandaloneNavigator {
+  return 'standalone' in navigator && typeof navigator.standalone === 'boolean';
+}
+
+function subscribeToNeverShow(callback: () => void) {
+  const handleStorage = (event: StorageEvent) => {
+    if (event.key === 'ras_rbt_pwa_never_show') callback();
+  };
+  window.addEventListener('storage', handleStorage);
+  return () => window.removeEventListener('storage', handleStorage);
+}
+
+function getNeverShowSnapshot() {
+  return localStorage.getItem('ras_rbt_pwa_never_show') === 'true';
+}
+
+function subscribeToDisplayMode(callback: () => void) {
+  const mediaQuery = window.matchMedia('(display-mode: standalone)');
+  mediaQuery.addEventListener('change', callback);
+  return () => mediaQuery.removeEventListener('change', callback);
+}
+
+function getStandaloneSnapshot() {
+  return (
+    window.matchMedia('(display-mode: standalone)').matches ||
+    (isIosStandaloneNavigator(window.navigator) && window.navigator.standalone)
+  );
+}
+
+function subscribeToStaticBrowserValue() {
+  return () => {};
+}
+
+function getIsIosSnapshot() {
+  return /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCase());
+}
+
+function getServerSnapshot() {
+  return false;
+}
+
 export default function PwaInstallBanner() {
   const { role } = useHrmRole();
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
-  const [isIos, setIsIos] = useState(false);
-  const [isStandalone, setIsStandalone] = useState(false);
+  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const isIos = useSyncExternalStore(
+    subscribeToStaticBrowserValue,
+    getIsIosSnapshot,
+    getServerSnapshot
+  );
+  const isStandalone = useSyncExternalStore(
+    subscribeToDisplayMode,
+    getStandaloneSnapshot,
+    getServerSnapshot
+  );
+  const neverShowAgain = useSyncExternalStore(
+    subscribeToNeverShow,
+    getNeverShowSnapshot,
+    getServerSnapshot
+  );
   const [showIosModal, setShowIosModal] = useState(false);
   const [dismissed, setDismissed] = useState(false);
   
@@ -18,25 +92,11 @@ export default function PwaInstallBanner() {
   const [dontShowAgain, setDontShowAgain] = useState(false);
 
   useEffect(() => {
-    // Check if never show again was previously selected
-    const neverShow = localStorage.getItem('ras_rbt_pwa_never_show') === 'true';
-    if (neverShow) {
-      setDismissed(true);
-    }
-
-    // Check if running in standalone mode (already installed)
-    const isStandaloneApp = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true;
-    setIsStandalone(isStandaloneApp);
-
-    // Detect iOS
-    const userAgent = window.navigator.userAgent.toLowerCase();
-    const isIphoneOrIpad = /iphone|ipad|ipod/.test(userAgent);
-    setIsIos(isIphoneOrIpad);
-
     // Capture Android / Chrome beforeinstallprompt event
-    const handleBeforeInstallPrompt = (e: Event) => {
-      e.preventDefault();
-      setDeferredPrompt(e);
+    const handleBeforeInstallPrompt = (event: Event) => {
+      if (!isBeforeInstallPromptEvent(event)) return;
+      event.preventDefault();
+      setDeferredPrompt(event);
     };
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
@@ -44,7 +104,12 @@ export default function PwaInstallBanner() {
   }, []);
 
   // Only show banner for RBT or APPLICANT roles, and if not already installed or dismissed
-  if (isStandalone || dismissed || (role !== 'RBT' && role !== 'APPLICANT')) {
+  if (
+    isStandalone ||
+    neverShowAgain ||
+    dismissed ||
+    (role !== 'RBT' && role !== 'APPLICANT')
+  ) {
     return null;
   }
 
@@ -136,7 +201,7 @@ export default function PwaInstallBanner() {
                 className="w-4 h-4 accent-[#F97316] rounded cursor-pointer"
               />
               <label htmlFor="pwaDontShowAgain" className="text-xs text-zinc-200 font-bold cursor-pointer select-none">
-                Don't show this prompt again
+                Don&apos;t show this prompt again
               </label>
             </div>
 
@@ -193,7 +258,9 @@ export default function PwaInstallBanner() {
                   2
                 </div>
                 <div>
-                  <span className="font-bold text-white block mb-0.5">Select "Add to Home Screen"</span>
+                  <span className="font-bold text-white block mb-0.5">
+                    Select &quot;Add to Home Screen&quot;
+                  </span>
                   <span className="text-[11px] text-zinc-400 flex items-center gap-1.5">
                     Scroll down and tap <PlusSquare className="w-4 h-4 text-brand-orange-400" /> Add to Home Screen (+).
                   </span>

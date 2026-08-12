@@ -1,5 +1,18 @@
 # Workspace Agent Rules — Simple RAS CRM
 
+## Read first
+
+1. **Architecture:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — CRM vs HRM vs packages, shared Postgres, SQL convention, which-skill-when.
+2. **App skill:** **crm-app-map** or **hrm-app-map** (then other skills as needed) — task-scoped ownership map.
+3. **Relevant spec** under [`docs/superpowers/specs/`](docs/superpowers/specs/) when implementing that feature (spine roadmap + session-note SoT are indexed from ARCHITECTURE / docs README).
+4. **Docs library:** [`docs/LIBRARY.md`](docs/LIBRARY.md) — what to add / NOT to add; skill **docs-library** when editing docs/skills/specs/SQL. Index: [`docs/README.md`](docs/README.md).
+5. **SQL:** New paste-ready SQL only in [`docs/sql/`](docs/sql/) (`YYYY-MM-DD-HHmmssZ-slug.sql`; `Z` is UTC; use the real current UTC timestamp when generating the file). Keep one logical change per file and add both index and apply-order rows to `docs/sql/README.md`; the timestamp provides chronology/collision resistance, while README dependency order controls execution. Existing date-only SQL is grandfathered and must not be renamed. Never add under `prisma/migrations/` (archive), or run `prisma migrate` / `db push` against live DB.
+6. **Other skills** (`.agents/skills/`): **docs-library**, **intake-workflow-map**, **supabase-migration-generator**, **server-action-pattern**, **discord-imessage-chat-pattern**, **systematic-debugging**, **nextjs-component-audit**, **verification-before-completion**.
+7. **Server actions:** every action gates first via `requireStaff(roles?)` / `requireClientAccess(clientId)` (`apps/*/src/lib/auth-guard.ts`) — or the magic-link guard for parent-facing actions. See skill **server-action-pattern**.
+8. **Verify:** `npm test` (vitest, repo root) + `npm run typecheck` before claiming done; CI (`.github/workflows/ci.yml`) blocks on typecheck + tests + both `next build`s.
+
+---
+
 ## Prisma Relation Access (CRITICAL)
 
 Before writing ANY code that reads a Prisma relation (e.g., `client.intakePacket`, `user.sessions`), you MUST verify its cardinality in `prisma/schema.prisma`:

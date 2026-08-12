@@ -1,8 +1,17 @@
-'use client';
+import { assertApplicantHired } from '@/lib/assertApplicantHired';
+import { RbtJobBoardView } from '@/components/rbt/RbtJobBoardView';
+import { listOpenCaseOpeningsForRbt } from '@/app/actions/caseOpeningActions';
+import { toJobBoardListing } from './jobBoardUi';
 
-import React from 'react';
-import { RbtAvailabilityView } from '@/components/rbt/RbtAvailabilityView';
+export default async function RbtJobBoardPage() {
+  await assertApplicantHired();
+  const result = await listOpenCaseOpeningsForRbt();
 
-export default function RbtJobBoardPage() {
-  return <RbtAvailabilityView mode="job-board" />;
+  return (
+    <RbtJobBoardView
+      openings={result.openings.map(toJobBoardListing)}
+      travelProfile={result.travelProfile}
+      loadError={result.success ? null : result.error || 'Failed to load the job board.'}
+    />
+  );
 }

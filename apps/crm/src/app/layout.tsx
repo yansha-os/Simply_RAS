@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Inter, Fraunces, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
+// Boot-time env-lock: fails the build/render loudly if dev tools are enabled in production.
+import "@/lib/devToolsGate";
 
 const inter = Inter({
   variable: "--font-inter",

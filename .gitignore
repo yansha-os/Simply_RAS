@@ -41,4 +41,9 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-/src/generated/prisma
+apps/*/src/generated/prisma
+**/src/generated/prisma
+
+# cursor
+.cursor/
+

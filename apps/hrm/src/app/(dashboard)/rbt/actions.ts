@@ -1,90 +1,51 @@
 'use server'
 
 import { prisma } from '@/lib/prisma'
-import { revalidatePath } from 'next/cache'
+import { resolveActingRbtContext } from '@/lib/resolveActingRbt'
 
-export async function logSession(prevState: any, formData: FormData) {
-  try {
-    const clientId = String(formData.get('clientId'))
-    const rbtId = String(formData.get('rbtId'))
-    const bcbaId = String(formData.get('bcbaId'))
-    
-    // Hardcoding a 2-hour session for demonstration
-    const scheduledStart = new Date()
-    const scheduledEnd = new Date(scheduledStart.getTime() + (2 * 60 * 60 * 1000))
-
-    if (!clientId || !rbtId) {
-      return { error: 'Missing client or RBT ID.' }
-    }
-
-    // Step 7: First Session & Active Therapy -> Create Tracker Session Note
-    await prisma.$transaction(async (tx) => {
-      const session = await tx.session.create({
-        data: {
-          clientId,
-          rbtId,
-          bcbaId: bcbaId !== 'undefined' ? bcbaId : null,
-          status: 'COMPLETED',
-          scheduledStart,
-          scheduledEnd,
-          cptCode: '97153',
-        }
-      })
-
-      await tx.sessionNote.create({
-        data: {
-          sessionId: session.id,
-          // No PHI stored.
-          clinicalContent: 'Session completed and documented in Artemis EMR.',
-          // RBT inherently signs it when confirming
-          rbtSigned: true, 
-          parentSigned: false,
-          bcbaSigned: false,
-          isConverted: false
-        }
-      })
-    })
-
-    revalidatePath('/rbt')
-    revalidatePath('/case')
-    revalidatePath('/notes')
-    return { success: true }
-  } catch (error) {
-    console.error(error)
-    return { error: 'Failed to log session.' }
+async function resolveActiveRbt() {
+  const acting = await resolveActingRbtContext()
+  if (!acting.rbtUserId) {
+    return { ok: false as const, error: 'No authenticated RBT identity. Please sign in.' }
   }
+
+  const rbt = await prisma.user.findFirst({
+    where: {
+      id: acting.rbtUserId,
+      role: 'RBT',
+      isActive: true,
+    },
+    select: { id: true },
+  })
+  if (!rbt) {
+    return { ok: false as const, error: 'Your active RBT staff account could not be verified.' }
+  }
+
+  return { ok: true as const, rbt }
 }
 
-export async function fixDeficiency(prevState: any, formData: FormData) {
+/**
+ * Retired assignment writer. Kept as a server-disabled compatibility facade
+ * so stale clients cannot manufacture completed sessions from hidden form IDs.
+ */
+export async function logSession(_prevState: unknown, _formData: FormData) {
   try {
-    const deficiencyId = String(formData.get('deficiencyId'))
-    const noteId = String(formData.get('noteId'))
+    void _prevState
+    void _formData
+    const acting = await resolveActiveRbt()
+    if (!acting.ok) {
+      return { error: acting.error }
+    }
 
-    await prisma.$transaction(async (tx) => {
-      // 1. Update the note tracking record
-      await tx.sessionNote.update({
-        where: { id: noteId },
-        data: {
-          rbtSigned: true // They confirm they fixed it in Artemis
-        }
-      })
-
-      // 2. Mark deficiency resolved
-      await tx.noteDeficiency.update({
-        where: { id: deficiencyId },
-        data: {
-          status: 'RESOLVED',
-          resolvedAt: new Date()
-        }
-      })
-    })
-
-    revalidatePath('/rbt')
-    revalidatePath('/case')
-    revalidatePath('/notes')
-    return { success: true }
+    return {
+      error:
+        'Direct session logging is disabled. Open your assigned scheduled session in Session Studio.',
+    }
   } catch (error) {
-    console.error(error)
-    return { error: 'Failed to fix deficiency.' }
+    console.error(
+      'Action failed [logSession]:',
+      error instanceof Error ? error.message : 'Unknown error'
+    )
+    return { error: 'Unable to verify Session Studio access.' }
   }
 }

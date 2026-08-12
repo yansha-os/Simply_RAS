@@ -2,14 +2,38 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Bell, Check, CheckCheck, ExternalLink, Info, AlertTriangle, ShieldAlert } from 'lucide-react';
-import { getNotifications, markNotificationAsRead, markAllNotificationsAsRead } from '@/app/actions/notifications';
+import {
+  getNotifications,
+  markNotificationAsRead,
+  markAllNotificationsAsRead,
+} from '@/app/actions/notificationActions';
+import { resolveNotificationLink } from '@/lib/notificationLinks';
 import { useHrmRole } from '@/lib/useHrmRole';
 import { useTheme } from './ThemeContext';
 import Link from 'next/link';
 
+type NotificationRecord = Awaited<ReturnType<typeof getNotifications>>['notifications'][number];
+
+type NotificationItem = Pick<
+  NotificationRecord,
+  'id' | 'title' | 'message' | 'type' | 'createdAt' | 'isRead' | 'linkUrl'
+>;
+
+function toNotificationItem(notification: NotificationRecord): NotificationItem {
+  return {
+    id: notification.id,
+    title: notification.title,
+    message: notification.message,
+    type: notification.type,
+    createdAt: notification.createdAt,
+    isRead: notification.isRead,
+    linkUrl: notification.linkUrl,
+  };
+}
+
 export default function NotificationBell({ userId }: { userId?: string }) {
   const [isOpen, setIsOpen] = useState(false);
-  const [notifications, setNotifications] = useState<any[]>([]);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -17,19 +41,23 @@ export default function NotificationBell({ userId }: { userId?: string }) {
   const { colorMode } = useTheme();
   const isLightMode = role === 'RBT' && colorMode === 'light';
 
-  const loadNotifications = () => {
-    getNotifications(userId).then(res => {
-      if (res?.success) {
-        setNotifications(res.notifications || []);
-        setUnreadCount(res.unreadCount || 0);
-      }
-    });
-  };
-
   useEffect(() => {
+    let active = true;
+    const loadNotifications = () => {
+      void getNotifications().then((res) => {
+        if (active && res.success) {
+          setNotifications(res.notifications.map(toNotificationItem));
+          setUnreadCount(res.unreadCount);
+        }
+      });
+    };
+
     loadNotifications();
-    const interval = setInterval(loadNotifications, 15000); // Poll every 15s
-    return () => clearInterval(interval);
+    const interval = window.setInterval(loadNotifications, 15000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
   }, [userId]);
 
   // Close dropdown when clicking outside
@@ -53,8 +81,18 @@ export default function NotificationBell({ userId }: { userId?: string }) {
     });
   };
 
+  // Mark-as-read when the user follows a notification link (best effort on cross-app full navigations).
+  const handleLinkClick = (item: { id: string; isRead: boolean }) => {
+    if (!item.isRead) {
+      markNotificationAsRead(item.id).catch(() => {});
+      setNotifications(prev => prev.map(n => n.id === item.id ? { ...n, isRead: true } : n));
+      setUnreadCount(prev => Math.max(0, prev - 1));
+    }
+    setIsOpen(false);
+  };
+
   const handleMarkAllRead = () => {
-    markAllNotificationsAsRead(userId).then(res => {
+    markAllNotificationsAsRead().then(res => {
       if (res?.success) {
         setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
         setUnreadCount(0);
@@ -157,15 +195,20 @@ export default function NotificationBell({ userId }: { userId?: string }) {
                         {new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </span>
 
-                      {item.linkUrl && (
-                        <Link
-                          href={item.linkUrl}
-                          onClick={() => setIsOpen(false)}
-                          className="text-[11px] font-bold text-[#F97316] hover:text-orange-600 inline-flex items-center gap-1"
-                        >
-                          View <ExternalLink className="w-3 h-3" />
-                        </Link>
-                      )}
+                      {item.linkUrl && (() => {
+                        const { href, isCrossApp } = resolveNotificationLink(item.linkUrl);
+                        const linkClass = 'text-[11px] font-bold text-[#F97316] hover:text-orange-600 inline-flex items-center gap-1 cursor-pointer';
+                        // Cross-app links need a full navigation (regular anchor); the client router would 404.
+                        return isCrossApp ? (
+                          <a href={href} onClick={() => handleLinkClick(item)} className={linkClass}>
+                            View <ExternalLink className="w-3 h-3" />
+                          </a>
+                        ) : (
+                          <Link href={href} onClick={() => handleLinkClick(item)} className={linkClass}>
+                            View <ExternalLink className="w-3 h-3" />
+                          </Link>
+                        );
+                      })()}
                     </div>
                   </div>
                 </div>

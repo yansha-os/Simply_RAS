@@ -1,11 +1,139 @@
 'use server'
 
+import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
+import {
+  requireClientAccess,
+  requireStaff,
+  INTAKE_ROLES,
+  CASE_COORD_ROLES,
+} from '@/lib/auth-guard'
+import { requireStaffOrParent, newMagicLinkExpiry } from '@/lib/magicLinkGuard'
+import { updateClientCaseCoordinator } from '@/app/actions/hr'
+import { writeAuditLog } from '@/lib/auditLog'
+import {
+  assertSingleConditionalWrite,
+  buildDocumentCorrectionPatch,
+  buildFormCorrectionPatch,
+  buildIntakeClientProfilePatch,
+  deriveMessageMutation,
+  deriveReadDirection,
+  intakeActionFailure,
+  isIntakeReviewItemKey,
+  isIntakeWriteConflict,
+  isRejectableIntakeDocumentKey,
+  isUuid,
+  normalizeFormCorrections,
+  runAuthorizedIntakeAction,
+  validateBoundIntakePacket,
+  validateMagicLinkCreationState,
+  validateMagicLinkRotationState,
+  validatePacketReadyForClinical,
+  validateReviewItemAvailability,
+  validateSubmittedIntakeReview,
+  validateUnlockRequest,
+  type IntakeActionFailure,
+  type IntakeActionFailureCode,
+  type IntakeActionResult,
+} from './actions/intake-action-security'
 
-export async function createInquiry(prevState: any, formData: FormData) {
+const INTAKE_CLIENT_PACKET_SELECT = {
+  id: true,
+  status: true,
+  updatedAt: true,
+  intakePacket: {
+    select: {
+      id: true,
+      clientId: true,
+      status: true,
+      updatedAt: true,
+      magicLinkRevokedAt: true,
+      clientChangeRequested: true,
+      formData: true,
+      rejectionDetails: true,
+      intakeFormComplete: true,
+      consentFormComplete: true,
+      insuranceCardFrontUploaded: true,
+      insuranceCardBackUploaded: true,
+      medicaidCardFrontUploaded: true,
+      medicaidCardBackUploaded: true,
+      diagnosticEvalUploaded: true,
+      physicianRxUploaded: true,
+      iepUploaded: true,
+      custodyDocsUploaded: true,
+      priorAbaRecordsUploaded: true,
+    },
+  },
+} as const satisfies Prisma.ClientSelect
+
+function loadIntakeClient(clientId: string) {
+  return prisma.client.findUnique({
+    where: { id: clientId },
+    select: INTAKE_CLIENT_PACKET_SELECT,
+  })
+}
+
+function revalidateIntakeSurfaces(clientId: string) {
+  revalidatePath('/', 'layout')
+  revalidatePath(`/client/${clientId}`)
+  revalidatePath('/portal-case')
+  revalidatePath('/portal-case/clients')
+  revalidatePath('/magic-link/[id]', 'page')
+}
+
+function policyFailure(result: {
+  ok: false
+  code: IntakeActionFailureCode
+  error: string
+}): IntakeActionFailure {
+  return intakeActionFailure(result.code, result.error)
+}
+
+function mutationFailure(
+  actionName: string,
+  error: unknown,
+  fallback: string
+): IntakeActionFailure {
+  if (isIntakeWriteConflict(error)) {
+    return intakeActionFailure(
+      'STALE_WRITE',
+      'This intake record changed in another session. Refresh and try again.'
+    )
+  }
+  console.error(
+    `${actionName} failed:`,
+    error instanceof Error ? error.name : 'UnknownError'
+  )
+  return intakeActionFailure('OPERATION_FAILED', fallback)
+}
+
+async function auditIntakeMutation(input: {
+  actorUserId: string
+  action: string
+  packetId: string
+  clientId: string
+  meta?: Record<string, unknown>
+}) {
+  await writeAuditLog({
+    actorUserId: input.actorUserId,
+    action: input.action,
+    entityType: 'INTAKE_PACKET',
+    entityId: input.packetId,
+    meta: {
+      clientId: input.clientId,
+      ...(input.meta ?? {}),
+    },
+  })
+}
+
+export async function createInquiry(prevState: unknown, formData: FormData) {
   try {
+    void prevState
+    const gate = await requireStaff(INTAKE_ROLES)
+    if (!gate.ok) return { success: false, error: gate.error }
+
     const firstName = String(formData.get('childFirstName') || formData.get('firstName') || '').trim()
     const lastName = String(formData.get('childLastName') || formData.get('lastName') || '').trim()
     
@@ -15,8 +143,6 @@ export async function createInquiry(prevState: any, formData: FormData) {
 
     const guardianPhone = String(formData.get('guardianPhone') || '').trim() || null
     const guardianEmail = String(formData.get('guardianEmail') || '').trim() || null
-    const preferredLanguage = String(formData.get('preferredLanguage') || 'English').trim()
-
     if (!firstName || !lastName) {
       return { success: false, error: 'Child First Name and Last Name are required.' }
     }
@@ -35,15 +161,22 @@ export async function createInquiry(prevState: any, formData: FormData) {
     revalidatePath('/portal-case')
     revalidatePath('/portal-case/clients')
     return { success: true }
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Failed to create inquiry:', error)
-    return { success: false, error: error.message || 'Failed to create inquiry.' }
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to create inquiry.',
+    }
   }
 }
 
-export async function createIntakeClient(prevState: any, formData: FormData) {
+export async function createIntakeClient(prevState: unknown, formData: FormData) {
   let newClient;
-  
+  void prevState
+
+  const gate = await requireStaff(INTAKE_ROLES)
+  if (!gate.ok) return { error: gate.error }
+
   try {
     const firstName = String(formData.get('firstName'))
     const lastName = String(formData.get('lastName'))
@@ -82,234 +215,603 @@ export async function createIntakeClient(prevState: any, formData: FormData) {
   redirect(`/client/${newClient.id}`)
 }
 
-export async function generateMagicLink(formData: FormData) {
-  const clientId = String(formData.get('clientId'))
-  const magicLinkToken = crypto.randomUUID()
+export async function generateMagicLink(
+  clientId: string
+): Promise<IntakeActionResult> {
+  return runAuthorizedIntakeAction(
+    () => requireStaff(INTAKE_ROLES),
+    async (actor) => {
+      if (!isUuid(clientId)) {
+        return intakeActionFailure('INVALID_ID', 'Invalid client.')
+      }
 
-  await prisma.intakePacket.create({
-    data: {
-      clientId,
-      magicLinkToken,
-      status: 'PENDING_CLIENT_SUBMISSION'
+      try {
+        const client = await loadIntakeClient(clientId)
+        const state = validateMagicLinkCreationState(client, clientId)
+        if (!state.ok) return policyFailure(state)
+
+        const magicLinkToken = crypto.randomUUID()
+        const packetId = await prisma.$transaction(
+          async (tx) => {
+            const clientUpdate = await tx.client.updateMany({
+              where: {
+                id: clientId,
+                status: 'INQUIRY',
+                updatedAt: client!.updatedAt,
+              },
+              data: { status: 'MAGIC_LINK_SENT' },
+            })
+            assertSingleConditionalWrite(clientUpdate.count)
+
+            const packet = await tx.intakePacket.create({
+              data: {
+                clientId,
+                magicLinkToken,
+                magicLinkExpiresAt: newMagicLinkExpiry(),
+                status: 'PENDING_CLIENT_SUBMISSION',
+              },
+              select: { id: true },
+            })
+            return packet.id
+          },
+          { isolationLevel: 'Serializable' }
+        )
+
+        await auditIntakeMutation({
+          actorUserId: actor.id,
+          action: 'MAGIC_LINK_CREATED',
+          packetId,
+          clientId,
+        })
+        revalidateIntakeSurfaces(clientId)
+        return { success: true }
+      } catch (error) {
+        return mutationFailure(
+          'generateMagicLink',
+          error,
+          'Failed to generate the parent link. Please try again.'
+        )
+      }
     }
-  })
-
-  await prisma.client.update({
-    where: { id: clientId },
-    data: { status: 'MAGIC_LINK_SENT' }
-  })
-
-  revalidatePath(`/client/${clientId}`)
+  )
 }
 
-export async function regenerateMagicLink(formData: FormData) {
-  const packetId = String(formData.get('packetId'))
-  const clientId = String(formData.get('clientId'))
-  const newMagicLinkToken = crypto.randomUUID()
+/** Staff "reset link": new token + fresh expiry, clears revocation + device lock. */
+export async function regenerateMagicLink(
+  clientId: string,
+  packetId: string
+): Promise<IntakeActionResult> {
+  return runAuthorizedIntakeAction(
+    () => requireStaff(INTAKE_ROLES),
+    async (actor) => {
+      if (!isUuid(clientId) || !isUuid(packetId)) {
+        return intakeActionFailure(
+          'INVALID_ID',
+          'Invalid client or intake packet.'
+        )
+      }
 
-  await prisma.intakePacket.update({
-    where: { id: packetId },
-    data: { magicLinkToken: newMagicLinkToken }
-  })
+      try {
+        const client = await loadIntakeClient(clientId)
+        const state = validateMagicLinkRotationState(
+          client,
+          clientId,
+          packetId
+        )
+        if (!state.ok) return policyFailure(state)
+        const packet = client!.intakePacket!
 
-  revalidatePath(`/client/${clientId}`)
+        const update = await prisma.intakePacket.updateMany({
+          where: {
+            id: packetId,
+            clientId,
+            status: packet.status,
+            updatedAt: packet.updatedAt,
+          },
+          data: {
+            magicLinkToken: crypto.randomUUID(),
+            magicLinkExpiresAt: newMagicLinkExpiry(),
+            magicLinkRevokedAt: null,
+            deviceFingerprint: null,
+          },
+        })
+        assertSingleConditionalWrite(update.count)
+
+        await auditIntakeMutation({
+          actorUserId: actor.id,
+          action: 'MAGIC_LINK_REGENERATED',
+          packetId,
+          clientId,
+        })
+        revalidateIntakeSurfaces(clientId)
+        return { success: true }
+      } catch (error) {
+        return mutationFailure(
+          'regenerateMagicLink',
+          error,
+          'Failed to regenerate the parent link. Please try again.'
+        )
+      }
+    }
+  )
 }
 
-export async function sendToClinical(formData: FormData) {
-  const packetId = String(formData.get('packetId'))
-  const clientId = String(formData.get('clientId'))
+/** Staff revoke: kills the live parent link immediately. */
+export async function revokeMagicLink(
+  packetId: string,
+  clientId: string
+): Promise<IntakeActionResult> {
+  return runAuthorizedIntakeAction(
+    () => requireStaff(INTAKE_ROLES),
+    async (actor) => {
+      if (!isUuid(clientId) || !isUuid(packetId)) {
+        return intakeActionFailure(
+          'INVALID_ID',
+          'Invalid client or intake packet.'
+        )
+      }
 
-  await prisma.intakePacket.update({
-    where: { id: packetId },
-    data: { status: 'APPROVED' }
-  })
+      try {
+        const client = await loadIntakeClient(clientId)
+        const binding = validateBoundIntakePacket(
+          client,
+          clientId,
+          packetId
+        )
+        if (!binding.ok) return policyFailure(binding)
+        const packet = client!.intakePacket!
+        if (packet.magicLinkRevokedAt) return { success: true }
 
-  await prisma.client.update({
-    where: { id: clientId },
-    data: { status: 'DOCS_APPROVED_INTAKE' }
-  })
+        const update = await prisma.intakePacket.updateMany({
+          where: {
+            id: packetId,
+            clientId,
+            updatedAt: packet.updatedAt,
+            magicLinkRevokedAt: null,
+          },
+          data: { magicLinkRevokedAt: new Date() },
+        })
+        assertSingleConditionalWrite(update.count)
 
-  revalidatePath(`/client/${clientId}`)
-  redirect('/portal-case/clients')
+        await auditIntakeMutation({
+          actorUserId: actor.id,
+          action: 'MAGIC_LINK_REVOKED',
+          packetId,
+          clientId,
+        })
+        revalidateIntakeSurfaces(clientId)
+        return { success: true }
+      } catch (error) {
+        return mutationFailure(
+          'revokeMagicLink',
+          error,
+          'Failed to revoke the parent link. Please try again.'
+        )
+      }
+    }
+  )
 }
 
-export async function approveDocument(packetId: string, documentKey: string, clientId: string) {
-  const packet = await prisma.intakePacket.update({
-    where: { id: packetId },
-    data: { [documentKey]: true }
-  });
+export async function sendToClinical(
+  clientId: string,
+  packetId: string
+): Promise<IntakeActionResult> {
+  return runAuthorizedIntakeAction(
+    () => requireStaff(INTAKE_ROLES),
+    async (actor) => {
+      if (!isUuid(clientId) || !isUuid(packetId)) {
+        return intakeActionFailure(
+          'INVALID_ID',
+          'Invalid client or intake packet.'
+        )
+      }
 
-  if (documentKey === 'intakeFormComplete') {
-    let parsed1 = typeof packet.formData === 'string' ? JSON.parse(packet.formData) : (packet.formData || {});
-    let formData = typeof parsed1 === 'string' ? JSON.parse(parsed1) : parsed1;
+      try {
+        const client = await loadIntakeClient(clientId)
+        const ready = validatePacketReadyForClinical(
+          client,
+          clientId,
+          packetId
+        )
+        if (!ready.ok) return policyFailure(ready)
+        const packet = client!.intakePacket!
 
-    // Calculate age from DOB
-    let childAge = null;
-    let dateOfBirth = null;
-    if (formData.dob) {
-      dateOfBirth = new Date(formData.dob);
-      const diff = Date.now() - dateOfBirth.getTime();
-      childAge = Math.floor(diff / (1000 * 60 * 60 * 24 * 365.25));
+        await prisma.$transaction(
+          async (tx) => {
+            const packetUpdate = await tx.intakePacket.updateMany({
+              where: {
+                id: packetId,
+                clientId,
+                status: 'SUBMITTED',
+                updatedAt: packet.updatedAt,
+              },
+              data: { status: 'APPROVED' },
+            })
+            assertSingleConditionalWrite(packetUpdate.count)
+
+            const clientUpdate = await tx.client.updateMany({
+              where: {
+                id: clientId,
+                status: 'DOCS_SUBMITTED',
+                updatedAt: client!.updatedAt,
+              },
+              data: { status: 'DOCS_APPROVED_INTAKE' },
+            })
+            assertSingleConditionalWrite(clientUpdate.count)
+          },
+          { isolationLevel: 'Serializable' }
+        )
+
+        await auditIntakeMutation({
+          actorUserId: actor.id,
+          action: 'INTAKE_APPROVED_FOR_CLINICAL',
+          packetId,
+          clientId,
+        })
+        revalidateIntakeSurfaces(clientId)
+        return { success: true }
+      } catch (error) {
+        return mutationFailure(
+          'sendToClinical',
+          error,
+          'Failed to send the packet to Clinical. Please try again.'
+        )
+      }
     }
-
-    // Split childName into firstName, lastName
-    let firstName = undefined;
-    let lastName = undefined;
-    if (formData.childName) {
-      const parts = formData.childName.trim().split(' ');
-      firstName = parts[0];
-      lastName = parts.slice(1).join(' ') || '';
-    }
-
-    // Prepare data
-    const updateData: any = {};
-    if (firstName) updateData.firstName = firstName;
-    if (lastName !== undefined) updateData.lastName = lastName;
-    if (dateOfBirth) updateData.dateOfBirth = dateOfBirth;
-    if (childAge !== null) updateData.childAge = childAge;
-    
-    if (formData.sexAtBirth) updateData.childGender = formData.sexAtBirth;
-    
-    if (formData.priInsCompany) updateData.insurancePayer = formData.priInsCompany;
-    if (formData.priInsMemberId) updateData.memberId = formData.priInsMemberId;
-    if (formData.medicaidId) updateData.medicaidId = formData.medicaidId;
-
-    if (formData.g1Name) updateData.guardianName = formData.g1Name;
-    if (formData.g1Phone) updateData.guardianPhone = formData.g1Phone;
-    if (formData.g1Email) updateData.guardianEmail = formData.g1Email;
-    
-    // Address format
-    if (formData.g1Address) {
-      updateData.parentAddress = formData.g1Address;
-    }
-
-    await prisma.client.update({
-      where: { id: clientId },
-      data: updateData
-    });
-  }
-
-  revalidatePath('/client');
-  revalidatePath(`/client/${clientId}`);
+  )
 }
 
-export async function rejectDocument(packetId: string, documentKey: string, clientId: string, reason: string) {
-  const packet = await prisma.intakePacket.findUnique({ where: { id: packetId } })
-  
-  if (!packet) return;
+export async function approveDocument(
+  packetId: string,
+  documentKey: string,
+  clientId: string
+): Promise<IntakeActionResult> {
+  return runAuthorizedIntakeAction(
+    () => requireStaff(INTAKE_ROLES),
+    async (actor) => {
+      if (!isUuid(clientId) || !isUuid(packetId)) {
+        return intakeActionFailure(
+          'INVALID_ID',
+          'Invalid client or intake packet.'
+        )
+      }
+      if (!isIntakeReviewItemKey(documentKey)) {
+        return intakeActionFailure(
+          'INVALID_DOCUMENT_KEY',
+          'Invalid intake review item.'
+        )
+      }
 
-  const currentDetails = typeof packet.rejectionDetails === 'object' && packet.rejectionDetails !== null 
-    ? (packet.rejectionDetails as Record<string, string>) 
-    : {};
+      try {
+        const client = await loadIntakeClient(clientId)
+        const review = validateSubmittedIntakeReview(
+          client,
+          clientId,
+          packetId
+        )
+        if (!review.ok) return policyFailure(review)
+        const packet = client!.intakePacket!
+        const availability = validateReviewItemAvailability(
+          packet,
+          clientId,
+          documentKey
+        )
+        if (!availability.ok) return policyFailure(availability)
 
-  currentDetails[documentKey] = reason;
+        const packetData = {
+          [documentKey]: true,
+        } as Prisma.IntakePacketUpdateManyMutationInput
+        const clientData: Prisma.ClientUpdateManyMutationInput =
+          buildIntakeClientProfilePatch(packet.formData)
 
-  // Clear the formData so the client can re-upload
-  let parsed1 = typeof packet.formData === 'string' ? JSON.parse(packet.formData) : (packet.formData || {});
-  let formData = typeof parsed1 === 'string' ? JSON.parse(parsed1) : parsed1;
-  
-  const uploadMap: Record<string, string> = {
-    insuranceCardFrontUploaded: 'docInsuranceFront',
-    insuranceCardBackUploaded: 'docInsuranceBack',
-    medicaidCardFrontUploaded: 'docMedicaidFront',
-    medicaidCardBackUploaded: 'docMedicaidBack',
-    diagnosticEvalUploaded: 'docEval',
-    physicianRxUploaded: 'docReferral',
-    iepUploaded: 'docIEP',
-    custodyDocsUploaded: 'docCustody',
-    priorAbaRecordsUploaded: 'docPriorABA'
-  };
-  
-  const formKey = uploadMap[documentKey];
-  if (formKey) {
-    delete formData[formKey];
-  }
+        await prisma.$transaction(
+          async (tx) => {
+            const liveClient = await tx.client.findUnique({
+              where: { id: clientId },
+              select: { status: true, updatedAt: true },
+            })
+            if (
+              !liveClient ||
+              liveClient.status !== 'DOCS_SUBMITTED' ||
+              liveClient.updatedAt.getTime() !==
+                client!.updatedAt.getTime()
+            ) {
+              assertSingleConditionalWrite(0)
+            }
 
-  await prisma.intakePacket.update({
-    where: { id: packetId },
-    data: { 
-      [documentKey]: false,
-      rejectionDetails: currentDetails,
-      formData: formData,
-      status: 'PENDING_CLIENT_SUBMISSION'
+            const packetUpdate = await tx.intakePacket.updateMany({
+              where: {
+                id: packetId,
+                clientId,
+                status: 'SUBMITTED',
+                updatedAt: packet.updatedAt,
+              },
+              data: packetData,
+            })
+            assertSingleConditionalWrite(packetUpdate.count)
+
+            if (documentKey === 'intakeFormComplete') {
+              const clientUpdate = await tx.client.updateMany({
+                where: {
+                  id: clientId,
+                  status: 'DOCS_SUBMITTED',
+                  updatedAt: client!.updatedAt,
+                },
+                data: clientData,
+              })
+              assertSingleConditionalWrite(clientUpdate.count)
+            }
+          },
+          { isolationLevel: 'Serializable' }
+        )
+
+        await auditIntakeMutation({
+          actorUserId: actor.id,
+          action: 'INTAKE_ITEM_APPROVED',
+          packetId,
+          clientId,
+          meta: { documentKey },
+        })
+        revalidateIntakeSurfaces(clientId)
+        return { success: true }
+      } catch (error) {
+        return mutationFailure(
+          'approveDocument',
+          error,
+          'Failed to approve the intake item. Please try again.'
+        )
+      }
     }
-  })
-  
-  revalidatePath('/client/[id]', 'page');
-  revalidatePath('/magic-link/[id]', 'page');
+  )
 }
 
-export async function rejectFormField(packetId: string, fieldId: string, reason: string) {
-  return rejectFormFieldsBulk(packetId, [{ fieldId, reason }]);
+export async function rejectDocument(
+  packetId: string,
+  documentKey: string,
+  clientId: string,
+  reason: string
+): Promise<IntakeActionResult> {
+  return runAuthorizedIntakeAction(
+    () => requireStaff(INTAKE_ROLES),
+    async (actor) => {
+      if (!isUuid(clientId) || !isUuid(packetId)) {
+        return intakeActionFailure(
+          'INVALID_ID',
+          'Invalid client or intake packet.'
+        )
+      }
+      if (!isRejectableIntakeDocumentKey(documentKey)) {
+        return intakeActionFailure(
+          'INVALID_DOCUMENT_KEY',
+          'Invalid document key.'
+        )
+      }
+
+      try {
+        const client = await loadIntakeClient(clientId)
+        const review = validateSubmittedIntakeReview(
+          client,
+          clientId,
+          packetId
+        )
+        if (!review.ok) return policyFailure(review)
+        const packet = client!.intakePacket!
+        const availability = validateReviewItemAvailability(
+          packet,
+          clientId,
+          documentKey
+        )
+        if (!availability.ok) return policyFailure(availability)
+
+        const correction = buildDocumentCorrectionPatch(
+          packet,
+          documentKey,
+          reason
+        )
+        if (!correction.ok) return policyFailure(correction)
+        const data = correction.value
+        const updateData = {
+          [documentKey]: false,
+          formData: data.formData as Prisma.InputJsonValue,
+          rejectionDetails:
+            data.rejectionDetails as Prisma.InputJsonValue,
+          status: 'PENDING_CLIENT_SUBMISSION',
+        } as Prisma.IntakePacketUpdateManyMutationInput
+
+        const update = await prisma.intakePacket.updateMany({
+          where: {
+            id: packetId,
+            clientId,
+            status: 'SUBMITTED',
+            updatedAt: packet.updatedAt,
+          },
+          data: updateData,
+        })
+        assertSingleConditionalWrite(update.count)
+
+        await auditIntakeMutation({
+          actorUserId: actor.id,
+          action: 'INTAKE_DOCUMENT_CORRECTION_REQUESTED',
+          packetId,
+          clientId,
+          meta: { documentKey },
+        })
+        revalidateIntakeSurfaces(clientId)
+        return { success: true }
+      } catch (error) {
+        return mutationFailure(
+          'rejectDocument',
+          error,
+          'Failed to request the document correction. Please try again.'
+        )
+      }
+    }
+  )
 }
 
-export async function rejectFormFieldsBulk(packetId: string, fields: { fieldId: string, reason: string }[]) {
-  const packet = await prisma.intakePacket.findUnique({ where: { id: packetId } });
-  if (!packet) return;
-
-  const currentDetails = typeof packet.rejectionDetails === 'object' && packet.rejectionDetails !== null 
-    ? (packet.rejectionDetails as Record<string, string>) 
-    : {};
-
-  let parsed2 = typeof packet.formData === 'string' ? JSON.parse(packet.formData) : (packet.formData || {});
-  let formData = typeof parsed2 === 'string' ? JSON.parse(parsed2) : parsed2;
-  
-  fields.forEach(({ fieldId, reason }) => {
-    currentDetails[`formField_${fieldId}`] = reason;
-    delete formData[fieldId];
-  });
-
-  await prisma.intakePacket.update({
-    where: { id: packetId },
-    data: { 
-      formData,
-      rejectionDetails: currentDetails,
-      status: 'PENDING_CLIENT_SUBMISSION',
-    }
-  });
-  
-  revalidatePath('/client/[id]', 'page');
-  revalidatePath('/magic-link/[id]', 'page');
+export async function rejectFormField(
+  packetId: string,
+  clientId: string,
+  fieldId: string,
+  reason: string
+): Promise<IntakeActionResult> {
+  return rejectFormFieldsBulk(packetId, clientId, [
+    { fieldId, reason },
+  ])
 }
 
-export async function unlockPacket(packetId: string) {
-  await prisma.intakePacket.update({
-    where: { id: packetId },
-    data: { 
-      status: 'PENDING_CLIENT_SUBMISSION',
-      clientChangeRequested: false,
-      clientChangeNotes: null
+export async function rejectFormFieldsBulk(
+  packetId: string,
+  clientId: string,
+  fields: { fieldId: string; reason: string }[]
+): Promise<IntakeActionResult> {
+  return runAuthorizedIntakeAction(
+    () => requireStaff(INTAKE_ROLES),
+    async (actor) => {
+      if (!isUuid(clientId) || !isUuid(packetId)) {
+        return intakeActionFailure(
+          'INVALID_ID',
+          'Invalid client or intake packet.'
+        )
+      }
+      const normalized = normalizeFormCorrections(fields)
+      if (!normalized.ok) return policyFailure(normalized)
+
+      try {
+        const client = await loadIntakeClient(clientId)
+        const review = validateSubmittedIntakeReview(
+          client,
+          clientId,
+          packetId
+        )
+        if (!review.ok) return policyFailure(review)
+        const packet = client!.intakePacket!
+
+        const correction = buildFormCorrectionPatch(
+          packet,
+          normalized.value
+        )
+        if (!correction.ok) return policyFailure(correction)
+        const data = correction.value
+
+        const update = await prisma.intakePacket.updateMany({
+          where: {
+            id: packetId,
+            clientId,
+            status: 'SUBMITTED',
+            updatedAt: packet.updatedAt,
+          },
+          data: {
+            formData: data.formData as Prisma.InputJsonValue,
+            rejectionDetails:
+              data.rejectionDetails as Prisma.InputJsonValue,
+            status: 'PENDING_CLIENT_SUBMISSION',
+            intakeFormComplete: Boolean(data.intakeFormComplete),
+            consentFormComplete: Boolean(data.consentFormComplete),
+          },
+        })
+        assertSingleConditionalWrite(update.count)
+
+        await auditIntakeMutation({
+          actorUserId: actor.id,
+          action: 'INTAKE_FORM_CORRECTION_REQUESTED',
+          packetId,
+          clientId,
+          meta: { correctionCount: normalized.value.length },
+        })
+        revalidateIntakeSurfaces(clientId)
+        return { success: true }
+      } catch (error) {
+        return mutationFailure(
+          'rejectFormFieldsBulk',
+          error,
+          'Failed to request the form corrections. Please try again.'
+        )
+      }
     }
-  });
-  
-  revalidatePath('/client/[id]', 'page');
-  revalidatePath('/magic-link/[id]', 'page');
+  )
+}
+
+export async function unlockPacket(
+  packetId: string,
+  clientId: string
+): Promise<IntakeActionResult> {
+  return runAuthorizedIntakeAction(
+    () => requireStaff(INTAKE_ROLES),
+    async (actor) => {
+      if (!isUuid(clientId) || !isUuid(packetId)) {
+        return intakeActionFailure(
+          'INVALID_ID',
+          'Invalid client or intake packet.'
+        )
+      }
+
+      try {
+        const client = await loadIntakeClient(clientId)
+        const state = validateUnlockRequest(
+          client,
+          clientId,
+          packetId
+        )
+        if (!state.ok) return policyFailure(state)
+        const packet = client!.intakePacket!
+
+        const update = await prisma.intakePacket.updateMany({
+          where: {
+            id: packetId,
+            clientId,
+            status: 'SUBMITTED',
+            updatedAt: packet.updatedAt,
+            clientChangeRequested: true,
+          },
+          data: {
+            status: 'PENDING_CLIENT_SUBMISSION',
+            clientChangeRequested: false,
+            clientChangeNotes: null,
+          },
+        })
+        assertSingleConditionalWrite(update.count)
+
+        await auditIntakeMutation({
+          actorUserId: actor.id,
+          action: 'INTAKE_PARENT_EDIT_UNLOCKED',
+          packetId,
+          clientId,
+        })
+        revalidateIntakeSurfaces(clientId)
+        return { success: true }
+      } catch (error) {
+        return mutationFailure(
+          'unlockPacket',
+          error,
+          'Failed to unlock the intake packet. Please try again.'
+        )
+      }
+    }
+  )
 }
 
 export async function assignClinicalTeam(clientId: string, bcbaId: string, caseCoordinatorId: string) {
-  let isSuccess = false;
-  try {
-    await prisma.client.update({
-      where: { id: clientId },
-      data: {
-        bcbaId,
-        caseCoordinatorId,
-        status: 'ASSESSMENT_SCHEDULED'
-      }
-    });
-    
-    revalidatePath(`/client/${clientId}`);
-    revalidatePath('/portal-case/clients');
-    isSuccess = true;
-  } catch (error: any) {
-    console.error('Failed to assign clinical team:', error);
-    return { success: false, error: error.message };
-  }
-  
-  if (isSuccess) redirect('/portal-case/clients');
+  const gate = await requireStaff(INTAKE_ROLES);
+  if (!gate.ok) return { success: false, error: gate.error };
+
+  // This combined legacy writer cannot express two independent expected-current
+  // values or operation-specific ownership. Keep the export non-mutating so a
+  // dormant caller cannot bypass the canonical assignment actions.
+  void clientId;
+  void bcbaId;
+  void caseCoordinatorId;
+  return {
+    success: false,
+    error:
+      'Combined clinical-team assignment is disabled. Use Clinical BCBA assignment and the client Assignment tab.',
+  };
 }
 
 export async function getClinicalStaff() {
+  const gate = await requireStaff()
+  if (!gate.ok) return { bcbas: [], caseCoordinators: [] }
+
   const bcbas = await prisma.user.findMany({
     where: { role: 'BCBA', isActive: true },
     select: { id: true, firstName: true, lastName: true }
@@ -323,106 +825,165 @@ export async function getClinicalStaff() {
   return { bcbas, caseCoordinators };
 }
 
-export async function sendClientMessage(clientId: string, content: string, isFromClient: boolean, senderName: string) {
+export async function sendClientMessage(
+  clientId: string,
+  content: string
+): Promise<IntakeActionResult> {
+  const gate = await requireStaffOrParent({ clientId })
+  if (!gate.ok) {
+    return intakeActionFailure('AUTHORIZATION_FAILED', gate.error)
+  }
+  if (!isUuid(clientId)) {
+    return intakeActionFailure('INVALID_ID', 'Invalid client.')
+  }
+  if (gate.via === 'parent' && gate.clientId !== clientId) {
+    return intakeActionFailure(
+      'PACKET_CLIENT_MISMATCH',
+      'This portal cannot access the selected client.'
+    )
+  }
+  if (gate.via === 'staff') {
+    const access = await requireClientAccess(clientId)
+    if (!access.ok) {
+      return intakeActionFailure(
+        'AUTHORIZATION_FAILED',
+        access.error
+      )
+    }
+  }
+
+  const messageData = deriveMessageMutation(gate.via, content)
+  if (!messageData.ok) return policyFailure(messageData)
+
   try {
-    await prisma.clientMessage.create({
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      select: { id: true },
+    })
+    if (!client) {
+      return intakeActionFailure('NOT_FOUND', 'Client not found.')
+    }
+
+    const message = await prisma.clientMessage.create({
       data: {
         clientId,
-        content,
-        isFromClient,
-        senderName
-      }
-    });
-    revalidatePath(`/client/${clientId}`);
-    revalidatePath('/magic-link/[id]', 'page');
-    return { success: true };
-  } catch (error: any) {
-    console.error('Failed to send message:', error);
-    return { success: false, error: error.message };
+        ...messageData.value,
+      },
+      select: { id: true },
+    })
+    await writeAuditLog({
+      actorUserId: gate.via === 'staff' ? gate.user.id : null,
+      action: 'MESSAGE_SENT',
+      entityType: 'CLIENT_MESSAGE',
+      entityId: message.id,
+      meta: {
+        clientId,
+        senderType: gate.via,
+      },
+    })
+
+    revalidatePath(`/client/${clientId}`)
+    revalidatePath('/magic-link/[id]', 'page')
+    return { success: true }
+  } catch (error) {
+    return mutationFailure(
+      'sendClientMessage',
+      error,
+      'Failed to send the message. Please try again.'
+    )
   }
 }
 
-export async function markClientMessagesAsRead(clientId: string, isFromClient: boolean) {
+export async function markClientMessagesAsRead(
+  clientId: string
+): Promise<IntakeActionResult> {
+  const gate = await requireStaffOrParent({ clientId })
+  if (!gate.ok) {
+    return intakeActionFailure('AUTHORIZATION_FAILED', gate.error)
+  }
+  if (!isUuid(clientId)) {
+    return intakeActionFailure('INVALID_ID', 'Invalid client.')
+  }
+  if (gate.via === 'parent' && gate.clientId !== clientId) {
+    return intakeActionFailure(
+      'PACKET_CLIENT_MISMATCH',
+      'This portal cannot access the selected client.'
+    )
+  }
+  if (gate.via === 'staff') {
+    const access = await requireClientAccess(clientId)
+    if (!access.ok) {
+      return intakeActionFailure(
+        'AUTHORIZATION_FAILED',
+        access.error
+      )
+    }
+  }
+
   try {
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      select: { id: true },
+    })
+    if (!client) {
+      return intakeActionFailure('NOT_FOUND', 'Client not found.')
+    }
+
     await prisma.clientMessage.updateMany({
       where: {
         clientId,
-        isFromClient,
-        readAt: null
+        isFromClient: deriveReadDirection(gate.via),
+        readAt: null,
       },
-      data: {
-        readAt: new Date()
-      }
-    });
-    revalidatePath(`/client/${clientId}`);
-    revalidatePath('/magic-link/[id]', 'page');
-    return { success: true };
-  } catch (e) {
-    return { success: false };
+      data: { readAt: new Date() },
+    })
+    revalidatePath(`/client/${clientId}`)
+    revalidatePath('/magic-link/[id]', 'page')
+    return { success: true }
+  } catch (error) {
+    return mutationFailure(
+      'markClientMessagesAsRead',
+      error,
+      'Failed to mark messages as read. Please try again.'
+    )
   }
 }
 
-export async function assignCaseCoordinator(clientId: string, caseCoordinatorId: string) {
-  try {
-    const client = await prisma.client.findUnique({ where: { id: clientId } });
-    if (!client) return { success: false, error: 'Client not found.' };
+export async function assignCaseCoordinator(
+  clientId: string,
+  caseCoordinatorId: string | null,
+  expectedCaseCoordinatorId: string | null
+) {
+  const gate = await requireStaff(CASE_COORD_ROLES);
+  if (!gate.ok) return { success: false as const, error: gate.error };
 
-    const data: any = { caseCoordinatorId };
-    if (client.status === 'STAFFING_PENDING' && client.bcbaId && client.rbtId && client.rbtApproved) {
-      data.status = 'ACTIVE';
-    }
-
-    await prisma.client.update({
-      where: { id: clientId },
-      data
-    });
-
-    await prisma.clientMessage.deleteMany({
-      where: { clientId }
-    });
-    revalidatePath('/', 'layout');
-    return { success: true };
-  } catch (error) {
-    console.error('Failed to assign coordinator:', error instanceof Error ? error.message : error);
-    return { success: false, error: 'Failed to assign Case Coordinator.' };
-  }
+  return updateClientCaseCoordinator({
+    clientId,
+    caseCoordinatorId,
+    expectedCaseCoordinatorId,
+  });
 }
 
 export async function approveRbtCandidate(clientId: string) {
-  try {
-    const client = await prisma.client.findUnique({ where: { id: clientId } });
-    if (!client) return { success: false, error: 'Client not found.' };
+  const gate = await requireStaff(CASE_COORD_ROLES);
+  if (!gate.ok) return { success: false as const, error: gate.error };
 
-    const data: any = { rbtApproved: true };
-    if (client.status === 'STAFFING_PENDING' && client.bcbaId && client.caseCoordinatorId) {
-      data.status = 'ACTIVE';
-    }
-
-    await prisma.client.update({
-      where: { id: clientId },
-      data
-    });
-    revalidatePath('/', 'layout');
-    return { success: true };
-  } catch (error) {
-    console.error('Failed to approve RBT candidate:', error);
-    return { success: false, error: 'Failed to approve RBT candidate.' };
-  }
+  void clientId;
+  return {
+    success: false as const,
+    error:
+      'Legacy RBT approval is disabled. Record the parent decision on the selected Job Board application.',
+  };
 }
 
 export async function rejectRbtCandidate(clientId: string) {
-  try {
-    await prisma.client.update({
-      where: { id: clientId },
-      data: {
-        rbtId: null,
-        rbtApproved: false
-      }
-    });
-    revalidatePath('/', 'layout');
-    return { success: true };
-  } catch (error) {
-    console.error('Failed to reject RBT candidate:', error);
-    return { success: false, error: 'Failed to reject RBT candidate.' };
-  }
+  const gate = await requireStaff(CASE_COORD_ROLES);
+  if (!gate.ok) return { success: false as const, error: gate.error };
+
+  void clientId;
+  return {
+    success: false as const,
+    error:
+      'Legacy RBT rejection is disabled. Decline the selected Job Board application so assignment and opening state stay consistent.',
+  };
 }

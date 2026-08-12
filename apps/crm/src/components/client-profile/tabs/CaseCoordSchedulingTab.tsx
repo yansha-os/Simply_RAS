@@ -1,528 +1,445 @@
 'use client';
 
-import React, { useState, useTransition } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
+import React, { useMemo, useState, useTransition } from 'react';
+import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { Badge } from '@/components/ui/Badge';
-import { 
-  Calendar, 
-  Clock, 
-  UserCheck, 
-  UserX, 
-  CheckCircle2, 
-  AlertCircle, 
-  Sparkles, 
-  Video, 
-  Vote, 
-  ShieldCheck, 
-  RefreshCw,
-  Send,
-  ThumbsUp,
-  ThumbsDown,
-  CheckSquare
+import {
+  ArrowRight,
+  CalendarPlus,
+  CheckCircle2,
+  Sparkles,
+  Briefcase,
+  Clock,
+  ShieldCheck,
+  AlertTriangle,
 } from 'lucide-react';
-import { approveRbtCandidate, rejectRbtCandidate } from '@/app/(dashboard)/portal-case/actions';
+import {
+  scheduleFirstTherapySession,
+  confirmTherapySessionCompleted,
+  activateClientAfterFirstSession,
+} from '@/app/actions/firstSessionActions';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
+import ClientJobBoardPanel from '@/components/client-profile/tabs/ClientJobBoardPanel';
+import StaffingReadinessChecklist from '@/components/portal-case-coord/StaffingReadinessChecklist';
+import { getStaffingReadiness } from '@/lib/staffingReadiness';
+import { CLINIC_TIME_ZONE, addClinicDays, clinicDateKey } from '@/lib/clinicTimezone';
 
-export default function CaseCoordSchedulingTab({ client }: { client: any }) {
+type TherapySession = {
+  id: string;
+  status: string;
+  cptCode: string | null;
+  scheduledStart: string | Date;
+  scheduledEnd: string | Date;
+  location: string | null;
+  rbt?: { firstName: string; lastName: string } | null;
+  bcba?: { firstName: string; lastName: string } | null;
+  note?: {
+    id: string;
+    rbtSigned: boolean;
+    parentSigned: boolean;
+    bcbaSigned: boolean;
+    isConverted: boolean;
+  } | null;
+};
+
+/** Default input value: clinic calendar date +2 days at the given ET wall time. */
+function defaultClinicInputValue(hour: number, minute: number) {
+  const dateKey = clinicDateKey(addClinicDays(new Date(), 2));
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${dateKey}T${pad(hour)}:${pad(minute)}`;
+}
+
+export default function CaseCoordSchedulingTab({
+  client,
+  initialSubTab = 'job_board',
+}: {
+  client: any;
+  initialSubTab?: 'job_board' | 'activation';
+}) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
-  const [subTab, setSubTab] = useState<'rbt_staffing' | 'activation'>('rbt_staffing');
+  const [subTab, setSubTab] = useState<'job_board' | 'activation'>(initialSubTab);
 
-  // Meet & Greet State
-  const [meetDate, setMeetDate] = useState('');
-  const [meetPlatform, setMeetPlatform] = useState('Google Meet');
-  const [meetUrl, setMeetUrl] = useState('');
-  const [meetScheduled, setMeetScheduled] = useState(false);
+  const sessions: TherapySession[] = useMemo(() => {
+    const raw = (client.sessions || []) as TherapySession[];
+    return raw
+      .filter((s) => (s.cptCode || '') !== '97151')
+      .sort(
+        (a, b) =>
+          new Date(a.scheduledStart).getTime() - new Date(b.scheduledStart).getTime()
+      );
+  }, [client.sessions]);
 
-  // 3-Way Match & Voting State
-  const [matchGenerated, setMatchGenerated] = useState(false);
-  const [candidateDates, setCandidateDates] = useState<string[]>([]);
-  const [pollSent, setPollSent] = useState(false);
-  const [parentVote, setParentVote] = useState<string | null>(null);
-  const [bcbaVote, setBcbaVote] = useState<string | null>(null);
-  const [rbtVote, setRbtVote] = useState<string | null>(null);
-  const [coordinatorApproved, setCoordinatorApproved] = useState(false);
-
-  // Post-Session Consensus State
-  const [firstSessionDone, setFirstSessionDone] = useState(false);
-  const [parentConsensus, setParentConsensus] = useState<'YES' | 'NO' | null>(null);
-  const [bcbaConsensus, setBcbaConsensus] = useState<'YES' | 'NO' | null>(null);
-  const [rbtConsensus, setRbtConsensus] = useState<'YES' | 'NO' | null>(null);
-
+  const firstSession = sessions[0] || null;
   const isRbtAssigned = !!client.rbtId;
   const isBcbaAssigned = !!client.bcbaId;
+  const readiness = getStaffingReadiness(client);
+  const staffingReady = readiness.canScheduleFirstSession;
   const isActive = client.status === 'ACTIVE';
 
-  // Handler: Schedule Meet & Greet
-  const handleScheduleMeet = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!meetDate) {
-      toast.error('Please select a date and time for the Virtual Meet & Greet.');
-      return;
-    }
-    const generatedLink = meetUrl || `https://meet.google.com/ras-${Math.random().toString(36).substring(2, 7)}`;
-    setMeetUrl(generatedLink);
-    setMeetScheduled(true);
-    toast.success('Virtual Meet & Greet scheduled! Invite dispatched to parent portal.');
-  };
+  const defaultStart = useMemo(() => defaultClinicInputValue(15, 30), []);
+  const defaultEnd = useMemo(() => defaultClinicInputValue(17, 30), []);
 
-  // Handler: Run 3-Way Match Algorithm
-  const handleRunMatchAlgorithm = () => {
-    startTransition(() => {
-      const today = new Date();
-      const d1 = new Date(today.setDate(today.getDate() + 3)).toISOString().split('T')[0] + ' 15:30 (Mon)';
-      const d2 = new Date(today.setDate(today.getDate() + 2)).toISOString().split('T')[0] + ' 16:00 (Wed)';
-      const d3 = new Date(today.setDate(today.getDate() + 2)).toISOString().split('T')[0] + ' 15:30 (Fri)';
+  const [startLocal, setStartLocal] = useState(defaultStart);
+  const [endLocal, setEndLocal] = useState(defaultEnd);
+  const [location, setLocation] = useState('12 - Home');
 
-      setCandidateDates([d1, d2, d3]);
-      setMatchGenerated(true);
-      toast.success('3-Way Availability Matching Engine generated 3 optimal start dates!');
+  const handleSchedule = () => {
+    startTransition(async () => {
+      // Raw datetime-local strings: the server action interprets them as
+      // clinic wall-clock (America/New_York), never this machine's TZ.
+      const res = await scheduleFirstTherapySession({
+        clientId: client.id,
+        scheduledStart: startLocal,
+        scheduledEnd: endLocal,
+        location,
+        cptCode: '97153',
+        expectedClientStatus: client.status,
+        expectedRbtId: client.rbtId ?? null,
+        expectedBcbaId: client.bcbaId ?? null,
+        expectedRbtApproved: client.rbtApproved === true,
+        reason: 'Case Coordination scheduled first approved therapy session',
+      });
+      if (res.success) {
+        toast.success(
+          res.isFirstTherapySession
+            ? 'First therapy session scheduled. Next: Activate after first session (job-board accept does not set ACTIVE).'
+            : 'Therapy session scheduled.'
+        );
+        router.refresh();
+      } else {
+        toast.error(res.error || 'Failed to schedule session');
+      }
     });
   };
 
-  // Handler: Dispatch "Send Date" Alert
-  const handleSendDatePoll = () => {
-    setPollSent(true);
-    toast.success('"Send Date" alert dispatched to Parent Portal, BCBA Portal, and RBT Workstation!');
-  };
-
-  // Handler: Simulate 3-Way Votes
-  const handleSimulateVote = (role: 'parent' | 'bcba' | 'rbt', choice: string) => {
-    if (role === 'parent') setParentVote(choice);
-    if (role === 'bcba') setBcbaVote(choice);
-    if (role === 'rbt') setRbtVote(choice);
-    toast.info(`${role.toUpperCase()} voted for ${choice}`);
-  };
-
-  // Check Consensus
-  const consensusReached = pollSent && parentVote && bcbaVote && rbtVote;
-
-  // Handler: Final Coordinator Approval for Session #1
-  const handleFinalApproveSession1 = () => {
-    setCoordinatorApproved(true);
-    toast.success('Case Coordinator Approved! First session locked under BCBA supervision.');
-  };
-
-  // Handler: Post-First-Session 3-Party Consensus Vote
-  const handlePostSessionVote = (role: 'parent' | 'bcba' | 'rbt', vote: 'YES' | 'NO') => {
-    if (role === 'parent') setParentConsensus(vote);
-    if (role === 'bcba') setBcbaConsensus(vote);
-    if (role === 'rbt') setRbtConsensus(vote);
-  };
-
-  const allThreeConsensusYes = parentConsensus === 'YES' && bcbaConsensus === 'YES' && rbtConsensus === 'YES';
-  const hasConsensusNo = parentConsensus === 'NO' || bcbaConsensus === 'NO' || rbtConsensus === 'NO';
-
-  // Handler: Complete Pipeline & Activate
-  const handleActivatePipeline = () => {
+  const handleConfirmSession = (sessionId: string) => {
     startTransition(async () => {
-      const res = await approveRbtCandidate(client.id);
+      const res = await confirmTherapySessionCompleted(sessionId);
       if (res.success) {
-        toast.success('3-Party Consensus Reached! Client is now ACTIVE in maintenance mode.');
+        toast.success('Session marked COMPLETED.');
         router.refresh();
       } else {
-        toast.error(res.error || 'Failed to activate client');
+        toast.error(res.error || 'Failed to confirm session');
+      }
+    });
+  };
+
+  const handleActivate = () => {
+    startTransition(async () => {
+      const res = await activateClientAfterFirstSession(client.id);
+      if (res.success) {
+        toast.success(
+          res.alreadyActive
+            ? 'Client is already ACTIVE.'
+            : 'Client set to ACTIVE after durable first therapy session.'
+        );
+        router.refresh();
+      } else {
+        toast.error(res.error || 'Activation blocked');
       }
     });
   };
 
   return (
     <div className="space-y-6 animate-fade-in-up">
-      {/* Sub Tab Navigation */}
       <div className="flex gap-4 border-b border-white/10 pb-3 font-mono text-xs">
         <button
-          onClick={() => setSubTab('rbt_staffing')}
-          className={`px-5 py-2.5 rounded-xl transition-all flex items-center gap-2 cursor-pointer ${subTab === 'rbt_staffing' ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 font-bold shadow-lg' : 'text-zinc-400 hover:text-white'}`}
+          type="button"
+          onClick={() => setSubTab('job_board')}
+          className={`px-5 py-2.5 rounded-xl transition-all flex items-center gap-2 cursor-pointer ${
+            subTab === 'job_board'
+              ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 font-bold shadow-lg'
+              : 'text-zinc-400 hover:text-white'
+          }`}
         >
-          <UserCheck className="w-4 h-4" /> 1. RBT Staffing &amp; Meet &amp; Greet
+          <Briefcase className="w-4 h-4" /> 1. Job Board &amp; Applicants
         </button>
         <button
+          type="button"
           onClick={() => setSubTab('activation')}
-          className={`px-5 py-2.5 rounded-xl transition-all flex items-center gap-2 cursor-pointer ${subTab === 'activation' ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 font-bold shadow-lg' : 'text-zinc-400 hover:text-white'}`}
+          className={`px-5 py-2.5 rounded-xl transition-all flex items-center gap-2 cursor-pointer ${
+            subTab === 'activation'
+              ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 font-bold shadow-lg'
+              : 'text-zinc-400 hover:text-white'
+          }`}
         >
-          <Sparkles className="w-4 h-4" /> 2. 3-Way Match &amp; Activation Suite
+          <Sparkles className="w-4 h-4" /> 2. First Session &amp; Activate
         </button>
       </div>
 
-      {/* ========================================================================= */}
-      {/* TAB 1: RBT STAFFING & VIRTUAL MEET & GREET */}
-      {/* ========================================================================= */}
-      {subTab === 'rbt_staffing' && (
-        <div className="space-y-6">
-          <Card className="border-white/10 bg-zinc-950/80 shadow-xl backdrop-blur-xl rounded-3xl p-6">
-            <CardHeader className="px-0 pt-0 pb-4 border-b border-white/5 flex flex-row items-center justify-between">
-              <div>
-                <CardTitle className="text-lg font-bold text-white font-heading flex items-center gap-2">
-                  <UserCheck className="w-5 h-5 text-cyan-400" /> RBT Candidate Match &amp; Virtual Meet &amp; Greet
-                </CardTitle>
-                <p className="text-xs text-zinc-400 mt-1">
-                  Connect matched RBT candidates with the family for a Virtual Meet &amp; Greet to solidify client compatibility.
-                </p>
-              </div>
-
-              {isRbtAssigned ? (
-                <Badge className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 font-mono text-xs px-3 py-1">
-                  RBT MATCHED ✅
-                </Badge>
-              ) : (
-                <Badge className="bg-amber-500/10 text-amber-400 border-amber-500/20 font-mono text-xs px-3 py-1">
-                  AWAITING HR RBT MATCH ⏳
-                </Badge>
-              )}
-            </CardHeader>
-
-            <CardContent className="px-0 pt-6 space-y-6">
-              {/* Candidate Info Card */}
-              {isRbtAssigned ? (
-                <div className="p-5 bg-zinc-900/60 rounded-2xl border border-white/10 space-y-4">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <span className="text-[10px] font-mono text-cyan-400 uppercase tracking-wider block font-bold">MATCHED RBT CANDIDATE</span>
-                      <h4 className="text-base font-bold text-white mt-1">
-                        {client.rbt ? `${client.rbt.firstName} ${client.rbt.lastName}` : 'Assigned RBT Candidate'}
-                      </h4>
-                      <p className="text-xs text-zinc-400 font-sans mt-0.5">Specializations: Early Intervention, Behavior De-escalation</p>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <Button
-                        onClick={() => toast.success('Candidate approved!')}
-                        className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs h-8 px-4 rounded-xl cursor-pointer"
-                      >
-                        Accept Match
-                      </Button>
-                      <Button
-                        onClick={() => toast.info('Requesting alternative candidate from HR...')}
-                        variant="secondary"
-                        className="bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 border border-rose-500/40 text-xs h-8 px-4 rounded-xl cursor-pointer"
-                      >
-                        Request New Match
-                      </Button>
-                    </div>
-                  </div>
-
-                  {/* Virtual Meet & Greet Form */}
-                  <div className="pt-4 border-t border-white/5 space-y-4">
-                    <h5 className="text-xs font-bold text-white font-mono uppercase tracking-wider flex items-center gap-2">
-                      <Video className="w-4 h-4 text-cyan-400" /> Schedule Virtual Meet &amp; Greet
-                    </h5>
-
-                    <form onSubmit={handleScheduleMeet} className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                      <div>
-                        <label className="text-[11px] font-mono text-zinc-400 block mb-1">Date &amp; Time</label>
-                        <input
-                          type="datetime-local"
-                          value={meetDate}
-                          onChange={e => setMeetDate(e.target.value)}
-                          className="w-full bg-zinc-900 border border-white/10 rounded-xl p-2.5 text-xs text-white outline-none focus:border-cyan-500 font-sans"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="text-[11px] font-mono text-zinc-400 block mb-1">Platform</label>
-                        <select
-                          value={meetPlatform}
-                          onChange={e => setMeetPlatform(e.target.value)}
-                          className="w-full bg-zinc-900 border border-white/10 rounded-xl p-2.5 text-xs text-white outline-none focus:border-cyan-500 font-sans"
-                        >
-                          <option value="Google Meet">Google Meet</option>
-                          <option value="Zoom">Zoom</option>
-                          <option value="In-Person">In-Person</option>
-                        </select>
-                      </div>
-
-                      <div className="flex items-end">
-                        <Button
-                          type="submit"
-                          className="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs h-10 rounded-xl cursor-pointer"
-                        >
-                          Dispatch Meet &amp; Greet Invite
-                        </Button>
-                      </div>
-                    </form>
-
-                    {meetScheduled && (
-                      <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-center justify-between text-xs font-mono text-emerald-400">
-                        <span>Meeting Confirmed: {meetUrl}</span>
-                        <span className="bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-md font-bold">INVITE SENT TO PARENT ✅</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <div className="p-8 text-center text-xs text-zinc-500 border border-dashed border-white/10 rounded-2xl bg-zinc-950/40">
-                  Case Coordinator is waiting for HR Staffing to assign an RBT Candidate to this client.
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
+      {subTab === 'job_board' && (
+        <ClientJobBoardPanel
+          client={client}
+          onRequestActivationTab={() => setSubTab('activation')}
+        />
       )}
 
-      {/* ========================================================================= */}
-      {/* TAB 2: 3-WAY MATCH & ACTIVATION SUITE */}
-      {/* ========================================================================= */}
       {subTab === 'activation' && (
         <div className="space-y-6">
-          {/* STEP A: 3-WAY AVAILABILITY ALGORITHM */}
-          <Card className="border-white/10 bg-zinc-950/80 shadow-xl backdrop-blur-xl rounded-3xl p-6 space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <StaffingReadinessChecklist
+            client={client}
+            ctaKinds={['publish_opening', 'review_applicants', 'await_parent', 'blocked']}
+            onCtaClick={() => setSubTab('job_board')}
+          />
+
+          <Card className="border-white/10 bg-zinc-950/80 shadow-xl backdrop-blur-xl rounded-3xl p-6 space-y-4 relative overflow-hidden">
+            <div className="absolute top-0 right-1/4 w-72 h-72 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
+            <div className="relative z-10 space-y-4">
               <div>
-                <span className="text-[10px] font-mono text-cyan-400 uppercase font-bold tracking-wider block">STEP A</span>
-                <h3 className="text-lg font-bold text-white font-heading">3-Way Availability Matching Engine</h3>
-                <p className="text-xs text-zinc-400 mt-0.5">
-                  Calculate overlapping availability between Client, assigned BCBA, and assigned RBT for the first session.
+                <span className="text-[10px] font-mono text-cyan-400 uppercase font-bold tracking-wider block">
+                  First session → Activate
+                </span>
+                <h3 className="text-lg font-bold text-white font-heading">
+                  Schedule first therapy session, then activate
+                </h3>
+                <p className="text-xs text-zinc-400 mt-1 max-w-2xl">
+                  Flow: <span className="text-zinc-200 font-semibold">1) Schedule Session</span> (97153) →{' '}
+                  <span className="text-zinc-200 font-semibold">2) Activate after first session</span>.
+                  Job-board / parent accept only assigns the RBT — it never sets ACTIVE.
                 </p>
+              </div>
 
-                {/* BCBA & RBT Readiness Indicators */}
-                <div className="flex items-center gap-3 mt-3 font-mono text-xs">
-                  <div className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-zinc-900 border border-white/10">
-                    <span className="text-zinc-400 font-bold">BCBA Status:</span>
-                    <span className={`font-bold flex items-center gap-1 ${isBcbaAssigned ? 'text-emerald-400' : 'text-amber-400'}`}>
-                      <span className={`w-2 h-2 rounded-full ${isBcbaAssigned ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
-                      {isBcbaAssigned ? 'READY ✅' : 'WAITING ⏳'}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-zinc-900 border border-white/10">
-                    <span className="text-zinc-400 font-bold">RBT Status:</span>
-                    <span className={`font-bold flex items-center gap-1 ${isRbtAssigned ? 'text-emerald-400' : 'text-amber-400'}`}>
-                      <span className={`w-2 h-2 rounded-full ${isRbtAssigned ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
-                      {isRbtAssigned ? 'READY ✅' : 'WAITING ⏳'}
-                    </span>
-                  </div>
+              <div className="flex flex-wrap items-center gap-3 font-mono text-xs">
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-900 border border-white/10">
+                  <span className="text-zinc-400 font-bold">Status:</span>
+                  <span
+                    className={`font-bold ${
+                      isActive
+                        ? 'text-emerald-400'
+                        : client.status === 'STAFFING_PENDING'
+                          ? 'text-amber-400'
+                          : 'text-zinc-300'
+                    }`}
+                  >
+                    {client.status}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-900 border border-white/10">
+                  <span className="text-zinc-400 font-bold">BCBA:</span>
+                  <span className={isBcbaAssigned ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold'}>
+                    {isBcbaAssigned ? 'ASSIGNED' : 'WAITING'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-900 border border-white/10">
+                  <span className="text-zinc-400 font-bold">RBT:</span>
+                  <span className={isRbtAssigned ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold'}>
+                    {isRbtAssigned
+                      ? client.rbtApproved
+                        ? 'APPROVED'
+                        : 'PENDING PARENT'
+                      : 'WAITING'}
+                  </span>
                 </div>
               </div>
 
-              <Button
-                onClick={handleRunMatchAlgorithm}
-                disabled={!isBcbaAssigned || !isRbtAssigned || isPending}
-                className={`font-bold text-xs h-10 px-5 rounded-xl cursor-pointer flex items-center gap-2 transition-all ${
-                  isBcbaAssigned && isRbtAssigned 
-                    ? 'bg-gradient-to-r from-cyan-500 to-teal-600 hover:from-cyan-600 text-white shadow-lg shadow-cyan-500/20' 
-                    : 'bg-zinc-800 text-zinc-500 border border-white/5 cursor-not-allowed'
-                }`}
-              >
-                <Sparkles className="w-4 h-4" /> Run 3-Way Match Algorithm
-              </Button>
+              {!staffingReady && !isActive && (
+                <div className="flex items-start gap-2 p-3 rounded-2xl bg-amber-500/10 border border-amber-500/25 text-xs text-amber-200">
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <div className="space-y-2">
+                    <p>
+                      {readiness.nextAction.label} Use{' '}
+                      <span className="font-semibold text-amber-100">Job Board &amp; Applicants</span> until
+                      RBT + BCBA are assigned.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setSubTab('job_board')}
+                      className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-[11px] font-semibold text-amber-100 transition hover:border-amber-500/50"
+                    >
+                      Open Job Board
+                      <ArrowRight className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </Card>
+
+          {(staffingReady || isActive) && (
+            <Card className="border-white/10 bg-zinc-950/80 shadow-xl backdrop-blur-xl rounded-3xl p-6 space-y-4">
+              <div className="flex items-center gap-2">
+                <CalendarPlus className="w-5 h-5 text-cyan-400" />
+                <h3 className="text-base font-bold text-white font-heading">
+                  Step 1 · Schedule therapy session (97153)
+                </h3>
+              </div>
+              <p className="text-xs text-zinc-500">
+                Creates a durable therapy session on the calendar. Status stays{' '}
+                <span className="font-mono text-zinc-300">STAFFING_PENDING</span> until you activate below.
+              </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <label className="space-y-1.5 text-xs font-mono">
+                  <span className="text-zinc-400 font-bold uppercase tracking-wide">
+                    Start <span className="text-cyan-400/80 normal-case">(ET)</span>
+                  </span>
+                  <input
+                    type="datetime-local"
+                    value={startLocal}
+                    onChange={(e) => setStartLocal(e.target.value)}
+                    className="w-full rounded-xl bg-zinc-900 border border-white/10 px-3 py-2.5 text-white focus:outline-none focus:border-cyan-500/50 cursor-pointer"
+                  />
+                </label>
+                <label className="space-y-1.5 text-xs font-mono">
+                  <span className="text-zinc-400 font-bold uppercase tracking-wide">
+                    End <span className="text-cyan-400/80 normal-case">(ET)</span>
+                  </span>
+                  <input
+                    type="datetime-local"
+                    value={endLocal}
+                    onChange={(e) => setEndLocal(e.target.value)}
+                    className="w-full rounded-xl bg-zinc-900 border border-white/10 px-3 py-2.5 text-white focus:outline-none focus:border-cyan-500/50 cursor-pointer"
+                  />
+                </label>
+                <label className="space-y-1.5 text-xs font-mono">
+                  <span className="text-zinc-400 font-bold uppercase tracking-wide">Location</span>
+                  <select
+                    value={location}
+                    onChange={(e) => setLocation(e.target.value)}
+                    className="w-full rounded-xl bg-zinc-900 border border-white/10 px-3 py-2.5 text-white focus:outline-none focus:border-cyan-500/50 cursor-pointer"
+                  >
+                    <option value="12 - Home">12 - Home</option>
+                    <option value="03 - School">03 - School</option>
+                    <option value="11 - Clinic">11 - Clinic</option>
+                  </select>
+                </label>
+              </div>
+
+              <div className="flex justify-end">
+                <Button
+                  type="button"
+                  onClick={handleSchedule}
+                  disabled={isPending || (!staffingReady && !isActive)}
+                  className={`font-bold text-xs h-10 px-5 rounded-xl flex items-center gap-2 transition-all ${
+                    staffingReady || isActive
+                      ? 'bg-gradient-to-r from-cyan-500 to-teal-600 hover:from-cyan-600 text-white shadow-lg shadow-cyan-500/20 cursor-pointer'
+                      : 'bg-zinc-800 text-zinc-500 border border-white/5 cursor-not-allowed'
+                  }`}
+                >
+                  <CalendarPlus className="w-4 h-4" />
+                  {sessions.length === 0 ? 'Schedule first session' : 'Schedule Session'}
+                </Button>
+              </div>
+            </Card>
+          )}
+
+          <Card className="border-white/10 bg-zinc-950/80 shadow-xl backdrop-blur-xl rounded-3xl p-6 space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Clock className="w-5 h-5 text-brand-orange-400" />
+                <h3 className="text-base font-bold text-white font-heading">Therapy sessions on file</h3>
+              </div>
+              <span className="font-mono text-[10px] text-zinc-400 border border-white/10 px-2 py-1 rounded-lg">
+                {sessions.length} session(s)
+              </span>
             </div>
 
-            {matchGenerated && (
-              <div className="space-y-3 pt-2">
-                <span className="text-xs font-mono text-zinc-300 font-bold block">Calculated Top 3 Optimal Start Dates:</span>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 font-mono text-xs">
-                  {candidateDates.map((date, idx) => (
-                    <div key={idx} className="p-3 bg-zinc-900/80 border border-cyan-500/30 rounded-xl text-center">
-                      <span className="text-[10px] text-cyan-400 font-bold block uppercase">OPTION {idx + 1}</span>
-                      <span className="text-sm font-bold text-white mt-1 block">{date}</span>
-                      <span className="text-[10px] text-emerald-400 block mt-1">100% 3-Way Free Window ✅</span>
+            {sessions.length === 0 ? (
+              <div className="p-6 text-center text-xs text-zinc-500 border border-dashed border-white/10 rounded-2xl bg-zinc-900/40">
+                No therapy sessions yet. Schedule the first 97153 session above.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {sessions.map((s, idx) => (
+                  <div
+                    key={s.id}
+                    className="p-4 rounded-2xl bg-zinc-900/70 border border-white/10 hover:border-brand-orange-500/40 transition-all duration-300 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                  >
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {idx === 0 && (
+                          <span className="text-[10px] font-mono font-bold uppercase bg-cyan-500/10 text-cyan-400 border border-cyan-500/25 px-2 py-0.5 rounded-md">
+                            First session
+                          </span>
+                        )}
+                        <span className="text-sm font-bold text-white">
+                          {new Date(s.scheduledStart).toLocaleString('en-US', {
+                            timeZone: CLINIC_TIME_ZONE,
+                          })}{' '}
+                          <span className="text-[10px] font-mono text-zinc-500">ET</span>
+                        </span>
+                        <span className="text-[10px] font-mono text-zinc-400">
+                          CPT {s.cptCode || '97153'}
+                        </span>
+                        <span
+                          className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-md border ${
+                            s.status === 'COMPLETED'
+                              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/25'
+                              : s.status === 'SCHEDULED'
+                                ? 'bg-amber-500/10 text-amber-400 border-amber-500/25'
+                                : 'bg-zinc-500/10 text-zinc-400 border-zinc-500/25'
+                          }`}
+                        >
+                          {s.status}
+                        </span>
+                      </div>
+                      <p className="text-xs text-zinc-400 mt-1 font-mono">
+                        {s.location || 'Location TBD'} · RBT{' '}
+                        {s.rbt ? `${s.rbt.firstName} ${s.rbt.lastName}` : '—'} · BCBA{' '}
+                        {s.bcba ? `${s.bcba.firstName} ${s.bcba.lastName}` : '—'}
+                      </p>
                     </div>
-                  ))}
-                </div>
-
-                {!pollSent && (
-                  <div className="flex justify-end pt-2">
-                    <Button
-                      onClick={handleSendDatePoll}
-                      className="bg-brand-orange-500 hover:bg-brand-orange-600 text-white font-bold text-xs h-9 px-5 rounded-xl cursor-pointer flex items-center gap-2"
-                    >
-                      <Send className="w-4 h-4" /> Send Date (Alert All 3 Portals)
-                    </Button>
+                    {s.status === 'SCHEDULED' && (
+                      <Button
+                        type="button"
+                        onClick={() => handleConfirmSession(s.id)}
+                        disabled={isPending}
+                        className="bg-zinc-800 hover:bg-zinc-700 text-white font-bold text-xs h-9 px-4 rounded-xl cursor-pointer border border-white/10"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" />
+                        Confirm completed
+                      </Button>
+                    )}
                   </div>
-                )}
+                ))}
               </div>
             )}
           </Card>
 
-          {/* STEP B & C: MULTI-PORTAL VOTING & FINAL APPROVAL */}
-          {pollSent && (
-            <Card className="border-white/10 bg-zinc-950/80 shadow-xl backdrop-blur-xl rounded-3xl p-6 space-y-4">
-              <div>
-                <span className="text-[10px] font-mono text-amber-400 uppercase font-bold tracking-wider block">STEP B &amp; C</span>
-                <h3 className="text-lg font-bold text-white font-heading">Multi-Portal Polling &amp; Final Date Lock</h3>
-                <p className="text-xs text-zinc-400">
-                  Track live voting responses from Parent, BCBA, and RBT portals.
+          <Card className="border-white/10 bg-zinc-950/80 shadow-xl backdrop-blur-xl rounded-3xl p-6 space-y-4">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-5 h-5 text-emerald-400" />
+              <h3 className="text-base font-bold text-white font-heading">
+                Step 2 · Activate after first session
+              </h3>
+            </div>
+            <p className="text-xs text-zinc-400">
+              Sets <span className="font-mono text-zinc-200">Client.status = ACTIVE</span> once a
+              durable non-97151 therapy session is on file. Job-board accept alone never activates.
+            </p>
+
+            {isActive ? (
+              <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center gap-2">
+                <span className="dot-live" />
+                <span className="text-sm font-bold text-emerald-300 font-heading">
+                  Client is ACTIVE
+                </span>
+              </div>
+            ) : (
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <p className="text-xs text-zinc-500 font-mono">
+                  {firstSession
+                    ? `First session on file · ${firstSession.status} · ${new Date(firstSession.scheduledStart).toLocaleDateString('en-US', { timeZone: CLINIC_TIME_ZONE })}`
+                    : 'Blocked until a therapy Session is scheduled.'}
                 </p>
+                <Button
+                  type="button"
+                  onClick={handleActivate}
+                  disabled={isPending || !firstSession}
+                  className={`font-bold text-xs h-10 px-6 rounded-xl flex items-center gap-2 ${
+                    firstSession
+                      ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-500/20 cursor-pointer'
+                      : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
+                  }`}
+                >
+                  <Sparkles className="w-4 h-4" />
+                  Activate after first session
+                </Button>
               </div>
-
-              {/* Voting Trackers */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 font-mono text-xs">
-                {/* Parent Vote Card */}
-                <div className="p-4 bg-zinc-900/60 border border-white/5 rounded-2xl space-y-2">
-                  <span className="text-[10px] text-zinc-400 block font-bold">PARENT PORTAL VOTE</span>
-                  <span className={`text-sm font-bold block ${parentVote ? 'text-emerald-400' : 'text-amber-400'}`}>
-                    {parentVote ? `VOTED: ${parentVote}` : 'AWAITING VOTE...'}
-                  </span>
-                  {!parentVote && (
-                    <button
-                      onClick={() => handleSimulateVote('parent', candidateDates[0])}
-                      className="text-[10px] text-cyan-400 underline cursor-pointer"
-                    >
-                      Simulate Parent Vote
-                    </button>
-                  )}
-                </div>
-
-                {/* BCBA Vote Card */}
-                <div className="p-4 bg-zinc-900/60 border border-white/5 rounded-2xl space-y-2">
-                  <span className="text-[10px] text-zinc-400 block font-bold">BCBA PORTAL VOTE</span>
-                  <span className={`text-sm font-bold block ${bcbaVote ? 'text-emerald-400' : 'text-amber-400'}`}>
-                    {bcbaVote ? `VOTED: ${bcbaVote}` : 'AWAITING VOTE...'}
-                  </span>
-                  {!bcbaVote && (
-                    <button
-                      onClick={() => handleSimulateVote('bcba', candidateDates[0])}
-                      className="text-[10px] text-cyan-400 underline cursor-pointer"
-                    >
-                      Simulate BCBA Vote
-                    </button>
-                  )}
-                </div>
-
-                {/* RBT Vote Card */}
-                <div className="p-4 bg-zinc-900/60 border border-white/5 rounded-2xl space-y-2">
-                  <span className="text-[10px] text-zinc-400 block font-bold">RBT WORKSTATION VOTE</span>
-                  <span className={`text-sm font-bold block ${rbtVote ? 'text-emerald-400' : 'text-amber-400'}`}>
-                    {rbtVote ? `VOTED: ${rbtVote}` : 'AWAITING VOTE...'}
-                  </span>
-                  {!rbtVote && (
-                    <button
-                      onClick={() => handleSimulateVote('rbt', candidateDates[0])}
-                      className="text-[10px] text-cyan-400 underline cursor-pointer"
-                    >
-                      Simulate RBT Vote
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {consensusReached && !coordinatorApproved && (
-                <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl flex items-center justify-between">
-                  <div>
-                    <span className="text-xs font-bold text-emerald-400 font-mono block">3-WAY CONSENSUS REACHED! 🎉</span>
-                    <span className="text-xs text-zinc-300 font-sans">Agreed Date: {candidateDates[0]}</span>
-                  </div>
-
-                  <Button
-                    onClick={handleFinalApproveSession1}
-                    className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs h-9 px-5 rounded-xl cursor-pointer"
-                  >
-                    Case Coordinator Final Sign-off
-                  </Button>
-                </div>
-              )}
-            </Card>
-          )}
-
-          {/* STEP D: POST-FIRST-SESSION 3-PARTY CONSENSUS GATE */}
-          {coordinatorApproved && (
-            <Card className="border-white/10 bg-zinc-950/80 shadow-xl backdrop-blur-xl rounded-3xl p-6 space-y-4">
-              <div>
-                <span className="text-[10px] font-mono text-purple-400 uppercase font-bold tracking-wider block">STEP D</span>
-                <h3 className="text-lg font-bold text-white font-heading">Post-First-Session 3-Party Consensus Gate</h3>
-                <p className="text-xs text-zinc-400">
-                  After session #1 is conducted under BCBA supervision, all 3 parties vote on continuing services before the case enters active maintenance.
-                </p>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 font-mono text-xs">
-                {/* Parent Consensus */}
-                <div className="p-4 bg-zinc-900/60 border border-white/5 rounded-2xl space-y-3">
-                  <span className="text-[10px] text-zinc-400 block font-bold">PARENT SATISFACTION VOTE</span>
-                  <div className="flex gap-2">
-                    <Button
-                      onClick={() => handlePostSessionVote('parent', 'YES')}
-                      className={`h-8 px-3 text-xs font-bold rounded-lg cursor-pointer ${parentConsensus === 'YES' ? 'bg-emerald-600 text-white' : 'bg-zinc-800 text-zinc-300'}`}
-                    >
-                      <ThumbsUp className="w-3.5 h-3.5 mr-1" /> YES
-                    </Button>
-                    <Button
-                      onClick={() => handlePostSessionVote('parent', 'NO')}
-                      className={`h-8 px-3 text-xs font-bold rounded-lg cursor-pointer ${parentConsensus === 'NO' ? 'bg-rose-600 text-white' : 'bg-zinc-800 text-zinc-300'}`}
-                    >
-                      <ThumbsDown className="w-3.5 h-3.5 mr-1" /> NO
-                    </Button>
-                  </div>
-                </div>
-
-                {/* BCBA Consensus */}
-                <div className="p-4 bg-zinc-900/60 border border-white/5 rounded-2xl space-y-3">
-                  <span className="text-[10px] text-zinc-400 block font-bold">BCBA CLINICAL VOTE</span>
-                  <div className="flex gap-2">
-                    <Button
-                      onClick={() => handlePostSessionVote('bcba', 'YES')}
-                      className={`h-8 px-3 text-xs font-bold rounded-lg cursor-pointer ${bcbaConsensus === 'YES' ? 'bg-emerald-600 text-white' : 'bg-zinc-800 text-zinc-300'}`}
-                    >
-                      <ThumbsUp className="w-3.5 h-3.5 mr-1" /> YES
-                    </Button>
-                    <Button
-                      onClick={() => handlePostSessionVote('bcba', 'NO')}
-                      className={`h-8 px-3 text-xs font-bold rounded-lg cursor-pointer ${bcbaConsensus === 'NO' ? 'bg-rose-600 text-white' : 'bg-zinc-800 text-zinc-300'}`}
-                    >
-                      <ThumbsDown className="w-3.5 h-3.5 mr-1" /> NO
-                    </Button>
-                  </div>
-                </div>
-
-                {/* RBT Consensus */}
-                <div className="p-4 bg-zinc-900/60 border border-white/5 rounded-2xl space-y-3">
-                  <span className="text-[10px] text-zinc-400 block font-bold">RBT COMPATIBILITY VOTE</span>
-                  <div className="flex gap-2">
-                    <Button
-                      onClick={() => handlePostSessionVote('rbt', 'YES')}
-                      className={`h-8 px-3 text-xs font-bold rounded-lg cursor-pointer ${rbtConsensus === 'YES' ? 'bg-emerald-600 text-white' : 'bg-zinc-800 text-zinc-300'}`}
-                    >
-                      <ThumbsUp className="w-3.5 h-3.5 mr-1" /> YES
-                    </Button>
-                    <Button
-                      onClick={() => handlePostSessionVote('rbt', 'NO')}
-                      className={`h-8 px-3 text-xs font-bold rounded-lg cursor-pointer ${rbtConsensus === 'NO' ? 'bg-rose-600 text-white' : 'bg-zinc-800 text-zinc-300'}`}
-                    >
-                      <ThumbsDown className="w-3.5 h-3.5 mr-1" /> NO
-                    </Button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Resolution Banner */}
-              {allThreeConsensusYes && (
-                <div className="p-5 bg-gradient-to-r from-emerald-500/20 to-teal-500/20 border border-emerald-500/40 rounded-2xl flex justify-between items-center">
-                  <div>
-                    <h4 className="text-sm font-bold text-white font-heading">UNANIMOUS 3-PARTY CONSENSUS CONFIRMED! ✅</h4>
-                    <p className="text-xs text-emerald-300 font-sans mt-0.5">
-                      Parent, BCBA, and RBT all voted YES after session #1. Click below to complete pipeline and transition client to active maintenance.
-                    </p>
-                  </div>
-
-                  <Button
-                    onClick={handleActivatePipeline}
-                    disabled={isPending}
-                    className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs h-10 px-6 rounded-xl shadow-lg cursor-pointer"
-                  >
-                    Complete Pipeline &amp; Activate Client
-                  </Button>
-                </div>
-              )}
-
-              {hasConsensusNo && (
-                <div className="p-4 bg-rose-500/10 border border-rose-500/30 rounded-2xl flex justify-between items-center text-xs">
-                  <div>
-                    <span className="font-bold text-rose-400 block font-mono">REJECTION VOTE RECORDED ⚠️</span>
-                    <span className="text-zinc-300 font-sans">Automated fallback triggered: re-routing case to HR to assign a new RBT candidate.</span>
-                  </div>
-
-                  <Button
-                    onClick={() => setSubTab('rbt_staffing')}
-                    className="bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs h-8 px-4 rounded-xl cursor-pointer"
-                  >
-                    Re-route to RBT Staffing
-                  </Button>
-                </div>
-              )}
-            </Card>
-          )}
+            )}
+          </Card>
         </div>
       )}
     </div>

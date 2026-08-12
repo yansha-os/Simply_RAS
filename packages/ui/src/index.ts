@@ -1,3 +1,3 @@
-// Export shared UI components
-export * from '../../../src/components/ui/Button';
-export * from '../../../src/components/ui/Card';
+// Export shared UI from the active CRM app (not the legacy root src tree)
+export * from '../../../apps/crm/src/components/ui/Button';
+export * from '../../../apps/crm/src/components/ui/Card';

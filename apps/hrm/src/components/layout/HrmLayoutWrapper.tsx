@@ -14,17 +14,22 @@ export function HrmLayoutWrapper({ children }: { children: React.ReactNode }) {
   const { role } = useHrmRole();
   const { colorMode } = useTheme();
 
-  // Public routes without admin sidebar & admin header
+  // Public routes / immersive Session Studio — no sidebar & header
   const isPublicRoute =
     pathname === '/' ||
     pathname === '/apply' ||
     pathname === '/public' ||
     pathname === '/login';
+  const isSessionStudio = pathname.startsWith('/rbt/session');
 
-  if (isPublicRoute) {
+  if (isPublicRoute || isSessionStudio) {
     return (
-      <div className="min-h-screen flex flex-col bg-white text-slate-900 w-full relative z-20">
-        <main className="flex-1 w-full bg-white">{children}</main>
+      <div
+        className={`min-h-screen flex flex-col w-full relative z-20 ${
+          isSessionStudio ? 'bg-[#F2ECE0] text-slate-900' : 'bg-white text-slate-900'
+        }`}
+      >
+        <main className="flex-1 w-full">{children}</main>
         <HrmDevToolsUI />
       </div>
     );

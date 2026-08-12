@@ -1,152 +1,213 @@
 'use client';
 
+/**
+ * Treatment PA manual Plutus tracker queue.
+ * Status mutations: `@/app/(dashboard)/portal-case/actions/billing.ts` (canonical),
+ * surfaced inline via `portal-billing/actions.ts` wrappers (see PaQueueShared).
+ * No EDI / payer API — submitted / approved / denied + auth numbers only.
+ */
+
 import React from 'react';
-import { Card } from '@/components/ui/Card';
-import { ShieldCheck, Clock, FileCheck, ArrowRight, FilePlus } from 'lucide-react';
-import Link from 'next/link';
+import { Clock, FilePlus, RefreshCw, ShieldCheck } from 'lucide-react';
+import {
+  EmptyColumn,
+  PaQueueCard,
+  QueueSearchInput,
+  daysUntil,
+  filterClientsByQuery,
+  getPa,
+} from './PaQueueShared';
+
+function treatmentPa(client: any) {
+  return getPa(client, 'TREATMENT');
+}
+
+function hasParentTreatmentSignature(client: any): boolean {
+  const plan = client.treatmentPlan;
+  if (!plan || typeof plan !== 'object') return false;
+  return !!(plan as { parentSignature?: unknown }).parentSignature;
+}
 
 export default function TreatmentPaQueue({ clients }: { clients: any[] }) {
-  const [mounted, setMounted] = React.useState(false);
-  React.useEffect(() => setMounted(true), []);
-  
-  const pendingTxPaQueue = clients.filter(c => {
-    const pa = c.paRequests?.find((p: any) => p.type === 'TREATMENT');
+  const [query, setQuery] = React.useState('');
+  const visible = filterClientsByQuery(clients, query);
+
+  const pendingTxPaQueue = visible.filter((c) => {
+    const pa = treatmentPa(c);
     if (pa) return pa.status === 'NOT_STARTED';
-    
-    // Only show in PA queue if parent has signed the Treatment Plan
-    const hasParentSig = c.treatmentPlan && typeof c.treatmentPlan === 'object' && !!(c.treatmentPlan as any).parentSignature;
-    return c.status === 'REPORT_ASSEMBLED' && hasParentSig;
+    return c.status === 'REPORT_ASSEMBLED' && hasParentTreatmentSignature(c);
   });
 
-  const submittedQueue = clients.filter(c => {
-    const pa = c.paRequests?.find((p: any) => p.type === 'TREATMENT');
-    if (pa) return pa.status === 'SUBMITTED' || pa.status === 'DENIED_CLERICAL' || pa.status === 'DENIED_CLINICAL';
+  const submittedQueue = visible.filter((c) => {
+    if (pendingTxPaQueue.some((p) => p.id === c.id)) return false;
+    const pa = treatmentPa(c);
+    if (pa) {
+      return ['SUBMITTED', 'DENIED_CLERICAL', 'DENIED_CLINICAL'].includes(pa.status);
+    }
     return c.status === 'TX_PA_SUBMITTED';
   });
 
-  const expiringQueue = clients.filter(c => {
-    const pa = c.paRequests?.find((p: any) => p.type === 'TREATMENT');
+  const expiringQueue = visible.filter((c) => {
+    const pa = treatmentPa(c);
     if (!pa || pa.status !== 'APPROVED' || !pa.expirationDate) return false;
-    
-    // Check if expiration is within 45 days (or past)
-    const daysUntilExp = (new Date(pa.expirationDate).getTime() - new Date().getTime()) / (1000 * 3600 * 24);
-    return daysUntilExp <= 45;
+    const days = daysUntil(pa.expirationDate);
+    return days !== null && days <= 45;
   });
 
-  const QueueCard = ({ client, title, icon: Icon, desc, mode }: { client: any, title: string, icon: any, desc: string, mode?: string }) => {
-    const unreadCount = client.messages?.filter((m: any) => m.isFromClient && !m.readAt).length || 0;
-
-    return (
-      <Card className="bg-zinc-950 border border-white/5 hover:border-brand-gold-500/50 transition-colors cursor-pointer group mb-3 shadow-none">
-        <Link href={`/client/${client.id}${mode ? `?mode=${mode}` : ''}`} className="block p-4">
-          <div className="flex justify-between items-start">
-            <div>
-              <div className="flex items-center gap-2">
-                <h4 className="font-semibold text-white group-hover:text-brand-gold-400 transition-colors flex items-center gap-2">
-                  {client.firstName} {client.lastName}
-                  {unreadCount > 0 && (
-                    <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full min-w-[16px] text-center leading-none shadow-sm">{unreadCount}</span>
-                  )}
-                </h4>
-              </div>
-              <p className="text-xs text-zinc-500 mt-1">{desc}</p>
-              
-              {(() => {
-                const pa = client.paRequests?.find((p: any) => p.type === 'TREATMENT');
-                if (pa?.status === 'DENIED_CLINICAL') {
-                  return (
-                    <div className="mt-3 inline-block bg-red-500/10 border border-red-500/20 text-red-500 text-[10px] font-bold uppercase px-2 py-1 rounded">
-                      🔴 Clinical Denial - P2P Required
-                    </div>
-                  );
-                }
-                if (pa?.status === 'DENIED_CLERICAL') {
-                  return (
-                    <div className="mt-3 inline-block bg-orange-500/10 border border-orange-500/20 text-orange-400 text-[10px] font-bold uppercase px-2 py-1 rounded">
-                      🟠 Clerical Denial - Action Needed
-                    </div>
-                  );
-                }
-                return null;
-              })()}
-            </div>
-            <Icon className="w-5 h-5 text-zinc-700 group-hover:text-brand-gold-500 transition-colors" />
-          </div>
-        <div className="mt-4 flex items-center justify-between">
-          <div className="text-[10px] text-zinc-600 uppercase font-bold tracking-wider">
-            Updated {mounted ? new Date(client.updatedAt).toLocaleDateString() : ''}
-          </div>
-          <ArrowRight className="w-4 h-4 text-zinc-600 group-hover:text-brand-gold-500 group-hover:translate-x-1 transition-all" />
-        </div>
-      </Link>
-    </Card>
-    );
-  };
+  const noResults =
+    query.trim() !== '' &&
+    pendingTxPaQueue.length + submittedQueue.length + expiringQueue.length === 0;
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-7xl mx-auto">
-      
-      {/* Column 1: Pending Submission */}
-      <div className="space-y-4">
-        <div className="flex items-center justify-between border-b border-brand-orange-500/30 pb-3">
-          <h2 className="font-bold text-white flex items-center">
-            <FilePlus className="w-5 h-5 text-brand-orange-500 mr-2" />
-            1. Submit Treatment PA
-          </h2>
-          <span className="bg-brand-orange-500/10 text-brand-orange-500 px-2 py-0.5 rounded-full text-xs font-bold">
-            {pendingTxPaQueue.length}
-          </span>
-        </div>
-        <div className="space-y-3">
-          {pendingTxPaQueue.length === 0 && <div className="text-zinc-600 text-sm text-center py-8 bg-zinc-900/30 rounded-xl border border-white/5 border-dashed">No clients in queue</div>}
-          {pendingTxPaQueue.map(c => (
-            <QueueCard key={c.id} client={c} title="Submit PA" icon={FilePlus} desc="Ready to submit 97153, 97155, 97156" mode="billing" />
-          ))}
+    <div className="space-y-8 mt-2 pb-8 animate-fade-in-up">
+      <div className="relative overflow-hidden p-7 rounded-3xl bg-zinc-950/80 border border-white/10 shadow-2xl backdrop-blur-2xl">
+        <div className="absolute top-0 right-1/4 w-80 h-80 bg-brand-orange-500/10 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-8 w-72 h-72 bg-sky-500/8 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative z-10 space-y-3">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-brand-orange-500/10 border border-brand-orange-500/20 text-brand-orange-400 font-mono text-[11px] font-bold">
+            <span className="dot-live" />
+            TREATMENT PA · MANUAL PLUTUS TRACKER
+          </div>
+          <h1 className="text-2xl lg:text-3xl font-extrabold text-white font-heading tracking-tight">
+            Treatment PA{' '}
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-brand-orange-400 via-amber-300 to-sky-300">
+              Queue
+            </span>
+          </h1>
+          <p className="text-sm text-zinc-400 max-w-2xl font-sans leading-relaxed">
+            Clients with parent-signed treatment plans and live TREATMENT PARequest rows. Submit and
+            track 97153 / 97155 / 97156 in Plutus manually — record approvals, denials with reason,
+            and P2P outcomes inline. Approval hands the client to Case Coord staffing.
+          </p>
+          <div className="flex flex-col lg:flex-row lg:items-center gap-3 pt-1">
+            <QueueSearchInput
+              value={query}
+              onChange={setQuery}
+              placeholder="Search clients by name…"
+            />
+            <div className="flex flex-wrap gap-3">
+              {[
+                { label: 'Submit', count: pendingTxPaQueue.length, cls: 'bg-brand-orange-500/10 text-brand-orange-400 border-brand-orange-500/20' },
+                { label: 'Tracking', count: submittedQueue.length, cls: 'bg-sky-500/10 text-sky-400 border-sky-500/20' },
+                { label: 'Re-auth', count: expiringQueue.length, cls: 'bg-rose-500/10 text-rose-400 border-rose-500/20' },
+              ].map((stat) => (
+                <div
+                  key={stat.label}
+                  className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-mono font-bold ${stat.cls}`}
+                >
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  {stat.label}
+                  <span className="opacity-80">{stat.count}</span>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Column 2: PA Tracking */}
-      <div className="space-y-4">
-        <div className="flex items-center justify-between border-b border-brand-blue-500/30 pb-3">
-          <h2 className="font-bold text-white flex items-center">
-            <Clock className="w-5 h-5 text-brand-blue-500 mr-2" />
-            2. PA Tracking
-          </h2>
-          <span className="bg-brand-blue-500/10 text-brand-blue-500 px-2 py-0.5 rounded-full text-xs font-bold">
-            {submittedQueue.length}
-          </span>
+      {noResults && (
+        <EmptyColumn message={`No treatment-phase clients match “${query.trim()}”.`} />
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+        <div className="space-y-4">
+          <div className="flex items-center justify-between border-b border-brand-orange-500/30 pb-3 px-1">
+            <h2 className="font-bold text-white text-sm flex items-center font-heading">
+              <FilePlus className="w-4 h-4 text-brand-orange-500 mr-2" />
+              1. Submit Treatment PA
+            </h2>
+            <span className="bg-brand-orange-500/10 text-brand-orange-400 border border-brand-orange-500/20 px-2.5 py-0.5 rounded-full text-xs font-mono font-bold">
+              {pendingTxPaQueue.length}
+            </span>
+          </div>
+          <div>
+            {pendingTxPaQueue.length === 0 && !noResults && (
+              <EmptyColumn message="No clients ready for Treatment PA submission (needs REPORT_ASSEMBLED + parent signature)." />
+            )}
+            {pendingTxPaQueue.map((c) => (
+              <PaQueueCard
+                key={c.id}
+                client={c}
+                kind="TREATMENT"
+                icon={FilePlus}
+                accent="orange"
+                desc="Ready to submit 97153, 97155, 97156 in Plutus."
+              />
+            ))}
+          </div>
         </div>
-        <div className="space-y-3">
-          {submittedQueue.length === 0 && <div className="text-zinc-600 text-sm text-center py-8 bg-zinc-900/30 rounded-xl border border-white/5 border-dashed">No clients in queue</div>}
-          {submittedQueue.map(c => (
-            <QueueCard key={c.id} client={c} title="Tracking PA" icon={Clock} desc="Awaiting payer decision" mode="billing" />
-          ))}
+
+        <div className="space-y-4">
+          <div className="flex items-center justify-between border-b border-sky-500/30 pb-3 px-1">
+            <h2 className="font-bold text-white text-sm flex items-center font-heading">
+              <Clock className="w-4 h-4 text-sky-400 mr-2" />
+              2. PA Tracking
+            </h2>
+            <span className="bg-sky-500/10 text-sky-400 border border-sky-500/20 px-2.5 py-0.5 rounded-full text-xs font-mono font-bold">
+              {submittedQueue.length}
+            </span>
+          </div>
+          <div>
+            {submittedQueue.length === 0 && !noResults && (
+              <EmptyColumn message="No Treatment PAs awaiting payer decision or denial follow-up." />
+            )}
+            {submittedQueue.map((c) => {
+              const pa = treatmentPa(c);
+              const desc = pa?.status?.startsWith('DENIED')
+                ? 'Denial logged — resolve and re-decision inline or in the Billing tab.'
+                : 'Awaiting payer decision on treatment authorization.';
+              return (
+                <PaQueueCard
+                  key={c.id}
+                  client={c}
+                  kind="TREATMENT"
+                  icon={Clock}
+                  accent="sky"
+                  desc={desc}
+                />
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div className="flex items-center justify-between border-b border-rose-500/30 pb-3 px-1">
+            <h2 className="font-bold text-white text-sm flex items-center font-heading">
+              <RefreshCw className="w-4 h-4 text-rose-400 mr-2" />
+              3. Re-Authorization Needed
+            </h2>
+            <span className="bg-rose-500/10 text-rose-400 border border-rose-500/20 px-2.5 py-0.5 rounded-full text-xs font-mono font-bold">
+              {expiringQueue.length}
+            </span>
+          </div>
+          <div>
+            {expiringQueue.length === 0 && !noResults && (
+              <EmptyColumn message="No approved Treatment auths expiring within 45 days." />
+            )}
+            {expiringQueue.map((c) => {
+              const pa = treatmentPa(c);
+              const days = daysUntil(pa?.expirationDate);
+              return (
+                <PaQueueCard
+                  key={c.id}
+                  client={c}
+                  kind="TREATMENT"
+                  icon={RefreshCw}
+                  accent="rose"
+                  desc={
+                    days === null
+                      ? 'Re-authorization window.'
+                      : days < 0
+                        ? `Auth expired ${Math.abs(days)} days ago.`
+                        : `Expires in ${days} days — start re-auth.`
+                  }
+                />
+              );
+            })}
+          </div>
         </div>
       </div>
-
-      {/* Column 3: Re-Authorization Needed */}
-      <div className="space-y-4">
-        <div className="flex items-center justify-between border-b border-red-500/30 pb-3">
-          <h2 className="font-bold text-white flex items-center">
-            <Clock className="w-5 h-5 text-red-500 mr-2" />
-            3. Re-Authorization Needed
-          </h2>
-          <span className="bg-red-500/10 text-red-500 px-2 py-0.5 rounded-full text-xs font-bold">
-            {expiringQueue.length}
-          </span>
-        </div>
-        <div className="space-y-3">
-          {expiringQueue.length === 0 && <div className="text-zinc-600 text-sm text-center py-8 bg-zinc-900/30 rounded-xl border border-white/5 border-dashed opacity-60">No expiring auths</div>}
-          {expiringQueue.map(c => {
-            const pa = c.paRequests?.find((p: any) => p.type === 'TREATMENT');
-            const daysExp = pa?.expirationDate ? Math.max(0, Math.ceil((new Date(pa.expirationDate).getTime() - new Date().getTime()) / (1000 * 3600 * 24))) : 0;
-            return (
-              <QueueCard key={c.id} client={c} title="Expiring Soon" icon={Clock} desc={`Expires in ${daysExp} days`} mode="billing" />
-            );
-          })}
-        </div>
-      </div>
-
     </div>
   );
 }

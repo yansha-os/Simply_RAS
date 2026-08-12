@@ -16,8 +16,13 @@ Every server action in this project MUST follow this pattern:
 
 import { prisma } from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
+import { requireStaff, BILLING_ROLES } from '@/lib/auth-guard';
 
 export async function doSomething(id: string, data: SomeType) {
+  // MANDATORY: gate before anything else (pick the narrowest role group)
+  const gate = await requireStaff(BILLING_ROLES);
+  if (!gate.ok) return { success: false, error: gate.error };
+
   try {
     const result = await prisma.model.update({
       where: { id },
@@ -40,6 +45,25 @@ export async function doSomething(id: string, data: SomeType) {
 ---
 
 ## Rules
+
+### 0. Always gate first (MANDATORY)
+
+Every server action starts with an auth gate from `@/lib/auth-guard` (both apps have it) **before** any DB read/write:
+
+```typescript
+// Staff action, role-restricted (role groups: LEADERSHIP_ROLES, INTAKE_ROLES,
+// BILLING_ROLES, CLINICAL_ROLES, CASE_COORD_ROLES, HR_ROLES):
+const gate = await requireStaff(INTAKE_ROLES);
+if (!gate.ok) return { success: false, error: gate.error };
+
+// Client-scoped action (BCBA/RBT must be assigned to the client):
+const gate = await requireClientAccess(clientId);
+if (!gate.ok) return { success: false, error: gate.error };
+```
+
+Parent-facing magic-link actions gate with `requireParentPacketAccess()` / `requireStaffOrParent()` from `@/lib/magicLinkGuard` (CRM) instead — live token + expiry + revocation + device fingerprint.
+
+These gates are **non-throwing**: they return `{ ok: false, error }` — return the error to the caller, don't throw. An unguarded server action is a bug.
 
 ### 1. Always wrap in try/catch
 No bare `await prisma.*` calls. Every DB operation must be caught.
@@ -90,6 +114,9 @@ Use the correct scope based on what data changed:
 
 ```typescript
 export async function createClient(prevState: any, formData: FormData) {
+  const gate = await requireStaff(INTAKE_ROLES);
+  if (!gate.ok) return { error: gate.error };
+
   try {
     const firstName = String(formData.get('firstName'));
     if (!firstName) return { error: 'First name is required.' };
@@ -113,6 +140,8 @@ export async function createClient(prevState: any, formData: FormData) {
 | Intake & magic link actions | `src/app/actions/intake.ts` |
 | Portal/pipeline actions | `src/app/(dashboard)/portal-case/actions.ts` |
 | Magic link public actions | `src/app/magic-link/actions.ts` |
-| Upload API | `src/app/api/upload/route.ts` |
+| Auth gates (staff / client-scoped) | `src/lib/auth-guard.ts` (both apps) |
+| Parent magic-link gate | `src/lib/magicLinkGuard.ts` (CRM) |
+| Upload API (private `client-documents` bucket) | `src/app/api/upload/route.ts` |
 
 Place new actions in the file that matches their domain. Create a new file only if the domain is clearly distinct.

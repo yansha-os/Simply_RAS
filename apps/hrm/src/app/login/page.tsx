@@ -18,8 +18,9 @@ export default function LoginPage() {
   const [passwordInput, setPasswordInput] = useState('');
 
   const fillQuickDemo = (demoEmail: string) => {
+    if (process.env.NEXT_PUBLIC_ENABLE_DEV_TOOLS !== 'true') return;
     setEmailInput(demoEmail);
-    setPasswordInput('password123');
+    setPasswordInput('');
   };
 
   return (

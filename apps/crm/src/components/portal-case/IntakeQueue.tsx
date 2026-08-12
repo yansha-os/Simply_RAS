@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { Card } from '@/components/ui/Card';
 import { UserPlus, Mail, FileCheck, ArrowRight, Loader2, UserCheck, Clock, Plus, Phone, Globe } from 'lucide-react';
 import Link from 'next/link';
-import { createInquiry, generateMagicLink, assignCaseCoordinator } from '@/app/(dashboard)/portal-case/actions';
+import { createInquiry, generateMagicLink } from '@/app/(dashboard)/portal-case/actions';
 import { Button } from '@/components/ui/Button';
 
 export default function IntakeQueue({ clients, coordinators }: { clients: any[], coordinators?: any[] }) {
@@ -20,8 +20,6 @@ export default function IntakeQueue({ clients, coordinators }: { clients: any[],
   const [guardianPhone, setGuardianPhone] = useState('');
   const [guardianEmail, setGuardianEmail] = useState('');
   const [preferredLanguage, setPreferredLanguage] = useState('English');
-
-  const [selectedCoord, setSelectedCoord] = useState<{ [key: string]: string }>({});
 
   React.useEffect(() => setMounted(true), []);
   

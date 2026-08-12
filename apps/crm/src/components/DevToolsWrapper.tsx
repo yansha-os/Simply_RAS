@@ -2,9 +2,11 @@ import React from 'react';
 import { prisma } from '@/lib/prisma';
 import { cookies } from 'next/headers';
 import { DevToolsUI } from './DevToolsUI';
+import { isDevToolsEnabled } from '@/lib/devToolsGate';
 
 export async function DevToolsWrapper() {
-  if (process.env.NEXT_PUBLIC_ENABLE_DEV_TOOLS !== 'true') {
+  // NODE_ENV + flag gate: never render (or query users) in production.
+  if (!isDevToolsEnabled()) {
     return null;
   }
 

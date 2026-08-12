@@ -15,8 +15,9 @@ export function HrmDevToolsUI() {
 
   const isLightMode = role === 'RBT' && colorMode === 'light';
 
-  // Always render Dev Tools in HRM
-  const isDevEnabled = true;
+  const isDevEnabled =
+    process.env.NODE_ENV !== 'production' &&
+    process.env.NEXT_PUBLIC_ENABLE_DEV_TOOLS === 'true';
 
   const hrmRoles: { role: HrmRole; label: string; desc: string; route: string }[] = [
     { role: 'HEAD_HR', label: 'Head HR (Staffing & Case Dispatch)', desc: 'Assigns RBT candidates & dispatches to CRM Case Coordinators', route: '/portal-hr' },
@@ -73,7 +74,7 @@ export function HrmDevToolsUI() {
     setRole(newRole);
     toast.success(`Navigating to ${label} Dashboard (${targetRoute})...`);
     setIsOpen(false);
-    window.location.href = targetRoute;
+    window.location.assign(targetRoute);
   };
 
   const handleSwitchUser = (user: typeof activePersonnelUsers[0]) => {
@@ -81,8 +82,12 @@ export function HrmDevToolsUI() {
     setRole(user.role as HrmRole);
     toast.success(`Impersonating Active User: ${user.name} (${user.role})`);
     setIsOpen(false);
-    window.location.href = user.route;
+    window.location.assign(user.route);
   };
+
+  if (!isDevEnabled) {
+    return null;
+  }
 
   return (
     <div className="fixed bottom-6 left-6 z-[999999]">

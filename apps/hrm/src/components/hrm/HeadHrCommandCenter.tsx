@@ -142,7 +142,7 @@ export default function HeadHrCommandCenter() {
                     RBT Onboarding Checklist <ArrowUpRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity text-emerald-400" />
                   </h3>
                   <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
-                    6-point compliance checklist: BACB verification, background checks, Artemis EMR setup, and 1-on-1 interview scoring.
+                    6-point compliance checklist: BACB verification, background checks, EMR account setup, and 1-on-1 interview scoring.
                   </p>
                 </div>
                 <div className="pt-3 border-t border-white/5 flex items-center justify-between text-[11px] text-zinc-500 font-mono">

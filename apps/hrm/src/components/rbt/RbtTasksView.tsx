@@ -18,13 +18,167 @@ import {
   Upload,
   Check,
   Play,
-  Sparkles,
   UserCheck,
   Video
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { getHrMembers } from '@/app/actions/hrInterviewActions';
+import { getActiveApplicantId, getActiveApplicantName } from '@/lib/syncAtsProgress';
+import { getOnboardingDoc, ONBOARDING_TOTAL_STEPS } from '@/lib/onboardingDocuments';
+import { OnboardingConfirmModal } from '@/components/rbt/OnboardingConfirmModal';
+import {
+  HarassmentQuizPanel,
+  OnboardingDocumentStatus,
+  OfficialPdfBar,
+  UploadCertificatePanel,
+} from '@/components/rbt/OnboardingStepPanels';
+import { EmbeddedOnboardingFormPanel } from '@/components/rbt/EmbeddedOnboardingForms';
+import { WageOfferApplicantCard } from '@/components/rbt/WageOfferApplicantCard';
+import {
+  getOnboardingStepState,
+  recordOnboardingAdvance,
+  recordOnboardingSignature,
+} from '@/app/actions/onboardingSignatureActions';
+import { resolveHrmUiRole } from '@/app/actions/resolveHrmRole';
+import { RbtLiveTasksInbox } from '@/components/rbt/RbtLiveTasksInbox';
+import {
+  completedTaskStepsFromAudit,
+  mergeCompletedTaskSteps,
+  resolveTaskSurface,
+  type TaskSurface,
+} from '@/components/rbt/RbtTasksModel';
+import { addClinicDays, clinicDateKey } from '@/lib/clinicTimezone';
 
+/**
+ * `/rbt` Tasks home.
+ * Hired / Active RBT → live inbox from real sources (pay holds, apps, leftover onboarding).
+ * Applicant → onboarding clearance hub (no fake Leo LIVE task lists).
+ */
 export default function RbtTasksView() {
+  const [taskSurface, setTaskSurface] = React.useState<
+    TaskSurface | 'LOADING' | 'ERROR'
+  >('LOADING');
+  const [resolutionKey, setResolutionKey] = React.useState(0);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    const resolve = async () => {
+      try {
+        const role = await resolveHrmUiRole();
+        if (!cancelled) setTaskSurface(resolveTaskSurface(role));
+      } catch {
+        if (!cancelled) setTaskSurface('ERROR');
+      }
+    };
+    void resolve();
+    const onIdentityChange = () => void resolve();
+    window.addEventListener('hrm_role_changed', onIdentityChange);
+    window.addEventListener('rbt_progress_synced', onIdentityChange);
+    window.addEventListener('ras_applicant_session_changed', onIdentityChange);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('hrm_role_changed', onIdentityChange);
+      window.removeEventListener('rbt_progress_synced', onIdentityChange);
+      window.removeEventListener('ras_applicant_session_changed', onIdentityChange);
+    };
+  }, [resolutionKey]);
+
+  if (taskSurface === 'LOADING') {
+    return (
+      <div
+        className="relative mx-auto max-w-5xl overflow-hidden rounded-3xl border border-white/10 bg-zinc-950/80 p-8 shadow-2xl backdrop-blur-xl"
+        role="status"
+        aria-live="polite"
+      >
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,_rgba(249,115,22,0.12),_transparent_58%)]" />
+        <div className="relative flex items-center gap-3">
+          <div className="h-11 w-11 animate-pulse rounded-2xl border border-white/10 bg-white/5" />
+          <div className="space-y-2">
+            <div className="h-4 w-40 animate-pulse rounded-full bg-white/10" />
+            <div className="h-3 w-64 max-w-full animate-pulse rounded-full bg-white/5" />
+          </div>
+        </div>
+        <span className="sr-only">Verifying task workspace access…</span>
+      </div>
+    );
+  }
+
+  if (taskSurface === 'ERROR') {
+    return (
+      <div
+        className="relative mx-auto max-w-3xl overflow-hidden rounded-3xl border border-rose-500/20 bg-zinc-950/85 p-8 shadow-2xl backdrop-blur-xl"
+        role="alert"
+      >
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,_rgba(244,63,94,0.12),_transparent_58%)]" />
+        <div className="relative flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-rose-500/20 bg-rose-500/10">
+              <Lock className="h-5 w-5 text-rose-300" aria-hidden="true" />
+            </div>
+            <div>
+              <h1 className="font-heading text-xl font-black text-white">
+                Task access could not be verified
+              </h1>
+              <p className="mt-1 text-sm font-medium text-zinc-400">
+                Your session was not changed. Retry the secure role check.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setTaskSurface('LOADING');
+              setResolutionKey((key) => key + 1);
+            }}
+            className="cursor-pointer rounded-xl bg-[#F97316] px-4 py-2.5 text-sm font-black text-white transition hover:bg-orange-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-300"
+          >
+            Retry access
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (taskSurface === 'DENIED') {
+    return (
+      <div
+        className="relative mx-auto max-w-3xl overflow-hidden rounded-3xl border border-amber-500/20 bg-zinc-950/85 p-8 shadow-2xl backdrop-blur-xl"
+        role="alert"
+      >
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,_rgba(245,158,11,0.12),_transparent_58%)]" />
+        <div className="relative flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-amber-500/20 bg-amber-500/10">
+              <Lock className="h-5 w-5 text-amber-300" aria-hidden="true" />
+            </div>
+            <div>
+              <h1 className="font-heading text-xl font-black text-white">
+                This is not your task workspace
+              </h1>
+              <p className="mt-1 text-sm font-medium text-zinc-400">
+                My Tasks is limited to the resolved applicant or RBT owner session.
+              </p>
+            </div>
+          </div>
+          <Link
+            href="/"
+            className="cursor-pointer rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-center text-sm font-black text-zinc-100 transition hover:border-[#F97316]/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F97316]/70"
+          >
+            Return home
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  if (taskSurface === 'LIVE') {
+    return <RbtLiveTasksInbox />;
+  }
+
+  return <ApplicantOnboardingTasksHub />;
+}
+
+function ApplicantOnboardingTasksHub() {
   // 5 Parallel Requirements Completion State
   const [tasksDone, setTasksDone] = useState(false);
   const [interviewBooked, setInterviewBooked] = useState(false); // Slot scheduled
@@ -48,10 +202,19 @@ export default function RbtTasksView() {
   const [checkESign, setCheckESign] = useState(false);
   const [fullName, setFullName] = useState('');
   const [isSigned, setIsSigned] = useState(false);
+  const [lastAuditHash, setLastAuditHash] = useState<string | null>(null);
+  const [confirmKind, setConfirmKind] = useState<'SIGN' | 'NEXT' | null>(null);
+  const [confirmPending, setConfirmPending] = useState(false);
+  const [progressIssue, setProgressIssue] = useState<string | null>(null);
+  const [progressReloadKey, setProgressReloadKey] = useState(0);
 
   // HR Interview Modal State
-  const [selectedHr, setSelectedHr] = useState('Eleanor Vance (Head of HR)');
-  const [interviewDate, setInterviewDate] = useState('2026-08-10');
+  const [hrMembers, setHrMembers] = useState<{ id: string; name: string; role: string; email: string }[]>([]);
+  const [selectedHrId, setSelectedHrId] = useState('');
+  const [selectedHr, setSelectedHr] = useState('Marcus Vance (HR Agent)');
+  const [interviewDate, setInterviewDate] = useState(() =>
+    clinicDateKey(addClinicDays(new Date(), 1))
+  );
   const [interviewTime, setInterviewTime] = useState('10:00 AM');
 
   // Availability State
@@ -69,6 +232,60 @@ export default function RbtTasksView() {
   const [simCompleted, setSimCompleted] = useState(false);
 
   const documentRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (activeModal === 'NONE') return;
+
+    const previouslyFocused =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const focusableSelector =
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    const focusFirst = window.requestAnimationFrame(() => {
+      const focusable =
+        dialogRef.current?.querySelectorAll<HTMLElement>(focusableSelector) ?? [];
+      (focusable[0] ?? dialogRef.current)?.focus();
+    });
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setActiveModal('NONE');
+        return;
+      }
+      if (event.key !== 'Tab' || !dialogRef.current) return;
+
+      const focusable = Array.from(
+        dialogRef.current.querySelectorAll<HTMLElement>(focusableSelector)
+      );
+      if (focusable.length === 0) {
+        event.preventDefault();
+        dialogRef.current.focus();
+        return;
+      }
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.cancelAnimationFrame(focusFirst);
+      document.removeEventListener('keydown', onKeyDown);
+      document.body.style.overflow = previousOverflow;
+      previouslyFocused?.focus();
+    };
+  }, [activeModal]);
 
   const handleScroll = () => {
     if (documentRef.current) {
@@ -87,8 +304,79 @@ export default function RbtTasksView() {
     setIsSigned(completedSteps.includes(currentStep));
   }, [currentStep, completedSteps]);
 
+  React.useEffect(() => {
+    void getHrMembers().then((res) => {
+      if (!res.success || res.data.length === 0) return;
+      setHrMembers(res.data);
+      const marcus =
+        res.data.find((m) => m.name.toLowerCase().includes('marcus')) || res.data[0];
+      setSelectedHrId(marcus.id);
+      setSelectedHr(`${marcus.name} (${marcus.role})`);
+    });
+  }, []);
+
+  React.useEffect(() => {
+    void getOnboardingStepState().then((res) => {
+      if (!res.success || !res.data) {
+        setProgressIssue(res.error || 'Could not load the onboarding audit trail.');
+        return;
+      }
+      const auditSteps = completedTaskStepsFromAudit(res.data.events);
+      setCompletedSteps((previous) =>
+        mergeCompletedTaskSteps(previous, auditSteps)
+      );
+      if (auditSteps.length === ONBOARDING_TOTAL_STEPS) {
+        setTasksDone(true);
+      }
+      const latest = res.data.events.find(
+        (e) =>
+          e.stepNumber === currentStep &&
+          (e.actionType === 'SIGNED' ||
+            e.actionType === 'FORM_SUBMITTED' ||
+            e.actionType === 'UPLOADED' ||
+            e.actionType === 'QUIZ_PASSED')
+      );
+      setLastAuditHash(latest?.auditHash ?? null);
+      setProgressIssue(null);
+    });
+  }, [currentStep, progressReloadKey]);
+
+  const markStepComplete = async (step: number, auditHash?: string) => {
+    if (auditHash) setLastAuditHash(auditHash);
+    setIsSigned(true);
+    const updated = mergeCompletedTaskSteps(completedSteps, [step]);
+    setCompletedSteps(updated);
+    const allDone = Array.from({ length: ONBOARDING_TOTAL_STEPS }, (_, i) => i + 1).every((s) =>
+      updated.includes(s)
+    );
+    if (allDone) {
+      setTasksDone(true);
+      window.dispatchEvent(new Event('rbt_tasks_changed'));
+    }
+    const { syncAtsProgress } = await import('@/lib/syncAtsProgress');
+    // The server rebuilds task completion from OnboardingSignatureEvent rows.
+    const synced = await syncAtsProgress({});
+    if (!synced) {
+      setProgressIssue(
+        'This step is in the signed audit trail, but the task summary could not sync. Retry after reconnecting.'
+      );
+      toast.warning('Step recorded; task summary sync is pending.');
+      return;
+    }
+    setProgressIssue(null);
+    if (allDone) {
+      toast.success('All onboarding documents complete. Waiting for Head HR wage offer.');
+    } else {
+      toast.success(`Step ${step} saved. Confirm to continue to the next page.`);
+    }
+  };
+
   const handleSignDocument = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSigned) {
+      if (currentStep < ONBOARDING_TOTAL_STEPS) setConfirmKind('NEXT');
+      return;
+    }
     if (!checkRead || !checkAgree || !checkESign) {
       toast.error('Please accept all consent terms and agreements before signing.');
       return;
@@ -97,56 +385,46 @@ export default function RbtTasksView() {
       toast.error('Please type your full legal name to sign.');
       return;
     }
-
-    setIsSigned(true);
-    let updated = completedSteps;
-    if (!completedSteps.includes(currentStep)) {
-      updated = [...completedSteps, currentStep];
-      setCompletedSteps(updated);
-      localStorage.setItem('ras_rbt_completed_steps', JSON.stringify(updated));
-      const activeId = localStorage.getItem('ras_active_impersonated_applicant_id') || localStorage.getItem('ras_active_applicant_id');
-      const activeEmail = localStorage.getItem('ras_active_impersonated_applicant_email');
-      if (activeId) {
-        localStorage.setItem(`ras_rbt_completed_steps_${activeId}`, JSON.stringify(updated));
-      }
-      if (activeEmail) {
-        localStorage.setItem(`ras_rbt_completed_steps_${activeEmail.toLowerCase().trim()}`, JSON.stringify(updated));
-      }
-    }
-
-    // REQUIREMENT 1 ONLY MARKS AS COMPLETE ONCE ALL 30 DOCUMENTS ARE SIGNED AND STEP 30 SUBMITTED
-    if (updated.length >= 30 && currentStep === 30) {
-      setTasksDone(true);
-      localStorage.setItem('ras_rbt_tasks_done', 'true');
-      const activeId = localStorage.getItem('ras_active_impersonated_applicant_id') || localStorage.getItem('ras_active_applicant_id');
-      const activeEmail = localStorage.getItem('ras_active_impersonated_applicant_email');
-      if (activeId) {
-        localStorage.setItem(`ras_rbt_tasks_done_${activeId}`, 'true');
-      }
-      if (activeEmail) {
-        localStorage.setItem(`ras_rbt_tasks_done_${activeEmail.toLowerCase().trim()}`, 'true');
-      }
-      window.dispatchEvent(new Event('rbt_tasks_changed'));
-      window.dispatchEvent(new Event('storage'));
-      toast.success('🎉 Congratulations! All 30 onboarding documents signed. Requirement 1 is 100% Complete!');
-    } else {
-      toast.success(`Step ${currentStep} of 30 signed & saved!`);
-    }
-
-    // Automatically advance to the next document if not on the last step
-    if (currentStep < totalSteps) {
-      setCurrentStep((prev) => prev + 1);
-    }
+    setConfirmKind('SIGN');
   };
 
-  const handleBookInterview = (e: React.FormEvent) => {
-    e.preventDefault();
-    setInterviewBooked(true);
-    setActiveModal('NONE');
+  const confirmSignNow = async () => {
+    setConfirmPending(true);
+    const res = await recordOnboardingSignature({
+      stepNumber: currentStep,
+      signerName: fullName.trim(),
+      consents: { read: checkRead, agree: checkAgree, eSign: checkESign },
+    });
+    setConfirmPending(false);
+    if (!res.success) {
+      toast.error(res.error);
+      return;
+    }
+    setConfirmKind(null);
+    await markStepComplete(currentStep, res.data.auditHash);
+  };
 
-    let realCandidateId = localStorage.getItem('ras_active_impersonated_applicant_id') || localStorage.getItem('ras_active_applicant_id') || 'c1';
-    let realCandidateEmail = localStorage.getItem('ras_active_impersonated_applicant_email') || 'jane.doe@gmail.com';
-    let realCandidateName = localStorage.getItem('ras_active_impersonated_applicant_name') || 'Jane Doe';
+  const confirmAdvanceNow = async () => {
+    if (!completedSteps.includes(currentStep)) {
+      toast.error('Complete this step before moving on.');
+      return;
+    }
+    setConfirmPending(true);
+    const res = await recordOnboardingAdvance(currentStep, currentStep + 1);
+    setConfirmPending(false);
+    if (!res.success) {
+      toast.error(res.error);
+      return;
+    }
+    setConfirmKind(null);
+    setCurrentStep((prev) => Math.min(ONBOARDING_TOTAL_STEPS, prev + 1));
+  };
+
+  const handleBookInterview = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    let realCandidateId = getActiveApplicantId() || '';
+    let realCandidateName = getActiveApplicantName() || 'Applicant';
 
     try {
       const storedApp = localStorage.getItem('ras_latest_submitted_app');
@@ -154,84 +432,100 @@ export default function RbtTasksView() {
         const parsed = JSON.parse(storedApp);
         if (parsed.fullName) realCandidateName = parsed.fullName;
         else if (parsed.name) realCandidateName = parsed.name;
-        if (parsed.email) realCandidateEmail = parsed.email;
         if (parsed.applicantId) realCandidateId = parsed.applicantId;
       }
-    } catch (e) {}
+    } catch {
+      // ignore
+    }
 
-    const roomName = `RiseAndShine_HR_Interview_${realCandidateId}`;
-    const meetingLink = `https://meet.jit.si/${roomName}`;
+    if (!realCandidateId) {
+      toast.error('No active applicant selected.');
+      return;
+    }
 
-    const payload = {
-      candidateName: realCandidateName,
-      candidateEmail: realCandidateEmail,
+    if (!selectedHrId) {
+      toast.error('Select an HR specialist first.');
+      return;
+    }
+
+    const { bookHrInterview } = await import('@/app/actions/hrInterviewActions');
+    const res = await bookHrInterview({
       candidateId: realCandidateId,
-      hrInterviewer: selectedHr || 'Marcus Vance',
+      candidateName: realCandidateName,
+      hrInterviewerId: selectedHrId,
+      hrInterviewerName: selectedHr || 'Marcus Vance',
       date: interviewDate,
       time: interviewTime,
-      meetingCode: roomName,
-      meetingLink: meetingLink,
-      status: 'SCHEDULED',
-      bookedAt: new Date().toISOString(),
-    };
+    });
 
-    localStorage.setItem('ras_rbt_interview_done', 'true');
-    localStorage.setItem('ras_rbt_interview_payload', JSON.stringify(payload));
-    if (realCandidateId) {
-      localStorage.setItem(`ras_rbt_interview_booked_${realCandidateId}`, 'true');
-      localStorage.setItem(`ras_rbt_interview_done_${realCandidateId}`, 'true');
+    if (!res.success) {
+      toast.error(res.error || 'Failed to book interview');
+      return;
     }
-    if (realCandidateEmail) {
-      localStorage.setItem(`ras_rbt_interview_booked_${realCandidateEmail.toLowerCase().trim()}`, 'true');
-      localStorage.setItem(`ras_rbt_interview_done_${realCandidateEmail.toLowerCase().trim()}`, 'true');
+
+    setInterviewBooked(true);
+    setActiveModal('NONE');
+    window.dispatchEvent(new Event('rbt_interview_changed'));
+    window.dispatchEvent(new Event('rbt_progress_synced'));
+    toast.success(
+      `HR Interview scheduled with ${selectedHr || 'Marcus Vance'} on ${interviewDate} at ${interviewTime}!`
+    );
+  };
+
+  const handleSaveAvailability = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const { syncAtsProgress } = await import('@/lib/syncAtsProgress');
+    const synced = await syncAtsProgress({
+      preferredBoroughs: selectedBoroughs,
+    });
+    if (!synced) {
+      setProgressIssue('Availability could not be saved to your onboarding record.');
+      toast.error('Could not save availability. Please try again.');
+      return;
     }
+    setActiveModal('NONE');
+    window.dispatchEvent(new Event('rbt_availability_changed'));
+    setProgressIssue('Borough preferences saved. Complete the weekly grid to finish availability.');
+    toast.success('Borough preferences saved. Complete the weekly availability grid next.');
+  };
+
+  const handleCertUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
     try {
-      const customStages = JSON.parse(localStorage.getItem('ras_ats_custom_stages') || '{}');
-      if (realCandidateId) {
-        customStages[realCandidateId] = { stage: 'INTERVIEW', activationStatus: 'INVITATION_SENT' };
+      const formData = new FormData();
+      formData.append('file', file);
+      const { uploadFortyHourCertificate } = await import(
+        '@/app/actions/fortyHourCourseActions'
+      );
+      const result = await uploadFortyHourCertificate(formData);
+      if (!result.success || !result.data) {
+        const message =
+          result.error ||
+          'Certificate upload could not be stored. Please try again.';
+        setProgressIssue(message);
+        toast.error(message);
+        return;
       }
-      if (realCandidateEmail) {
-        customStages[realCandidateEmail.toLowerCase().trim()] = { stage: 'INTERVIEW', activationStatus: 'INVITATION_SENT' };
-      }
-      localStorage.setItem('ras_ats_custom_stages', JSON.stringify(customStages));
-    } catch (e) {}
 
-    window.dispatchEvent(new Event('rbt_interview_changed'));
-    window.dispatchEvent(new Event('storage'));
-
-    toast.success(`HR Interview scheduled with ${selectedHr || 'Marcus Vance'} on ${interviewDate} at ${interviewTime}!`);
-  };
-
-  const handleSaveAvailability = (e: React.FormEvent) => {
-    e.preventDefault();
-    setAvailabilitySet(true);
-    setActiveModal('NONE');
-    localStorage.setItem('ras_rbt_availability_set', 'true');
-    const activeId = localStorage.getItem('ras_active_impersonated_applicant_id') || localStorage.getItem('ras_active_applicant_id');
-    const activeEmail = localStorage.getItem('ras_active_impersonated_applicant_email');
-    if (activeId) {
-      localStorage.setItem(`ras_rbt_availability_set_${activeId}`, 'true');
-    }
-    if (activeEmail) {
-      localStorage.setItem(`ras_rbt_availability_set_${activeEmail.toLowerCase().trim()}`, 'true');
-    }
-    window.dispatchEvent(new Event('rbt_availability_changed'));
-    window.dispatchEvent(new Event('storage'));
-    toast.success('Weekly availability & borough preferences saved!');
-  };
-
-  const handleCertUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setCertFileName(file.name);
+      setCertFileName(result.data.certFileName || file.name);
       setCertUploaded(true);
+      setProgressIssue(null);
+      window.dispatchEvent(new Event('rbt_progress_synced'));
       toast.success(`Uploaded ${file.name}! BACB 40-Hour Certificate saved.`);
+    } catch {
+      const message =
+        'Certificate upload could not be stored. Check your connection and try again.';
+      setProgressIssue(message);
+      toast.error(message);
+    } finally {
+      e.target.value = '';
     }
   };
 
   // Trial Simulator Controls
-  const handleTrial = (type: 'CORRECT' | 'PROMPTED' | 'INCORRECT') => {
+  const handleTrial = async (type: 'CORRECT' | 'PROMPTED' | 'INCORRECT') => {
     if (trialsCount >= 10) return;
     const newCount = trialsCount + 1;
     setTrialsCount(newCount);
@@ -241,23 +535,10 @@ export default function RbtTasksView() {
 
     if (newCount === 10) {
       setSimCompleted(true);
-      setSimulatorPassed(true);
-      localStorage.setItem('ras_rbt_sim_completed', 'true');
-      localStorage.setItem('ras_rbt_simulation_completed', 'true');
-
-      const activeId = localStorage.getItem('ras_active_impersonated_applicant_id') || localStorage.getItem('ras_active_applicant_id');
-      const activeEmail = localStorage.getItem('ras_active_impersonated_applicant_email');
-      if (activeId) {
-        localStorage.setItem(`ras_rbt_sim_completed_${activeId}`, 'true');
-      }
-      if (activeEmail) {
-        localStorage.setItem(`ras_rbt_sim_completed_${activeEmail.toLowerCase().trim()}`, 'true');
-      }
-
-      window.dispatchEvent(new Event('rbt_sim_changed'));
-      window.dispatchEvent(new Event('simulationCompleted'));
-      window.dispatchEvent(new Event('storage'));
-      toast.success('10/10 Trials Completed! Data Collection Simulation Passed.');
+      setProgressIssue(
+        'Practice completed locally. Simulation readiness remains pending until a durable assessment record is implemented.'
+      );
+      toast.info('Practice complete. This attempt does not clear onboarding readiness.');
     }
   };
 
@@ -269,97 +550,185 @@ export default function RbtTasksView() {
     setSimCompleted(false);
   };
 
-  const isBtCleared = tasksDone && interviewPassed && availabilitySet && simulatorPassed;
-  const isRbtCleared = isBtCleared && certUploaded;
-  const coreCompletedCount = [tasksDone, interviewPassed, availabilitySet, simulatorPassed].filter(Boolean).length;
+  const isRbtCleared =
+    tasksDone && interviewPassed && availabilitySet && simulatorPassed && certUploaded;
+  const coreCompletedCount = [
+    tasksDone,
+    interviewPassed,
+    availabilitySet,
+    simulatorPassed,
+    certUploaded,
+  ].filter(Boolean).length;
 
   React.useEffect(() => {
-    const checkAllRequirementStatuses = () => {
-      const simDone = localStorage.getItem('ras_rbt_sim_completed') === 'true' || localStorage.getItem('ras_rbt_simulation_completed') === 'true';
-      const availDone = localStorage.getItem('ras_rbt_availability_set') === 'true';
-      const interviewDone = localStorage.getItem('ras_rbt_interview_done') === 'true' || !!localStorage.getItem('ras_rbt_interview_payload');
-      const interviewPassedVal = localStorage.getItem('ras_rbt_interview_passed') === 'true';
-      const certDone = localStorage.getItem('ras_rbt_cert_uploaded') === 'true' || localStorage.getItem('ras_rbt_cert_uploaded_c1') === 'true';
-      const tasksDoneVal = localStorage.getItem('ras_rbt_tasks_done') === 'true';
-      const storedStepsStr = localStorage.getItem('ras_rbt_completed_steps');
-
-      if (storedStepsStr) {
-        try {
-          const parsed = JSON.parse(storedStepsStr);
-          if (Array.isArray(parsed)) setCompletedSteps(parsed);
-        } catch (e) {}
-      } else {
-        setCompletedSteps([]);
+    const applySnapshot = (data: {
+      tasksDone: boolean;
+      tasksCompletedSteps: number[];
+      availabilityDone: boolean;
+      simulationDone: boolean;
+      interviewBooked: boolean;
+      interviewPassed: boolean;
+      certUploaded: boolean;
+      clearedForHire: boolean;
+    }) => {
+      setCompletedSteps((previous) =>
+        mergeCompletedTaskSteps(previous, data.tasksCompletedSteps)
+      );
+      setTasksDone((previous) => previous || data.tasksDone);
+      setAvailabilitySet(data.availabilityDone);
+      setSimulatorPassed(data.simulationDone);
+      setSimCompleted(data.simulationDone);
+      setInterviewBooked(data.interviewBooked);
+      setInterviewPassed(data.interviewPassed);
+      setCertUploaded(data.certUploaded);
+      if (
+        data.clearedForHire ||
+        (data.tasksDone &&
+          data.interviewPassed &&
+          data.availabilityDone &&
+          data.simulationDone &&
+          data.certUploaded)
+      ) {
+        window.dispatchEvent(new Event('rbt_clearance_changed'));
       }
-
-      if (simDone) {
-        setSimulatorPassed(true);
-        setSimCompleted(true);
-      }
-      if (availDone) {
-        setAvailabilitySet(true);
-      }
-      if (interviewDone) {
-        setInterviewBooked(true);
-      }
-      if (interviewPassedVal) {
-        setInterviewPassed(true);
-      }
-      if (certDone) {
-        setCertUploaded(true);
-      }
-      setTasksDone(tasksDoneVal);
     };
 
-    checkAllRequirementStatuses();
-    window.addEventListener('storage', checkAllRequirementStatuses);
-    window.addEventListener('rbt_sim_changed', checkAllRequirementStatuses);
-    window.addEventListener('simulationCompleted', checkAllRequirementStatuses);
-    window.addEventListener('rbt_availability_changed', checkAllRequirementStatuses);
-    window.addEventListener('rbt_interview_changed', checkAllRequirementStatuses);
-    window.addEventListener('rbt_tasks_changed', checkAllRequirementStatuses);
+    const loadFromDb = () => {
+      void import('@/lib/syncAtsProgress').then(({ loadAtsProgress }) =>
+        loadAtsProgress().then((data) => {
+          if (data) {
+            applySnapshot(data);
+            setProgressIssue(null);
+          } else {
+            setProgressIssue('Persisted onboarding progress could not be loaded.');
+          }
+        })
+      );
+    };
+
+    loadFromDb();
+    window.addEventListener('rbt_sim_changed', loadFromDb);
+    window.addEventListener('simulationCompleted', loadFromDb);
+    window.addEventListener('rbt_availability_changed', loadFromDb);
+    window.addEventListener('rbt_interview_changed', loadFromDb);
+    window.addEventListener('rbt_tasks_changed', loadFromDb);
+    window.addEventListener('rbt_progress_synced', loadFromDb);
     return () => {
-      window.removeEventListener('storage', checkAllRequirementStatuses);
-      window.removeEventListener('rbt_sim_changed', checkAllRequirementStatuses);
-      window.removeEventListener('simulationCompleted', checkAllRequirementStatuses);
-      window.removeEventListener('rbt_availability_changed', checkAllRequirementStatuses);
-      window.removeEventListener('rbt_interview_changed', checkAllRequirementStatuses);
-      window.removeEventListener('rbt_tasks_changed', checkAllRequirementStatuses);
+      window.removeEventListener('rbt_sim_changed', loadFromDb);
+      window.removeEventListener('simulationCompleted', loadFromDb);
+      window.removeEventListener('rbt_availability_changed', loadFromDb);
+      window.removeEventListener('rbt_interview_changed', loadFromDb);
+      window.removeEventListener('rbt_tasks_changed', loadFromDb);
+      window.removeEventListener('rbt_progress_synced', loadFromDb);
     };
-  }, []);
+  }, [progressReloadKey]);
 
-  React.useEffect(() => {
-    if (isBtCleared || isRbtCleared) {
-      localStorage.setItem('ras_rbt_cleared', 'true');
-      window.dispatchEvent(new Event('rbt_clearance_changed'));
-    }
-  }, [isBtCleared, isRbtCleared]);
-
-  const totalSteps = 30;
-  const tierAComplete = completedSteps.filter(s => s <= 25).length;
-  const tierBComplete = completedSteps.filter(s => s > 25).length;
+  const totalSteps = ONBOARDING_TOTAL_STEPS;
+  const currentDoc = getOnboardingDoc(currentStep);
+  const usesTypedSignature = currentDoc.kind === 'ESIGN' || currentDoc.kind === 'ACK';
+  const allPackStepsDone = Array.from({ length: ONBOARDING_TOTAL_STEPS }, (_, i) => i + 1).every((s) =>
+    completedSteps.includes(s)
+  );
+  /** Only after final step (27) is submitted — not while mid-pack on uploads. */
+  const packComplete = allPackStepsDone && (tasksDone || completedSteps.includes(ONBOARDING_TOTAL_STEPS));
+  /** Pack + interview + availability + sim + 40-hr cert — then wait for Head HR / LS-54. */
+  const allRequirementsDone =
+    packComplete && interviewPassed && availabilitySet && simulatorPassed && certUploaded;
+  const tierAComplete = completedSteps.filter(s => s <= 22).length;
+  const tierBComplete = completedSteps.filter(s => s > 22).length;
   const stepsList = Array.from({ length: totalSteps }, (_, i) => i + 1);
 
+  const remainingRequirements: {
+    key: string;
+    label: string;
+    detail: string;
+    done: boolean;
+    href?: string;
+  }[] = [
+    {
+      key: 'interview',
+      label: 'HR Interview',
+      detail: interviewPassed
+        ? 'Approved by HR'
+        : interviewBooked
+        ? 'Slot booked — awaiting HR evaluation'
+        : 'Book and complete your interview',
+      done: interviewPassed,
+      href: '/rbt/interview',
+    },
+    {
+      key: 'availability',
+      label: 'Set Availability',
+      detail: availabilitySet ? 'Schedule submitted' : 'Submit your weekly availability',
+      done: availabilitySet,
+      href: '/rbt/availability',
+    },
+    {
+      key: 'simulation',
+      label: 'Data Collection Simulation',
+      detail: simulatorPassed ? 'Simulation passed' : 'Complete the 10-trial simulator',
+      done: simulatorPassed,
+    },
+    {
+      key: 'cert',
+      label: '40-Hour Course Certificate',
+      detail: certUploaded ? 'Certificate on file' : 'Upload your RBT 40-hour certificate',
+      done: certUploaded,
+      href: '/rbt/documents',
+    },
+  ];
+
   const formattedDate = new Date().toLocaleDateString('en-US', {
+    timeZone: 'America/New_York',
     month: 'long',
     day: 'numeric',
     year: 'numeric',
   });
+  const minimumInterviewDate = clinicDateKey(new Date());
 
   return (
     <div className="max-w-5xl mx-auto space-y-8 pb-12">
+      {progressIssue ? (
+        <div
+          className="relative overflow-hidden rounded-2xl border border-amber-500/25 bg-zinc-950/90 p-4 text-white shadow-xl backdrop-blur-xl"
+          role="alert"
+        >
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,_rgba(245,158,11,0.14),_transparent_58%)]" />
+          <div className="relative flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <Clock className="mt-0.5 h-5 w-5 shrink-0 text-amber-300" aria-hidden="true" />
+              <div>
+                <p className="text-sm font-black text-amber-100">
+                  Progress sync needs attention
+                </p>
+                <p className="mt-0.5 text-xs font-medium text-zinc-300">
+                  {progressIssue}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setProgressReloadKey((key) => key + 1)}
+              className="cursor-pointer rounded-xl border border-amber-400/25 bg-amber-500/10 px-3.5 py-2 text-xs font-black text-amber-100 transition hover:border-amber-300/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70"
+            >
+              Retry progress
+            </button>
+          </div>
+        </div>
+      ) : null}
       {/* ONBOARDING & SERVICE CLEARANCE HUB BANNER - 100% OPAQUE PURE WHITE */}
       <div className="bg-white border-2 border-orange-200 rounded-3xl shadow-xl p-6 sm:p-8 space-y-6 text-slate-900">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-orange-100 pb-5">
           <div>
             <div className="flex items-center gap-2.5">
-              <ShieldCheck className={`w-7 h-7 ${isRbtCleared ? 'text-emerald-600' : isBtCleared ? 'text-amber-500' : 'text-[#F97316]'}`} />
+              <ShieldCheck className={`w-7 h-7 ${isRbtCleared ? 'text-emerald-600' : 'text-[#F97316]'}`} />
               <h1 className="text-2xl font-black text-slate-900 font-heading tracking-tight">
                 RBT Service Clearance Onboarding Hub
               </h1>
             </div>
             <p className="text-xs text-slate-600 font-semibold mt-1">
-              Complete the 4 Core Tasks below to start direct sessions as a <strong>Behavior Technician (BT)</strong>, and upload your 40-Hour Course to upgrade to <strong>RBT Tier Pay</strong>.
+              Complete all <strong>5 requirements</strong> below — including the mandatory{' '}
+              <strong>40-Hour BACB Course</strong> — before Head HR can extend your wage offer.
             </p>
           </div>
 
@@ -367,16 +736,12 @@ export default function RbtTasksView() {
             <span className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-black uppercase tracking-wide border shadow-sm ${
               isRbtCleared
                 ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                : isBtCleared
-                ? 'bg-amber-100 text-amber-900 border-amber-300'
                 : 'bg-orange-100 text-[#F97316] border-orange-300'
             }`}>
-              <span className={`w-2.5 h-2.5 rounded-full ${isRbtCleared ? 'bg-emerald-500 animate-pulse' : isBtCleared ? 'bg-amber-500 animate-pulse' : 'bg-[#F97316]'}`} />
-              {isRbtCleared 
-                ? '✓ CLEARED AS REGISTERED BEHAVIOR TECHNICIAN (RBT)' 
-                : isBtCleared 
-                ? '✓ CLEARED AS BEHAVIOR TECHNICIAN (BT)' 
-                : `${coreCompletedCount} OF 4 CORE TASKS DONE`}
+              <span className={`w-2.5 h-2.5 rounded-full ${isRbtCleared ? 'bg-emerald-500 animate-pulse' : 'bg-[#F97316]'}`} />
+              {isRbtCleared
+                ? '✓ CLEARED AS REGISTERED BEHAVIOR TECHNICIAN (RBT)'
+                : `${coreCompletedCount} OF 5 REQUIREMENTS DONE`}
             </span>
 
             <div className="flex items-center gap-3">
@@ -386,77 +751,17 @@ export default function RbtTasksView() {
               >
                 <span>💬 Need Help? Contact HR Recruiter</span>
               </Link>
-
-              <button
-                suppressHydrationWarning
-                type="button"
-                onClick={() => {
-                  localStorage.removeItem('ras_rbt_cleared');
-                  localStorage.removeItem('ras_rbt_sim_completed');
-                  localStorage.removeItem('ras_rbt_simulation_completed');
-                  localStorage.removeItem('ras_rbt_availability_set');
-                  localStorage.removeItem('ras_rbt_tasks_done');
-                  localStorage.removeItem('ras_rbt_completed_steps');
-                  localStorage.removeItem('ras_rbt_interview_done');
-                  localStorage.removeItem('ras_rbt_interview_passed');
-                  localStorage.removeItem('ras_rbt_interview_payload');
-                  localStorage.removeItem('ras_ats_custom_stages');
-                  window.dispatchEvent(new Event('rbt_clearance_changed'));
-                  window.dispatchEvent(new Event('rbt_sim_changed'));
-                  window.dispatchEvent(new Event('simulationCompleted'));
-                  window.dispatchEvent(new Event('rbt_availability_changed'));
-                  window.dispatchEvent(new Event('rbt_interview_changed'));
-                  window.dispatchEvent(new Event('rbt_tasks_changed'));
-                  window.dispatchEvent(new Event('storage'));
-                  setCompletedSteps([]);
-                  setCurrentStep(1);
-                  setTasksDone(false);
-                  setInterviewBooked(false);
-                  setAvailabilitySet(false);
-                  setSimulatorPassed(false);
-                  setCertUploaded(false);
-                  toast.info('🔄 All Onboarding Progress Reset! You can test fresh from Step 1.');
-                }}
-                className="text-[10px] font-bold text-slate-500 hover:text-slate-800 underline cursor-pointer"
-              >
-                🔄 Reset Demo Progress
-              </button>
             </div>
           </div>
         </div>
 
-        {/* 🌟 HIGHLY RECOMMENDED RBT TIER UPGRADE BANNER (WHEN BT CLEARED BUT NO 40-HR CERT YET) */}
-        {isBtCleared && !certUploaded && (
-          <div className="bg-gradient-to-r from-amber-50 to-orange-50 border-2 border-amber-300 p-4 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4 shadow-md">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-amber-100 border border-amber-300 text-amber-700 flex items-center justify-center shrink-0">
-                <Sparkles className="w-5 h-5" />
-              </div>
-              <div>
-                <h4 className="text-xs font-black text-slate-900 uppercase tracking-wide">
-                  Highly Recommended: Upgrade to Official RBT Tier Pay
-                </h4>
-                <p className="text-xs text-slate-600 font-medium">
-                  You are cleared to work as a <strong>Behavior Technician (BT)</strong>! Upload your free 40-Hour Course Certificate to unlock <strong>+$5/hr RBT Rate Upgrade</strong>.
-                </p>
-              </div>
-            </div>
-
-            <Link
-              href="/rbt/documents"
-              className="bg-[#F97316] hover:bg-orange-600 text-white font-extrabold text-xs px-4 py-2.5 rounded-xl shadow-md transition-all shrink-0 cursor-pointer"
-            >
-              Upload 40-Hr Cert →
-            </Link>
-          </div>
-        )}
-
         {/* 5 PARALLEL REQUIREMENTS CARDS - CLICK TO NAVIGATE TO DEDICATED TAB */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
           {/* REQ 1: MY TASKS */}
-          <div 
+          <button
+            type="button"
             onClick={() => window.scrollTo({ top: 450, behavior: 'smooth' })}
-            className={`p-4 rounded-2xl border-2 flex flex-col justify-between gap-2.5 transition-all cursor-pointer shadow-sm ${
+            className={`flex w-full cursor-pointer flex-col justify-between gap-2.5 rounded-2xl border-2 p-4 text-left shadow-sm transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F97316]/70 ${
               tasksDone 
                 ? 'bg-emerald-50/90 border-emerald-300 text-slate-900' 
                 : 'bg-[#F0F7FF] border-[#BFDBFE] text-slate-900 hover:border-[#F97316]'
@@ -468,12 +773,14 @@ export default function RbtTasksView() {
                 {tasksDone ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <Clock className="w-4 h-4 text-[#F97316]" />}
               </div>
               <h4 className="font-extrabold text-xs text-slate-900">E-Signatures &amp; Tasks</h4>
-              <p className="text-[10px] text-slate-600 font-medium">{completedSteps.length}/30 Forms Signed</p>
+              <p className="text-[10px] text-slate-600 font-medium">
+                {completedSteps.length}/{totalSteps} onboarding steps complete
+              </p>
             </div>
             <span className={`text-[10px] font-black ${tasksDone ? 'text-emerald-700' : 'text-[#F97316]'}`}>
               {tasksDone ? '✓ Completed' : 'Sign Forms Below ↓'}
             </span>
-          </div>
+          </button>
 
           {/* REQ 2: HR INTERVIEW */}
           <Link
@@ -547,25 +854,27 @@ export default function RbtTasksView() {
             </span>
           </Link>
 
-          {/* REQ 5: 40-HR CERTIFICATE (SOFT LOCKED / OPTIONAL RBT UPGRADE) */}
+          {/* REQ 5: 40-HR CERTIFICATE (MANDATORY) */}
           <Link
             href="/rbt/documents"
             className={`p-4 rounded-2xl border-2 flex flex-col justify-between gap-2.5 transition-all cursor-pointer shadow-sm ${
-              certUploaded 
-                ? 'bg-emerald-50/90 border-emerald-300 text-slate-900' 
-                : 'bg-amber-50/90 border-amber-300 text-slate-900 hover:border-[#F97316]'
+              certUploaded
+                ? 'bg-emerald-50/90 border-emerald-300 text-slate-900'
+                : 'bg-[#F0F7FF] border-[#BFDBFE] text-slate-900 hover:border-[#F97316]'
             }`}
           >
             <div className="space-y-1">
               <div className="flex items-center justify-between">
-                <span className="text-[10px] font-mono font-black text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded">RBT UPGRADE</span>
-                {certUploaded ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <Award className="w-4 h-4 text-amber-600" />}
+                <span className="text-[10px] font-mono font-bold text-slate-600">REQ 5</span>
+                {certUploaded ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <Award className="w-4 h-4 text-[#F97316]" />}
               </div>
               <h4 className="font-extrabold text-xs text-slate-900">40-Hr Course</h4>
-              <p className="text-[10px] text-slate-600 font-medium">{certFileName ? 'Uploaded' : 'Optional RBT Upgrade'}</p>
+              <p className="text-[10px] text-slate-600 font-medium">
+                {certFileName ? 'Uploaded' : 'Mandatory for hire'}
+              </p>
             </div>
-            <span className={`text-[10px] font-black ${certUploaded ? 'text-emerald-700' : 'text-amber-700'}`}>
-              {certUploaded ? '✓ Verified (RBT Tier)' : 'Highly Rec. (+ $5/hr) →'}
+            <span className={`text-[10px] font-black ${certUploaded ? 'text-emerald-700' : 'text-[#F97316]'}`}>
+              {certUploaded ? '✓ Verified' : 'Upload Cert →'}
             </span>
           </Link>
         </div>
@@ -574,23 +883,48 @@ export default function RbtTasksView() {
       {/* HR INTERVIEW BOOKING MODAL */}
       {activeModal === 'INTERVIEW' && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white border-2 border-orange-200 rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl animate-fade-in text-slate-900">
+          <div
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="rbt-interview-dialog-title"
+            tabIndex={-1}
+            className="bg-white border-2 border-orange-200 rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl animate-fade-in text-slate-900 focus:outline-none"
+          >
             <div className="flex items-center justify-between border-b border-orange-100 pb-3">
-              <h3 className="text-lg font-black text-slate-900 font-heading">Book HR Onboarding Interview</h3>
-              <button onClick={() => setActiveModal('NONE')} className="text-slate-400 hover:text-slate-700 font-bold">✕</button>
+              <h3 id="rbt-interview-dialog-title" className="text-lg font-black text-slate-900 font-heading">Book HR Onboarding Interview</h3>
+              <button
+                type="button"
+                onClick={() => setActiveModal('NONE')}
+                aria-label="Close interview dialog"
+                className="cursor-pointer rounded-lg p-1 font-bold text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F97316]/70"
+              >
+                ✕
+              </button>
             </div>
 
             <form onSubmit={handleBookInterview} className="space-y-3">
               <div>
                 <label className="text-xs font-bold text-slate-800 block mb-1">Select HR Specialist</label>
                 <select
-                  value={selectedHr}
-                  onChange={(e) => setSelectedHr(e.target.value)}
-                  className="w-full bg-blue-50/50 border border-blue-200 rounded-xl p-2.5 text-xs text-slate-900 font-bold"
+                  value={selectedHrId}
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    setSelectedHrId(id);
+                    const member = hrMembers.find((m) => m.id === id);
+                    if (member) setSelectedHr(`${member.name} (${member.role})`);
+                  }}
+                  className="w-full bg-blue-50/50 border border-blue-200 rounded-xl p-2.5 text-xs text-slate-900 font-bold cursor-pointer"
                 >
-                  <option value="Marcus Vance (HR Agent)">Marcus Vance (HR Agent &amp; ATS Recruiter)</option>
-                  <option value="Alexis Miller (HR Agent)">Alexis Miller (Compliance Specialist)</option>
-                  <option value="Jordan Hayes (HR Agent)">Jordan Hayes (Dispatch Coordinator)</option>
+                  {hrMembers.length === 0 ? (
+                    <option value="">Loading HR specialists…</option>
+                  ) : (
+                    hrMembers.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name} ({m.role})
+                      </option>
+                    ))
+                  )}
                 </select>
               </div>
 
@@ -600,6 +934,7 @@ export default function RbtTasksView() {
                   <input
                     type="date"
                     value={interviewDate}
+                    min={minimumInterviewDate}
                     onChange={(e) => setInterviewDate(e.target.value)}
                     className="w-full bg-blue-50/50 border border-blue-200 rounded-xl p-2 text-xs text-slate-900 font-bold"
                   />
@@ -611,9 +946,9 @@ export default function RbtTasksView() {
                     onChange={(e) => setInterviewTime(e.target.value)}
                     className="w-full bg-blue-50/50 border border-blue-200 rounded-xl p-2 text-xs text-slate-900 font-bold"
                   >
-                    <option value="10:00 AM">10:00 AM EST</option>
-                    <option value="01:30 PM">01:30 PM EST</option>
-                    <option value="04:00 PM">04:00 PM EST</option>
+                    <option value="10:00 AM">10:00 AM ET</option>
+                    <option value="01:30 PM">01:30 PM ET</option>
+                    <option value="04:00 PM">04:00 PM ET</option>
                   </select>
                 </div>
               </div>
@@ -629,10 +964,24 @@ export default function RbtTasksView() {
       {/* AVAILABILITY MODAL */}
       {activeModal === 'AVAILABILITY' && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white border-2 border-orange-200 rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl animate-fade-in text-slate-900">
+          <div
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="rbt-availability-dialog-title"
+            tabIndex={-1}
+            className="bg-white border-2 border-orange-200 rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl animate-fade-in text-slate-900 focus:outline-none"
+          >
             <div className="flex items-center justify-between border-b border-orange-100 pb-3">
-              <h3 className="text-lg font-black text-slate-900 font-heading">Set Weekly Availability &amp; Boroughs</h3>
-              <button onClick={() => setActiveModal('NONE')} className="text-slate-400 hover:text-slate-700 font-bold">✕</button>
+              <h3 id="rbt-availability-dialog-title" className="text-lg font-black text-slate-900 font-heading">Set Weekly Availability &amp; Boroughs</h3>
+              <button
+                type="button"
+                onClick={() => setActiveModal('NONE')}
+                aria-label="Close availability dialog"
+                className="cursor-pointer rounded-lg p-1 font-bold text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F97316]/70"
+              >
+                ✕
+              </button>
             </div>
 
             <form onSubmit={handleSaveAvailability} className="space-y-3">
@@ -680,10 +1029,24 @@ export default function RbtTasksView() {
       {/* 40-HOUR CERTIFICATE MODAL */}
       {activeModal === 'CERTIFICATE' && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white border-2 border-orange-200 rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl animate-fade-in text-slate-900">
+          <div
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="rbt-certificate-dialog-title"
+            tabIndex={-1}
+            className="bg-white border-2 border-orange-200 rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl animate-fade-in text-slate-900 focus:outline-none"
+          >
             <div className="flex items-center justify-between border-b border-orange-100 pb-3">
-              <h3 className="text-lg font-black text-slate-900 font-heading">Upload 40-Hour RBT Certificate</h3>
-              <button onClick={() => setActiveModal('NONE')} className="text-slate-400 hover:text-slate-700 font-bold">✕</button>
+              <h3 id="rbt-certificate-dialog-title" className="text-lg font-black text-slate-900 font-heading">Upload 40-Hour RBT Certificate</h3>
+              <button
+                type="button"
+                onClick={() => setActiveModal('NONE')}
+                aria-label="Close certificate dialog"
+                className="cursor-pointer rounded-lg p-1 font-bold text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F97316]/70"
+              >
+                ✕
+              </button>
             </div>
 
             <div className="space-y-3 text-center p-6 border-2 border-dashed border-orange-300 rounded-2xl bg-orange-50/50">
@@ -720,13 +1083,27 @@ export default function RbtTasksView() {
       {/* ABA TRIAL SIMULATOR MODAL */}
       {activeModal === 'SIMULATOR' && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white border-2 border-orange-200 rounded-3xl p-6 max-w-lg w-full space-y-5 shadow-2xl animate-fade-in text-slate-900">
+          <div
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="rbt-simulator-dialog-title"
+            tabIndex={-1}
+            className="bg-white border-2 border-orange-200 rounded-3xl p-6 max-w-lg w-full space-y-5 shadow-2xl animate-fade-in text-slate-900 focus:outline-none"
+          >
             <div className="flex items-center justify-between border-b border-orange-100 pb-3">
               <div className="flex items-center gap-2">
-                <Activity className="w-5 h-5 text-[#F97316]" />
-                <h3 className="text-lg font-black text-slate-900 font-heading">ABA Data Collection Simulator</h3>
+                <Activity className="w-5 h-5 text-[#F97316]" aria-hidden="true" />
+                <h3 id="rbt-simulator-dialog-title" className="text-lg font-black text-slate-900 font-heading">ABA Data Collection Simulator</h3>
               </div>
-              <button onClick={() => setActiveModal('NONE')} className="text-slate-400 hover:text-slate-700 font-bold">✕</button>
+              <button
+                type="button"
+                onClick={() => setActiveModal('NONE')}
+                aria-label="Close simulator dialog"
+                className="cursor-pointer rounded-lg p-1 font-bold text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F97316]/70"
+              >
+                ✕
+              </button>
             </div>
 
             <div className="space-y-4">
@@ -735,7 +1112,14 @@ export default function RbtTasksView() {
                   <span className="text-slate-900">Trial Progress: {trialsCount} / 10 Trials</span>
                   <span className="text-[#F97316]">Target: 10 Trials</span>
                 </div>
-                <div className="w-full h-3 bg-blue-100 rounded-full overflow-hidden flex">
+                <div
+                  className="w-full h-3 bg-blue-100 rounded-full overflow-hidden flex"
+                  role="progressbar"
+                  aria-label="Simulation trial progress"
+                  aria-valuemin={0}
+                  aria-valuemax={10}
+                  aria-valuenow={trialsCount}
+                >
                   <div className="bg-[#F97316] h-full transition-all duration-300" style={{ width: `${(trialsCount / 10) * 100}%` }} />
                 </div>
               </div>
@@ -750,25 +1134,28 @@ export default function RbtTasksView() {
 
               <div className="grid grid-cols-3 gap-2">
                 <button
+                  type="button"
                   disabled={trialsCount >= 10}
-                  onClick={() => handleTrial('CORRECT')}
-                  className="bg-emerald-500 hover:bg-emerald-600 text-white font-extrabold text-xs py-3 rounded-xl shadow-md cursor-pointer disabled:opacity-50"
+                  onClick={() => void handleTrial('CORRECT')}
+                  className="bg-emerald-500 hover:bg-emerald-600 text-white font-extrabold text-xs py-3 rounded-xl shadow-md cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   + Correct (+)
                 </button>
 
                 <button
+                  type="button"
                   disabled={trialsCount >= 10}
-                  onClick={() => handleTrial('PROMPTED')}
-                  className="bg-amber-500 hover:bg-amber-600 text-white font-extrabold text-xs py-3 rounded-xl shadow-md cursor-pointer disabled:opacity-50"
+                  onClick={() => void handleTrial('PROMPTED')}
+                  className="bg-amber-500 hover:bg-amber-600 text-white font-extrabold text-xs py-3 rounded-xl shadow-md cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   + Prompted (+P)
                 </button>
 
                 <button
+                  type="button"
                   disabled={trialsCount >= 10}
-                  onClick={() => handleTrial('INCORRECT')}
-                  className="bg-rose-500 hover:bg-rose-600 text-white font-extrabold text-xs py-3 rounded-xl shadow-md cursor-pointer disabled:opacity-50"
+                  onClick={() => void handleTrial('INCORRECT')}
+                  className="bg-rose-500 hover:bg-rose-600 text-white font-extrabold text-xs py-3 rounded-xl shadow-md cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   - Incorrect (-)
                 </button>
@@ -806,7 +1193,7 @@ export default function RbtTasksView() {
         </div>
       )}
 
-      {/* 30-STEP COMPLIANCE TASK WORKFLOW (100% OPAQUE PURE WHITE) */}
+      {/* 27-STEP COMPLIANCE TASK WORKFLOW — replaced by wage-offer wait after step 27 */}
       <div className="space-y-6">
         <div className="flex items-start gap-4">
           <div className="w-12 h-12 rounded-2xl bg-orange-100 border border-orange-200 text-[#F97316] flex items-center justify-center shrink-0 shadow-md mt-1">
@@ -815,14 +1202,109 @@ export default function RbtTasksView() {
           <div>
             <h2 className="text-3xl font-black text-slate-900 font-heading tracking-tight">My Tasks</h2>
             <p className="text-sm font-semibold text-slate-700 mt-0.5">
-              {completedSteps.length} of {totalSteps} complete · Tier A: {tierAComplete}/25 · Tier B: {tierBComplete}/5
+              {allRequirementsDone
+                ? 'All requirements complete — waiting for Head HR'
+                : packComplete
+                ? `Documents done · ${remainingRequirements.filter((r) => !r.done).length} requirement(s) still to do`
+                : `${completedSteps.length} of ${totalSteps} complete · Policies: ${tierAComplete}/22 · Forms & uploads: ${tierBComplete}/5`}
             </p>
           </div>
         </div>
 
         <div className="w-full h-px bg-slate-200 my-4" />
 
-        {/* STEP NUMBER POINTERS (1 THROUGH 30) */}
+        {packComplete && allRequirementsDone ? (
+          <WageOfferApplicantCard packComplete />
+        ) : packComplete ? (
+          <div className="space-y-4 rounded-3xl border-2 border-orange-200 bg-white p-6 shadow-xl text-slate-900 sm:p-8">
+            <div className="flex items-start gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-orange-200 bg-orange-50 text-[#F97316]">
+                <ClipboardList className="h-6 w-6" />
+              </div>
+              <div>
+                <h3 className="font-heading text-xl font-black text-slate-900">
+                  Finish your remaining requirements
+                </h3>
+                <p className="mt-1 text-sm leading-relaxed text-slate-600">
+                  Your onboarding documents are done. Complete the items below, then this page will switch to
+                  Waiting for Head HR for your wage notice (LS-54).
+                </p>
+              </div>
+            </div>
+
+            <ul className="space-y-2">
+              {remainingRequirements.map((req) => {
+                const inner = (
+                  <>
+                    <div className="flex items-start gap-3">
+                      {req.done ? (
+                        <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
+                      ) : (
+                        <Clock className="mt-0.5 h-5 w-5 shrink-0 text-[#F97316]" />
+                      )}
+                      <div>
+                        <p className="text-sm font-black text-slate-900">{req.label}</p>
+                        <p className="text-xs font-medium text-slate-600">{req.detail}</p>
+                      </div>
+                    </div>
+                    <span
+                      className={`shrink-0 rounded-lg px-2 py-1 text-[10px] font-black uppercase tracking-wide ${
+                        req.done
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : 'bg-orange-100 text-orange-800'
+                      }`}
+                    >
+                      {req.done ? 'Done' : 'To do'}
+                    </span>
+                  </>
+                );
+
+                const className = `flex items-center justify-between gap-3 rounded-2xl border px-4 py-3 transition-all ${
+                  req.done
+                    ? 'border-emerald-200 bg-emerald-50/80'
+                    : 'border-slate-200 bg-slate-50 hover:border-[#F97316]/40 hover:bg-orange-50/40'
+                }`;
+
+                if (req.href && !req.done) {
+                  return (
+                    <li key={req.key}>
+                      <Link href={req.href} className={`${className} cursor-pointer`}>
+                        {inner}
+                      </Link>
+                    </li>
+                  );
+                }
+
+                if (req.key === 'simulation' && !req.done) {
+                  return (
+                    <li key={req.key}>
+                      <button
+                        type="button"
+                        onClick={() => setActiveModal('SIMULATOR')}
+                        className={`${className} w-full cursor-pointer text-left`}
+                      >
+                        {inner}
+                      </button>
+                    </li>
+                  );
+                }
+
+                return (
+                  <li key={req.key}>
+                    <div className={className}>{inner}</div>
+                  </li>
+                );
+              })}
+            </ul>
+
+            <p className="text-center text-[11px] font-semibold text-slate-500">
+              {remainingRequirements.filter((r) => r.done).length} of {remainingRequirements.length}{' '}
+              remaining requirements complete
+            </p>
+          </div>
+        ) : (
+        <>
+        {/* STEP NUMBER POINTERS */}
         <div className="flex items-center gap-2 overflow-x-auto pb-3 custom-scrollbar">
           {stepsList.map((stepNum) => {
             const isCurrent = currentStep === stepNum;
@@ -831,17 +1313,26 @@ export default function RbtTasksView() {
 
             return (
               <button
+                type="button"
                 key={stepNum}
+                disabled={!isUnlocked && !isDone}
                 onClick={() => {
                   if (isUnlocked || isDone) setCurrentStep(stepNum);
                   else toast.error(`Please complete Step ${stepNum - 1} first.`);
                 }}
-                className={`min-w-[36px] h-9 rounded-full text-xs font-bold transition-all flex items-center justify-center cursor-pointer shrink-0 ${
+                aria-current={isCurrent ? 'step' : undefined}
+                aria-disabled={!isUnlocked && !isDone}
+                aria-label={`Onboarding step ${stepNum}${
+                  isDone ? ', completed' : isUnlocked ? ', available' : ', locked'
+                }`}
+                className={`min-w-[36px] h-9 rounded-full text-xs font-bold transition-all flex items-center justify-center shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F97316]/70 ${
                   isCurrent
-                    ? 'bg-[#F97316] text-white shadow-lg shadow-orange-500/30 scale-105'
+                    ? 'cursor-pointer bg-[#F97316] text-white shadow-lg shadow-orange-500/30 scale-105'
                     : isDone
-                    ? 'bg-emerald-100 text-emerald-700 border border-emerald-300'
-                    : 'bg-[#F0F7FF] text-slate-700 border border-[#BFDBFE] hover:border-[#F97316]'
+                    ? 'cursor-pointer bg-emerald-100 text-emerald-700 border border-emerald-300'
+                    : isUnlocked
+                      ? 'cursor-pointer bg-[#F0F7FF] text-slate-700 border border-[#BFDBFE] hover:border-[#F97316]'
+                      : 'cursor-not-allowed bg-slate-100 text-slate-400 border border-slate-200 opacity-70'
                 }`}
               >
                 {!isUnlocked && !isDone && <Lock className="w-3 h-3 mr-0.5" />}
@@ -853,41 +1344,47 @@ export default function RbtTasksView() {
 
         {/* STEP CARD CONTAINER - 100% OPAQUE PURE WHITE */}
         <div className="bg-white border-2 border-orange-200 rounded-3xl shadow-xl overflow-hidden p-6 sm:p-8 space-y-6 text-slate-900">
-          <h3 className="text-2xl font-black text-slate-900 font-heading">
-            Step {currentStep} of {totalSteps}: {
-              currentStep === 1 ? 'E-Signature Consent' :
-              currentStep === 2 ? 'Welcome Letter' :
-              currentStep === 3 ? 'Employee Handbook' :
-              currentStep === 4 ? 'HIPAA & Confidentiality' :
-              currentStep === 5 ? 'Non-Disclosure Agreement (NDA)' :
-              currentStep === 6 ? 'Mandated Reporter Acknowledgment' :
-              currentStep === 7 ? 'Emergency & Incident Reporting Policy' :
-              currentStep === 8 ? 'Session Note Policy' :
-              currentStep === 9 ? 'Time Recording Policy' :
-              currentStep === 10 ? 'Documentation & Time Acknowledgment' :
-              currentStep === 11 ? 'Sexual Harassment Policy Acknowledgment' :
-              currentStep === 12 ? 'OIG/SAM/OMIG Self-Attestation' :
-              currentStep === 13 ? 'RBT Supervision Contract' :
-              currentStep === 14 ? 'FCRA Disclosure' :
-              currentStep === 15 ? 'CFPB Consumer Rights Summary' :
-              currentStep === 16 ? 'NYS Disability Benefits Notice (DB-271S)' :
-              currentStep === 17 ? 'Paid Family Leave Notice (PFL-271S)' :
-              currentStep === 18 ? 'Paid Safe & Sick Leave Notice' :
-              currentStep === 19 ? 'Breast Milk Expression Rights Notice (P705)' :
-              currentStep === 20 ? 'Form W-4' :
-              currentStep === 21 ? 'Form IT-2104 (NYS Tax Withholding)' :
-              currentStep === 22 ? 'Direct Deposit Authorization' :
-              currentStep === 23 ? 'NYS Wage Notice (LS-54)' :
-              currentStep === 24 ? 'Background Check Authorization' :
-              currentStep === 25 ? 'Upload Social Security Card' :
-              currentStep === 26 ? 'Sexual Harassment Prevention Training + Quiz' :
-              currentStep === 27 ? 'Mandated Reporter Training Certificate' :
-              currentStep === 28 ? 'CPR/First Aid Certificate' :
-              currentStep === 29 ? '40-Hour RBT Training Certificate' :
-              'Artemis Training Booking & Completion'
-            }
-          </h3>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <h3 className="text-2xl font-black text-slate-900 font-heading">
+              Step {currentStep} of {totalSteps}: {currentDoc.title}
+            </h3>
+            <OnboardingDocumentStatus
+              doc={currentDoc}
+              complete={completedSteps.includes(currentStep)}
+            />
+          </div>
+          <p className="text-[11px] font-mono text-slate-500">{currentDoc.legalCite} · pack {currentDoc.version}</p>
 
+          {currentDoc.kind === 'EMBEDDED' ? (
+            <EmbeddedOnboardingFormPanel
+              doc={currentDoc}
+              alreadyDone={completedSteps.includes(currentStep)}
+              signerName={fullName}
+              onSubmitted={(auditHash) => {
+                void markStepComplete(currentStep, auditHash);
+              }}
+            />
+          ) : currentDoc.kind === 'UPLOAD' ? (
+            <UploadCertificatePanel
+              doc={currentDoc}
+              alreadyDone={completedSteps.includes(currentStep)}
+              onUploaded={() => {
+                void markStepComplete(currentStep);
+              }}
+            />
+          ) : currentDoc.kind === 'QUIZ' ? (
+            <div className="space-y-4">
+              <OfficialPdfBar doc={currentDoc} />
+              <HarassmentQuizPanel
+                alreadyPassed={completedSteps.includes(25)}
+                onResult={(passed, _score, _attempt) => {
+                  if (passed) void markStepComplete(25);
+                }}
+              />
+            </div>
+          ) : (
+            <>
+          <OfficialPdfBar doc={currentDoc} />
           {/* DOCUMENT PREVIEWER */}
           <div
             ref={documentRef}
@@ -1204,7 +1701,7 @@ export default function RbtTasksView() {
                 <div className="space-y-2">
                   <h5 className="font-bold text-slate-900 text-xs">1. Required Elements of a Compliant Session Note</h5>
                   <ul className="list-disc pl-5 space-y-1 text-[11px] text-slate-700">
-                    <li>Client Name and Client ID number in Artemis</li>
+                    <li>Client Name and Client ID number in the RAS EMR</li>
                     <li>Date of service and exact start/end times (to the minute — no rounding)</li>
                     <li>Service location (home, clinic, school, telehealth, community)</li>
                     <li>CPT code billed (97153 RBT direct, 97155 BCBA protocol modification, 97156 parent training)</li>
@@ -1214,7 +1711,7 @@ export default function RbtTasksView() {
                 </div>
 
                 <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-900 text-[11px] font-semibold">
-                  ⏰ <strong>The 24-Hour Rule:</strong> Every session note must be submitted and signed in Artemis within 24 hours of session end. Notes past 24 hours are non-billable and unpaid.
+                  ⏰ <strong>The 24-Hour Rule:</strong> Every session note must be submitted and signed in the RAS EMR within 24 hours of session end. Notes past 24 hours are non-billable and unpaid.
                 </div>
               </div>
             ) : currentStep === 9 ? (
@@ -1233,7 +1730,7 @@ export default function RbtTasksView() {
                     <li>Clock in only when physically present at the session location and ready to work.</li>
                     <li>Record exact times to the minute — no rounding (e.g. 2:07 PM to 3:52 PM).</li>
                     <li><strong>No Buddy Punching:</strong> Clocking in/out for another employee is timekeeping fraud resulting in immediate termination.</li>
-                    <li>GPS geolocation in Artemis verifies session location compliance.</li>
+                    <li>GPS geolocation in the RAS EMR verifies session location compliance.</li>
                   </ul>
                 </div>
 
@@ -1299,28 +1796,30 @@ export default function RbtTasksView() {
                 <p className="text-[11px] font-semibold text-slate-700">Continuing Duty: Must notify HR in writing within 24 hours if any sanction or exclusion action arises.</p>
               </div>
             ) : currentStep === 13 ? (
-              /* STEP 13: FULL OFFICIAL RBT SUPERVISION CONTRACT (RiseShine_11_RBT_SupervisionContract_v1) */
+              /* STEP 13: RBT SUPERVISION CONTRACT */
               <div className="space-y-4 text-slate-800 leading-relaxed text-xs">
                 <div className="text-center border-b pb-3 border-slate-200 space-y-1">
                   <h4 className="text-sm font-black text-slate-900 uppercase font-heading tracking-wide">
-                    BACB RBT SUPERVISION CONTRACT
+                    RBT SUPERVISION CONTRACT
                   </h4>
-                  <p className="text-[11px] text-slate-500 font-mono italic">Required by BACB RBT Handbook • Document v1.0</p>
+                  <p className="text-[11px] text-slate-500 font-mono italic">
+                    Agency acknowledgment • Check current certification and assignment requirements
+                  </p>
                 </div>
 
                 <div className="space-y-2">
-                  <h5 className="font-bold text-slate-900 text-xs">1. BACB Supervision Minimums</h5>
+                  <h5 className="font-bold text-slate-900 text-xs">1. Certification and Local Requirements</h5>
                   <ul className="list-disc pl-5 space-y-1 text-[11px] text-slate-700">
-                    <li>Supervision must equal at least <strong>5% of monthly direct service hours</strong>.</li>
-                    <li>Must include at least one face-to-face real-time observation per supervisory period.</li>
-                    <li>Up to 50% of supervision may be in small group format (max 10 RBTs).</li>
-                    <li>Supervision logs must be co-signed in HRM within 7 days of contact.</li>
+                    <li>Current BACB certification requirements govern RBT certification supervision; verify the current source and version directly with BACB or your qualified supervisor.</li>
+                    <li>Agency policy, payer contracts, and state rules are separate and may add requirements for a specific assignment.</li>
+                    <li><strong>Confirm current supervision plan with your qualified supervisor/HR.</strong></li>
+                    <li>This portal does not calculate or certify supervision compliance.</li>
                   </ul>
                 </div>
 
                 <div className="space-y-2">
                   <h5 className="font-bold text-slate-900 text-xs">2. Scope of RBT Practice</h5>
-                  <p>RBT practices only under the close supervision of a BCBA. RBT does NOT design treatment plans or FBAs. RBT may not deliver client services during any period without an active supervision contract.</p>
+                  <p>RBTs implement assigned treatment protocols under qualified-supervisor direction and do not independently design treatment plans or FBAs. Follow the confirmed supervision plan and current scope requirements for each assignment.</p>
                 </div>
               </div>
             ) : currentStep === 14 ? (
@@ -1493,31 +1992,6 @@ export default function RbtTasksView() {
                 </div>
               </div>
             ) : currentStep === 23 ? (
-              /* STEP 23: FULL OFFICIAL NYS WAGE NOTICE LS-54 (LS54) */
-              <div className="space-y-4 text-slate-800 leading-relaxed text-xs">
-                <div className="text-center border-b pb-3 border-slate-200 space-y-1">
-                  <h4 className="text-sm font-black text-slate-900 uppercase font-heading tracking-wide">
-                    NOTICE AND ACKNOWLEDGEMENT OF PAY RATE AND PAYDAY (LS 54)
-                  </h4>
-                  <p className="text-[11px] text-slate-500 font-mono italic">Under Section 195.1 of New York State Labor Law</p>
-                </div>
-
-                <div className="space-y-2">
-                  <h5 className="font-bold text-slate-900 text-xs">Employer Information</h5>
-                  <p><strong>Employer Name:</strong> Rise &amp; Shine ABA LLC · 424 Grandview Ave, Staten Island, NY 10303 · (929) 460-9600</p>
-                </div>
-
-                <div className="space-y-2">
-                  <h5 className="font-bold text-slate-900 text-xs">Pay Rate &amp; Payday Details</h5>
-                  <ul className="list-disc pl-5 space-y-1 text-[11px] text-slate-700 font-mono">
-                    <li><strong>Regular Pay Rate:</strong> Billed at regular hourly rate per offer letter ($25.00 - $35.00/hr)</li>
-                    <li><strong>Overtime Pay Rate:</strong> 1.5x regular rate for hours over 40 in a workweek</li>
-                    <li><strong>Regular Payday:</strong> Bi-weekly on Fridays via direct deposit</li>
-                  </ul>
-                </div>
-              </div>
-            ) : currentStep === 24 ? (
-              /* STEP 24: FULL OFFICIAL BACKGROUND CHECK AUTHORIZATION (BackgroundCheckLetter) */
               <div className="space-y-4 text-slate-800 leading-relaxed text-xs">
                 <div className="text-center border-b pb-3 border-slate-200 space-y-1">
                   <h4 className="text-sm font-black text-slate-900 uppercase font-heading tracking-wide">
@@ -1525,7 +1999,6 @@ export default function RbtTasksView() {
                   </h4>
                   <p className="text-[11px] text-slate-500 font-mono italic">Rise &amp; Shine ABA LLC Background Screening Authorization</p>
                 </div>
-
                 <p>Authorization for background screening under NY Executive Law §296(16):</p>
                 <ul className="list-disc pl-5 space-y-1 text-[11px] text-slate-700">
                   <li>Criminal history search (federal, NY State OCA, county court records)</li>
@@ -1534,8 +2007,7 @@ export default function RbtTasksView() {
                   <li>Healthcare debarment/exclusion screening (OIG LEIE, SAM.gov, NYS OMIG)</li>
                 </ul>
               </div>
-            ) : currentStep === 25 ? (
-              /* STEP 25: UPLOAD SOCIAL SECURITY CARD */
+            ) : currentStep === 24 ? (
               <div className="space-y-4 text-slate-800 leading-relaxed text-xs">
                 <div className="text-center border-b pb-3 border-slate-200 space-y-1">
                   <h4 className="text-sm font-black text-slate-900 uppercase font-heading tracking-wide">
@@ -1545,8 +2017,7 @@ export default function RbtTasksView() {
                 </div>
                 <p>Upload a clear PDF image of your signed Social Security Card or government-issued photo ID to complete USCIS Form I-9 employment eligibility verification.</p>
               </div>
-            ) : currentStep === 26 ? (
-              /* STEP 26: SEXUAL HARASSMENT PREVENTION TRAINING + QUIZ */
+            ) : currentStep === 25 ? (
               <div className="space-y-4 text-slate-800 leading-relaxed text-xs">
                 <div className="text-center border-b pb-3 border-slate-200 space-y-1">
                   <h4 className="text-sm font-black text-slate-900 uppercase font-heading tracking-wide">
@@ -1554,10 +2025,9 @@ export default function RbtTasksView() {
                   </h4>
                   <p className="text-[11px] text-slate-500 font-mono italic">NYS Mandated Interactive Training Module (NYS Labor Law §201-g)</p>
                 </div>
-                <p>Complete the NYS interactive training module and pass the 5-question comprehension quiz with 100% score.</p>
+                <p>Complete the NYS interactive training module and pass the 10-question comprehension quiz with 80% or higher.</p>
               </div>
-            ) : currentStep === 27 ? (
-              /* STEP 27: MANDATED REPORTER TRAINING CERTIFICATE */
+            ) : currentStep === 26 ? (
               <div className="space-y-4 text-slate-800 leading-relaxed text-xs">
                 <div className="text-center border-b pb-3 border-slate-200 space-y-1">
                   <h4 className="text-sm font-black text-slate-900 uppercase font-heading tracking-wide">
@@ -1567,8 +2037,7 @@ export default function RbtTasksView() {
                 </div>
                 <p>Upload your completion certificate from www.nysmandatedreporter.org (required within 10 days of hire date).</p>
               </div>
-            ) : currentStep === 28 ? (
-              /* STEP 28: CPR/FIRST AID CERTIFICATE */
+            ) : (
               <div className="space-y-4 text-slate-800 leading-relaxed text-xs">
                 <div className="text-center border-b pb-3 border-slate-200 space-y-1">
                   <h4 className="text-sm font-black text-slate-900 uppercase font-heading tracking-wide">
@@ -1577,30 +2046,6 @@ export default function RbtTasksView() {
                   <p className="text-[11px] text-slate-500 font-mono italic">American Heart Association / Red Cross Certification</p>
                 </div>
                 <p>Upload your active CPR and Pediatric First Aid certification card.</p>
-              </div>
-            ) : currentStep === 29 ? (
-              /* STEP 29: 40-HOUR RBT TRAINING CERTIFICATE */
-              <div className="space-y-4 text-slate-800 leading-relaxed text-xs">
-                <div className="text-center border-b pb-3 border-slate-200 space-y-1">
-                  <h4 className="text-sm font-black text-slate-900 uppercase font-heading tracking-wide">
-                    UPLOAD 40-HOUR RBT TRAINING CERTIFICATE
-                  </h4>
-                  <p className="text-[11px] text-slate-500 font-mono italic">BACB Approved 40-Hour Course Certificate</p>
-                </div>
-                <p>Upload your BACB-approved 40-Hour RBT course certificate to unlock official RBT Tier pay rate upgrade (+$5.00/hr).</p>
-              </div>
-            ) : (
-              /* STEP 30: ARTEMIS TRAINING BOOKING & COMPLETION */
-              <div className="space-y-4 text-slate-800 leading-relaxed text-xs">
-                <div className="text-center border-b pb-3 border-slate-200 space-y-1">
-                  <h4 className="text-sm font-black text-slate-900 uppercase font-heading tracking-wide">
-                    ARTEMIS EHR TRAINING BOOKING &amp; COMPLETION
-                  </h4>
-                  <p className="text-[11px] text-slate-500 font-mono italic">30-Minute Live Systems Walkthrough Session</p>
-                </div>
-                <p className="font-semibold text-emerald-900 bg-emerald-50 p-3 rounded-xl border border-emerald-200">
-                  🎉 Final Onboarding Step: Book your 30-minute live EHR Artemis session walkthrough with your Case Coordinator. Once completed, your candidate profile is 100% cleared for client matching!
-                </p>
               </div>
             )}
           </div>
@@ -1735,7 +2180,7 @@ export default function RbtTasksView() {
                   </div>
                   <div className="text-right">
                     <span className="text-slate-500 block text-[9px]">TIMESTAMP &amp; AUDIT HASH</span>
-                    <span className="font-bold text-amber-300/90">{formattedDate} EST · HASH-8F9A-2026</span>
+                    <span className="font-bold text-amber-300/90">{formattedDate} ET · {lastAuditHash ? lastAuditHash.slice(0, 12) : 'pending'}</span>
                   </div>
                 </div>
               </div>
@@ -1747,10 +2192,29 @@ export default function RbtTasksView() {
               className="w-full bg-[#F4A261] hover:bg-[#e7924e] text-white font-black text-sm py-3.5 rounded-2xl shadow-lg transition-all cursor-pointer border-none flex items-center justify-center gap-2"
             >
               {currentStep === totalSteps
-                ? (isSigned ? '✓ Final Document Signed' : 'Sign & Finish Onboarding')
-                : (isSigned ? '✓ Signed — Move to Next' : 'Sign & Move to Next Document')}
+                ? (isSigned ? '✓ Final Document Signed' : 'Sign this document')
+                : (isSigned ? 'Confirm & go to next page' : 'Sign this document')}
             </Button>
           </form>
+            </>
+          )}
+
+          {!usesTypedSignature && completedSteps.includes(currentStep) && currentStep < totalSteps && (
+            <button
+              type="button"
+              onClick={() => setConfirmKind('NEXT')}
+              className="w-full cursor-pointer rounded-2xl bg-[#F4A261] py-3.5 text-sm font-black text-white shadow-lg transition hover:bg-[#e7924e]"
+            >
+              Confirm & go to next page
+            </button>
+          )}
+          {!usesTypedSignature &&
+            completedSteps.includes(currentStep) &&
+            currentStep === totalSteps && (
+            <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-center text-sm font-semibold text-emerald-800">
+              Final step saved. Finishing your onboarding pack…
+            </p>
+          )}
         </div>
 
         {/* BOTTOM FOOTER NAVIGATION BUTTONS */}
@@ -1767,10 +2231,10 @@ export default function RbtTasksView() {
             disabled={currentStep === totalSteps}
             onClick={() => {
               if (!completedSteps.includes(currentStep)) {
-                toast.error('Please sign and complete the current document first.');
+                toast.error('Please complete the current document first.');
                 return;
               }
-              setCurrentStep(prev => Math.min(totalSteps, prev + 1));
+              setConfirmKind('NEXT');
             }}
             className="bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 font-bold text-xs px-5 py-2.5 rounded-xl cursor-pointer shadow-sm flex items-center gap-1"
           >
@@ -1778,45 +2242,62 @@ export default function RbtTasksView() {
             <span>&gt;</span>
           </Button>
         </div>
+        </>
+        )}
       </div>
 
       {/* HELP DESK MODAL FOR APPLICANTS */}
       {activeModal === 'HELP_DESK' && (
         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className="bg-white border-2 border-orange-200 rounded-3xl p-6 sm:p-8 max-w-md w-full space-y-5 shadow-2xl animate-fade-in relative text-slate-900">
+          <div
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="rbt-help-dialog-title"
+            tabIndex={-1}
+            className="bg-white border-2 border-orange-200 rounded-3xl p-6 sm:p-8 max-w-md w-full space-y-5 shadow-2xl animate-fade-in relative text-slate-900 focus:outline-none"
+          >
             <div className="flex items-center justify-between border-b border-orange-100 pb-3">
               <div>
-                <h3 className="text-base font-black text-slate-900 font-heading flex items-center gap-2">
+                <h3 id="rbt-help-dialog-title" className="text-base font-black text-slate-900 font-heading flex items-center gap-2">
                   💬 Contact HR Recruiter Help Desk
                 </h3>
                 <p className="text-xs text-slate-600 font-medium mt-0.5">Send an assistance alert to your assigned HR Specialist</p>
               </div>
-              <button onClick={() => setActiveModal('NONE')} className="text-slate-400 hover:text-slate-700 cursor-pointer">
+              <button
+                type="button"
+                onClick={() => setActiveModal('NONE')}
+                aria-label="Close help desk dialog"
+                className="cursor-pointer rounded-lg p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F97316]/70"
+              >
                 ✕
               </button>
             </div>
 
             <form
-              onSubmit={(e) => {
+              onSubmit={async (e) => {
                 e.preventDefault();
-                try {
-                  const customStages = JSON.parse(localStorage.getItem('ras_ats_custom_stages') || '{}');
-                  const ticketPayload = {
-                    stage: 'HELP_DESK',
-                    activationStatus: 'INVITATION_SENT',
-                    category: helpCategory,
-                    message: helpMessage || 'Applicant requested assistance on onboarding portal.',
-                    submittedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                  };
-                  customStages['c1'] = ticketPayload;
-                  customStages['cand-1'] = ticketPayload;
-                  customStages['usr-applicant-1'] = ticketPayload;
-                  localStorage.setItem('ras_ats_custom_stages', JSON.stringify(customStages));
-                  localStorage.setItem('ras_latest_help_ticket', JSON.stringify(ticketPayload));
-                  window.dispatchEvent(new Event('storage'));
-                  setActiveModal('NONE');
-                  toast.success('⚠️ Assistance alert sent! Your profile is now flagged in the HR Help Desk Alerts column.');
-                } catch (err) {}
+                const candidateId =
+                  localStorage.getItem('ras_active_impersonated_applicant_id') ||
+                  localStorage.getItem('ras_active_applicant_id');
+                if (!candidateId || candidateId === 'c1') {
+                  toast.error('No active applicant selected.');
+                  return;
+                }
+                const { createHelpTicket } = await import('@/app/actions/helpDeskActions');
+                const res = await createHelpTicket({
+                  candidateId,
+                  category: helpCategory,
+                  subject: 'Onboarding assistance request',
+                  message: helpMessage || 'Applicant requested assistance on onboarding portal.',
+                });
+                if (!res.success) {
+                  toast.error(res.error || 'Failed to send alert');
+                  return;
+                }
+                setActiveModal('NONE');
+                window.dispatchEvent(new Event('rbt_progress_synced'));
+                toast.success('Assistance alert sent! Profile flagged in Help Desk Alerts.');
               }}
               className="space-y-4"
             >
@@ -1866,6 +2347,35 @@ export default function RbtTasksView() {
           </div>
         </div>
       )}
+
+      <OnboardingConfirmModal
+        open={confirmKind === 'SIGN'}
+        title="Confirm electronic signature"
+        body={
+          <p>
+            You are about to electronically sign <strong>{currentDoc.title}</strong>. This is a legally binding
+            action under the federal E-SIGN Act and New York ESRA. Are you sure?
+          </p>
+        }
+        confirmLabel="Sign now"
+        pending={confirmPending}
+        onCancel={() => setConfirmKind(null)}
+        onConfirm={() => void confirmSignNow()}
+      />
+      <OnboardingConfirmModal
+        open={confirmKind === 'NEXT'}
+        title="Confirm before continuing"
+        body={
+          <p>
+            You completed <strong>{currentDoc.title}</strong>. Confirm to leave this page and open the next
+            onboarding step. This confirmation is recorded in your audit trail.
+          </p>
+        }
+        confirmLabel="Continue"
+        pending={confirmPending}
+        onCancel={() => setConfirmKind(null)}
+        onConfirm={() => void confirmAdvanceNow()}
+      />
     </div>
   );
 }

@@ -1,0 +1,13 @@
+-- Phase 8: LS-54 hire-last wage offer (Head HR only)
+-- Paste into Supabase SQL Editor after 14_onboarding_signatures.sql. Idempotent.
+
+ALTER TABLE "CandidateOnboardingPacket"
+  ADD COLUMN IF NOT EXISTS "ls54PreparedAt" TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS "ls54PreparedByUserId" UUID,
+  ADD COLUMN IF NOT EXISTS "ls54StoragePath" TEXT,
+  ADD COLUMN IF NOT EXISTS "ls54Payload" JSONB,
+  ADD COLUMN IF NOT EXISTS "ls54Status" TEXT NOT NULL DEFAULT 'NONE',
+  ADD COLUMN IF NOT EXISTS "ls54Version" INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS "ls54SentAt" TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS "ls54SignedAt" TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS "ls54DeclinedAt" TIMESTAMPTZ;

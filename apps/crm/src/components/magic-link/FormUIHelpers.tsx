@@ -78,11 +78,13 @@ export function AutoSaveInput({ label, fieldId, type = "text", defaultValue, onB
   if (adminReviewMode) return <FieldWrapper fieldId={fieldId}><ReadOnlyDisplay label={label} value={val} /></FieldWrapper>;
 
   const isMissing = required && !val;
+  const inputId = `intake-${fieldId}`;
   return (
     <FieldWrapper fieldId={fieldId}>
       <div className={`field ${isMissing ? 'missing' : ''}`}>
-        <label>{label}</label>
+        <label htmlFor={inputId}>{label}</label>
         <input 
+          id={inputId}
           type={type} 
           value={val}
           placeholder={placeholder}
@@ -117,11 +119,13 @@ export function AutoSaveDateInput({ label, fieldId, defaultValue, onBlur, requir
     setVal(formatted);
   };
 
+  const inputId = `intake-${fieldId}`;
   return (
     <FieldWrapper fieldId={fieldId}>
       <div className={`field ${isMissing ? 'missing' : ''}`}>
-        <label>{label}</label>
+        <label htmlFor={inputId}>{label}</label>
         <input 
+          id={inputId}
           type="text" 
           value={val}
           placeholder="MM/DD/YYYY"
@@ -143,11 +147,13 @@ export function AutoSaveTextArea({ label, fieldId, defaultValue, onBlur, require
   if (adminReviewMode) return <FieldWrapper fieldId={fieldId}><ReadOnlyDisplay label={label} value={val} /></FieldWrapper>;
 
   const isMissing = required && !val;
+  const inputId = `intake-${fieldId}`;
   return (
     <FieldWrapper fieldId={fieldId}>
       <div className={`field ${isMissing ? 'missing' : ''}`}>
-        <label>{label}</label>
+        <label htmlFor={inputId}>{label}</label>
         <textarea 
+          id={inputId}
           value={val}
           onChange={(e) => setVal(e.target.value)}
           onBlur={() => onBlur(fieldId, val)}
@@ -166,11 +172,13 @@ export function AutoSaveSelect({ label, fieldId, options, defaultValue, onBlur, 
   if (adminReviewMode) return <FieldWrapper fieldId={fieldId}><ReadOnlyDisplay label={label} value={val} /></FieldWrapper>;
 
   const isMissing = required && !val;
+  const inputId = `intake-${fieldId}`;
   return (
     <FieldWrapper fieldId={fieldId}>
       <div className={`field ${isMissing ? 'missing' : ''}`}>
-        <label>{label}</label>
+        <label htmlFor={inputId}>{label}</label>
         <select 
+          id={inputId}
           value={val}
           onChange={(e) => setVal(e.target.value)}
           onBlur={() => onBlur(fieldId, val)}
@@ -203,21 +211,22 @@ export function AutoSaveRadio({ label, fieldId, options, currentValue, onChange,
                 ${currentValue === opt ? 'bg-brand-blue-500/10 border-brand-blue-500 shadow-inner' : 'bg-black/50 border-white/10 hover:border-white/20 hover:bg-white/5'}
               `}
             >
-              <div className={`w-5 h-5 shrink-0 rounded-full flex items-center justify-center border transition-all
-                ${currentValue === opt ? 'border-brand-blue-500' : 'border-white/20 group-hover:border-brand-blue-400/50'}
-              `}>
-                {currentValue === opt && (
-                  <div className="w-2.5 h-2.5 rounded-full bg-brand-blue-500" />
-                )}
-              </div>
               <input 
                 type="radio" 
                 name={fieldId} 
                 value={opt}
                 checked={currentValue === opt}
                 onChange={() => onChange(fieldId, opt)}
-                className="hidden"
+                className="peer sr-only"
               />
+              <div className={`w-5 h-5 shrink-0 rounded-full flex items-center justify-center border transition-all
+                peer-focus-visible:ring-2 peer-focus-visible:ring-brand-blue-400 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-black
+                ${currentValue === opt ? 'border-brand-blue-500' : 'border-white/20 group-hover:border-brand-blue-400/50'}
+              `}>
+                {currentValue === opt && (
+                  <div className="w-2.5 h-2.5 rounded-full bg-brand-blue-500" />
+                )}
+              </div>
               <span className="text-sm font-bold text-white">{opt}</span>
             </label>
           ))}
@@ -241,7 +250,14 @@ export function AutoSaveCheckbox({ label, fieldId, currentValue, onChange, descr
           ${isMissing ? 'missing !border-yellow-400/50 !bg-yellow-400/5 shadow-[0_0_15px_rgba(250,204,21,0.15)]' : ''}
         `}
       >
+        <input 
+          type="checkbox" 
+          checked={!!currentValue}
+          onChange={(e) => onChange(fieldId, e.target.checked)}
+          className="peer sr-only"
+        />
         <div className={`mt-0.5 w-6 h-6 shrink-0 rounded flex items-center justify-center border transition-all
+          peer-focus-visible:ring-2 peer-focus-visible:ring-brand-blue-400 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-black
           ${currentValue ? 'bg-brand-blue-500 border-brand-blue-500' : 'bg-black/50 border-white/20 group-hover:border-brand-blue-400/50'}
           ${isMissing && !currentValue ? '!border-yellow-400/50' : ''}
         `}>
@@ -251,12 +267,6 @@ export function AutoSaveCheckbox({ label, fieldId, currentValue, onChange, descr
             </svg>
           )}
         </div>
-        <input 
-          type="checkbox" 
-          checked={!!currentValue}
-          onChange={(e) => onChange(fieldId, e.target.checked)}
-          className="hidden"
-        />
         <div>
           <span className="text-sm font-bold text-white block mb-1">
             {label}

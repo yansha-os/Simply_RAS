@@ -1,38 +1,147 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useTransition } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { CheckCircle, AlertTriangle, ShieldCheck, DollarSign, FileCheck, PhoneCall, Check, FileText } from 'lucide-react';
-import { completeVobAndCreds, submitPaRequest, denyPaRequest, approvePaRequest, submitTreatmentPaRequest, approveTreatmentPaRequest } from '@/app/(dashboard)/portal-case/actions/billing';
+import {
+  AlertTriangle,
+  Check,
+  CheckCircle,
+  ChevronDown,
+  ChevronUp,
+  Clock,
+  DollarSign,
+  DownloadCloud,
+  Eye,
+  FileCheck,
+  FileText,
+  Loader2,
+  PhoneCall,
+  ShieldCheck,
+  X,
+} from 'lucide-react';
+import {
+  approvePaRequest,
+  approveTreatmentPaRequest,
+  completeVobAndCreds,
+  denyPaRequest,
+  submitPaRequest,
+  submitTreatmentPaRequest,
+} from '@/app/(dashboard)/portal-case/actions/billing';
 import { createPortal } from 'react-dom';
-import { Eye, X, Loader2, ChevronDown, ChevronUp, Clock } from 'lucide-react';
-import { useTransition } from 'react';
 import { toast } from 'sonner';
-import { DownloadCloud } from 'lucide-react';
+import AuthUnitsPanel from '@/components/client-profile/tabs/AuthUnitsPanel';
+import WeeklyBillableUnitGrid from '@/components/client-profile/tabs/WeeklyBillableUnitGrid';
+import { canonicalDocumentReference } from '@/lib/documentReference';
 
-export default function BillingAuthTab({ client }: { client: any }) {
-  const paRequest = client.paRequests?.find((pa: any) => pa.type === 'ASSESSMENT');
-  const hasVob = paRequest?.vobCompleted;
-  
-  let formData: Record<string, any> = {};
+type BillingActionResult = { success: boolean; error?: string };
+type ApprovalKind = 'ASSESSMENT' | 'TREATMENT';
+
+type PaRequestView = {
+  id: string;
+  type: string;
+  status: string;
+  vobCompleted?: boolean | null;
+  providerCredentialed?: boolean | null;
+  p2pResolved?: boolean | null;
+  p2pNotes?: string | null;
+  authNumber?: string | null;
+  approvedUnits?: number | null;
+  effectiveDate?: string | Date | null;
+  expirationDate?: string | Date | null;
+};
+
+type BillingClient = {
+  id: string;
+  status: string;
+  intakePacket?: { formData?: unknown } | null;
+  paRequests?: PaRequestView[] | null;
+};
+
+function parseFormData(value: unknown): Record<string, unknown> {
+  let parsed = value;
   try {
-    if (client.intakePacket?.formData) {
-      formData = typeof client.intakePacket.formData === 'string' 
-        ? JSON.parse(client.intakePacket.formData) 
-        : client.intakePacket.formData;
+    // Some legacy packets were double-encoded. Decode at most twice.
+    for (let attempt = 0; attempt < 2 && typeof parsed === 'string'; attempt += 1) {
+      parsed = JSON.parse(parsed);
     }
-  } catch(e) {}
+  } catch {
+    return {};
+  }
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+    ? (parsed as Record<string, unknown>)
+    : {};
+}
 
-  const hasCred = paRequest?.providerCredentialed;
+function displayText(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function formatAuthDate(value: unknown): string {
+  if (!value) return '—';
+  const date = value instanceof Date ? value : new Date(value as string | number);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    // PA dates are calendar dates stored at UTC midnight.
+    timeZone: 'UTC',
+  });
+}
+
+function formatUnits(value: unknown): string {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? value.toLocaleString('en-US')
+    : '—';
+}
+
+function approvalDate(value: string): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function StepCircle({
+  active,
+  completed,
+  number,
+}: {
+  active: boolean;
+  completed: boolean;
+  number: number;
+}) {
+  return (
+    <div
+      className={`z-10 flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold ${
+        completed
+          ? 'bg-green-500 text-white'
+          : active
+            ? 'bg-brand-blue-500 text-white shadow-[0_0_15px_rgba(42,133,255,0.4)]'
+            : 'border border-white/10 bg-zinc-800 text-zinc-500'
+      }`}
+    >
+      {completed ? <Check className="h-5 w-5" /> : number}
+    </div>
+  );
+}
+
+export default function BillingAuthTab({ client }: { client: BillingClient }) {
+  const paRequest = client.paRequests?.find((pa) => pa.type === 'ASSESSMENT');
+  const hasVob = Boolean(paRequest?.vobCompleted);
+  const hasCred = Boolean(paRequest?.providerCredentialed);
+  const preChecksComplete = hasVob && hasCred;
+  const formData = parseFormData(client.intakePacket?.formData);
   const paStatus = paRequest?.status || 'NOT_STARTED';
 
-  const [vobChecked, setVobChecked] = useState(hasVob || false);
-  const [credChecked, setCredChecked] = useState(hasCred || false);
+  const [vobChecked, setVobChecked] = useState(hasVob);
+  const [credChecked, setCredChecked] = useState(hasCred);
   const [showDenyModal, setShowDenyModal] = useState(false);
   const [showTxDenyModal, setShowTxDenyModal] = useState(false);
   const [showApproveModal, setShowApproveModal] = useState(false);
   const [showTxApproveModal, setShowTxApproveModal] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [authRefreshKey, setAuthRefreshKey] = useState(0);
   
   // PA Submission confirmation states
   const [evalDownloaded, setEvalDownloaded] = useState(false);
@@ -41,9 +150,17 @@ export default function BillingAuthTab({ client }: { client: any }) {
   
   const [isPending, startTransition] = useTransition();
 
-  const txPaRequest = client.paRequests?.find((pa: any) => pa.type === 'TREATMENT');
+  const txPaRequest = client.paRequests?.find((pa) => pa.type === 'TREATMENT');
   const txPaStatus = txPaRequest?.status || 'NOT_STARTED';
-  const showTxPa = ['REPORT_ASSEMBLED', 'TX_PA_SUBMITTED', 'TX_PA_APPROVED', 'ACTIVE', 'DISCHARGED'].includes(client.status);
+  // Manual Plutus tracker UI — Assessment PA + Treatment PA (no EDI). Canonical actions: portal-case/actions/billing.ts
+  const showTxPa = [
+    'REPORT_ASSEMBLED',
+    'TX_PA_SUBMITTED',
+    'TX_PA_APPROVED',
+    'STAFFING_PENDING',
+    'ACTIVE',
+    'DISCHARGED',
+  ].includes(client.status);
   const isTxPaSubmitted = ['SUBMITTED', 'DENIED_CLERICAL', 'DENIED_CLINICAL', 'APPROVED'].includes(txPaStatus);
 
   // Form state for Approval
@@ -54,66 +171,215 @@ export default function BillingAuthTab({ client }: { client: any }) {
   
   // Preview Modal
   const [previewDoc, setPreviewDoc] = useState<{ key: string, name: string } | null>(null);
-  const [mounted, setMounted] = useState(false);
   
   // Collapse state for Assessment PA
   const [isAssessmentExpanded, setIsAssessmentExpanded] = useState(paStatus !== 'APPROVED');
   const [txSubmitConfirmed, setTxSubmitConfirmed] = useState(false);
 
-  React.useEffect(() => setMounted(true), []);
-
-  let parsedFormData: any = {};
-  if (client.intakePacket?.formData) {
-    try {
-      let parsed = typeof client.intakePacket.formData === 'string' ? JSON.parse(client.intakePacket.formData) : client.intakePacket.formData;
-      if (typeof parsed === 'string') parsed = JSON.parse(parsed);
-      parsedFormData = parsed || {};
-    } catch (e) {}
-  }
-
-  const insurancePayer = parsedFormData.insurancePayer || 'Unknown Payer';
-  const memberId = parsedFormData.insuranceMemberId || 'Unknown ID';
-  const hasMedicaid = parsedFormData.hasMedicaid === 'Yes';
-  const medicaidId = parsedFormData.medicaidId || '';
+  const insurancePayer = displayText(formData.insurancePayer);
+  const memberId = displayText(formData.insuranceMemberId);
+  const hasMedicaid = formData.hasMedicaid === 'Yes' || formData.hasMedicaid === true;
+  const medicaidId = displayText(formData.medicaidId);
+  const insuranceFrontUrl = canonicalDocumentReference(formData.docInsuranceFront, client.id);
+  const insuranceBackUrl = canonicalDocumentReference(formData.docInsuranceBack, client.id);
+  const medicaidFrontUrl = canonicalDocumentReference(formData.docMedicaidFront, client.id);
+  const medicaidBackUrl = canonicalDocumentReference(formData.docMedicaidBack, client.id);
+  const evalUrl = canonicalDocumentReference(formData.docEval, client.id);
+  const referralUrl = canonicalDocumentReference(formData.docReferral, client.id);
+  const previewValue = previewDoc ? formData[previewDoc.key] : null;
+  const previewUrl = canonicalDocumentReference(previewValue, client.id);
 
   const isPaSubmitted = ['SUBMITTED', 'DENIED_CLERICAL', 'DENIED_CLINICAL', 'APPROVED'].includes(paStatus);
 
-  const handleVobSubmit = () => {
-    if (!vobChecked || !credChecked) {
-      toast.error('Please verify both eligibility and credentialing before continuing.');
-      return;
-    }
+  const showActionError = (message: string) => {
+    setActionError(message);
+    toast.error(message);
+  };
+
+  const runBillingAction = (
+    action: () => Promise<BillingActionResult>,
+    successMessage: string,
+    onSuccess?: () => void,
+  ) => {
+    setActionError(null);
     startTransition(async () => {
-      const res = await completeVobAndCreds(client.id);
-      if (res?.success) toast.success('Pre-checks marked as complete.');
-      else toast.error(res?.error || 'Failed to complete pre-checks.');
+      try {
+        const result = await action();
+        if (result?.success) {
+          setAuthRefreshKey((key) => key + 1);
+          toast.success(successMessage);
+          onSuccess?.();
+          return;
+        }
+        showActionError(result?.error || 'The billing action could not be completed.');
+      } catch (cause) {
+        showActionError(
+          cause instanceof Error && cause.message
+            ? cause.message
+            : 'The billing action could not be completed.',
+        );
+      }
     });
   };
 
-  const StepCircle = ({ active, completed, number }: { active: boolean, completed: boolean, number: number }) => (
-    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 
-      ${completed ? 'bg-green-500 text-white' : active ? 'bg-brand-blue-500 text-white shadow-[0_0_15px_rgba(42,133,255,0.4)]' : 'bg-zinc-800 text-zinc-500 border border-white/10'}`}>
-      {completed ? <Check className="w-5 h-5" /> : number}
-    </div>
-  );
+  const resetApprovalFields = () => {
+    setAuthNumber('');
+    setUnits('');
+    setEffective('');
+    setExpiration('');
+  };
+
+  const openApproval = (kind: ApprovalKind) => {
+    setActionError(null);
+    resetApprovalFields();
+    if (kind === 'ASSESSMENT') setShowApproveModal(true);
+    else setShowTxApproveModal(true);
+  };
+
+  const closeApproval = (kind: ApprovalKind) => {
+    if (kind === 'ASSESSMENT') setShowApproveModal(false);
+    else setShowTxApproveModal(false);
+    setActionError(null);
+    resetApprovalFields();
+  };
+
+  const handleApprovalSubmit = (kind: ApprovalKind) => {
+    const request = kind === 'ASSESSMENT' ? paRequest : txPaRequest;
+    if (!request?.id) {
+      showActionError(`${kind === 'ASSESSMENT' ? 'Assessment' : 'Treatment'} PA request not found.`);
+      return;
+    }
+
+    const parsedUnits = Number(units);
+    const effectiveDate = approvalDate(effective);
+    const expirationDate = approvalDate(expiration);
+    if (!authNumber.trim()) {
+      showActionError('Authorization number is required.');
+      return;
+    }
+    if (!Number.isInteger(parsedUnits) || parsedUnits <= 0) {
+      showActionError('Approved units must be a whole number greater than zero.');
+      return;
+    }
+    if (!effectiveDate || !expirationDate) {
+      showActionError('Enter valid effective and expiration dates.');
+      return;
+    }
+    if (expirationDate < effectiveDate) {
+      showActionError('Expiration date cannot be before the effective date.');
+      return;
+    }
+
+    const payload = {
+      authNumber: authNumber.trim(),
+      approvedUnits: parsedUnits,
+      effectiveDate,
+      expirationDate,
+    };
+    runBillingAction(
+      () =>
+        kind === 'ASSESSMENT'
+          ? approvePaRequest(request.id, payload)
+          : approveTreatmentPaRequest(request.id, payload),
+      `${kind === 'ASSESSMENT' ? 'Assessment' : 'Treatment'} authorization saved.`,
+      () => closeApproval(kind),
+    );
+  };
+
+  const handleDeny = (
+    request: { id?: string } | null | undefined,
+    isClinical: boolean,
+    kind: ApprovalKind,
+  ) => {
+    if (!request?.id) {
+      showActionError(`${kind === 'ASSESSMENT' ? 'Assessment' : 'Treatment'} PA request not found.`);
+      return;
+    }
+    runBillingAction(
+      () => denyPaRequest(request.id!, isClinical),
+      `${kind === 'ASSESSMENT' ? 'Assessment' : 'Treatment'} ${
+        isClinical ? 'clinical' : 'clerical'
+      } denial logged.`,
+      () => {
+        if (kind === 'ASSESSMENT') setShowDenyModal(false);
+        else setShowTxDenyModal(false);
+        setActionError(null);
+      },
+    );
+  };
+
+  const handleVobSubmit = () => {
+    if (!vobChecked || !credChecked) {
+      showActionError('Please verify both eligibility and credentialing before continuing.');
+      return;
+    }
+    runBillingAction(
+      () => completeVobAndCreds(client.id),
+      'Pre-checks marked as complete.',
+    );
+  };
 
   return (
-    <div className="space-y-6 max-w-4xl">
+    <div className="space-y-6 max-w-4xl [&_button:not(:disabled)]:cursor-pointer [&_button:disabled]:cursor-not-allowed">
+
+      {actionError && (
+        <div
+          role="alert"
+          className="flex items-start justify-between gap-3 rounded-xl border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-200 shadow-[0_0_24px_rgba(239,68,68,0.08)]"
+        >
+          <span className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
+            {actionError}
+          </span>
+          <button
+            type="button"
+            onClick={() => setActionError(null)}
+            aria-label="Dismiss billing error"
+            className="shrink-0 rounded-md p-1 text-red-300 transition hover:bg-red-500/10 hover:text-white"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Authorized vs remaining units (read-only; existing PA / Authorization / Session) */}
+      <AuthUnitsPanel clientId={client.id} refreshKey={authRefreshKey} />
+
+      {/* Weekly CPT / units from BCBA-signed SessionNotes */}
+      <WeeklyBillableUnitGrid clientId={client.id} />
       
       {/* Insurance Snapshot */}
-      <div className="grid grid-cols-2 gap-4">
-        <Card className="border-white/10 shadow-sm bg-zinc-900/50">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <Card className="border-white/10 bg-zinc-900/50 shadow-sm transition-all duration-300 hover:border-brand-orange-500/30 hover:shadow-2xl">
           <CardContent className="p-4 flex flex-col justify-between h-full">
             <div>
               <p className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold mb-1">Primary Insurance</p>
-              <h4 className="text-white font-semibold">{insurancePayer}</h4>
-              <p className="text-brand-blue-400 font-mono text-sm mt-1">{memberId}</p>
+              <h4 className={insurancePayer ? 'font-semibold text-white' : 'font-medium text-zinc-500'}>
+                {insurancePayer ?? 'Payer not provided'}
+              </h4>
+              <p className={`mt-1 font-mono text-sm ${memberId ? 'text-brand-blue-400' : 'text-zinc-600'}`}>
+                {memberId ?? 'Member ID not provided'}
+              </p>
             </div>
             <div className="flex gap-2 mt-4">
-              <Button size="sm" variant="outline" className="flex-1 text-xs py-1 h-auto" onClick={() => setPreviewDoc({ key: 'docInsuranceFront', name: 'Primary Insurance (Front)' })}>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!insuranceFrontUrl}
+                aria-label={insuranceFrontUrl ? 'Preview primary insurance card front' : 'Primary insurance card front not uploaded'}
+                className="h-auto flex-1 py-1 text-xs disabled:cursor-not-allowed"
+                onClick={() => setPreviewDoc({ key: 'docInsuranceFront', name: 'Primary Insurance (Front)' })}
+              >
                 <Eye className="w-3 h-3 mr-1" /> Front
               </Button>
-              <Button size="sm" variant="outline" className="flex-1 text-xs py-1 h-auto" onClick={() => setPreviewDoc({ key: 'docInsuranceBack', name: 'Primary Insurance (Back)' })}>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!insuranceBackUrl}
+                aria-label={insuranceBackUrl ? 'Preview primary insurance card back' : 'Primary insurance card back not uploaded'}
+                className="h-auto flex-1 py-1 text-xs disabled:cursor-not-allowed"
+                onClick={() => setPreviewDoc({ key: 'docInsuranceBack', name: 'Primary Insurance (Back)' })}
+              >
                 <Eye className="w-3 h-3 mr-1" /> Back
               </Button>
             </div>
@@ -121,18 +387,34 @@ export default function BillingAuthTab({ client }: { client: any }) {
         </Card>
 
         {hasMedicaid ? (
-          <Card className="border-white/10 shadow-sm bg-zinc-900/50">
+          <Card className="border-white/10 bg-zinc-900/50 shadow-sm transition-all duration-300 hover:border-brand-orange-500/30 hover:shadow-2xl">
             <CardContent className="p-4 flex flex-col justify-between h-full">
               <div>
                 <p className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold mb-1">Medicaid</p>
-                <h4 className="text-white font-semibold">Active</h4>
-                <p className="text-brand-orange-400 font-mono text-sm mt-1">{medicaidId}</p>
+                <h4 className="font-semibold text-white">Reported by family</h4>
+                <p className={`mt-1 font-mono text-sm ${medicaidId ? 'text-brand-orange-400' : 'text-zinc-600'}`}>
+                  {medicaidId ?? 'Medicaid ID not provided'}
+                </p>
               </div>
               <div className="flex gap-2 mt-4">
-                <Button size="sm" variant="outline" className="flex-1 text-xs py-1 h-auto" onClick={() => setPreviewDoc({ key: 'docMedicaidFront', name: 'Medicaid (Front)' })}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={!medicaidFrontUrl}
+                  aria-label={medicaidFrontUrl ? 'Preview Medicaid card front' : 'Medicaid card front not uploaded'}
+                  className="h-auto flex-1 py-1 text-xs disabled:cursor-not-allowed"
+                  onClick={() => setPreviewDoc({ key: 'docMedicaidFront', name: 'Medicaid (Front)' })}
+                >
                   <Eye className="w-3 h-3 mr-1" /> Front
                 </Button>
-                <Button size="sm" variant="outline" className="flex-1 text-xs py-1 h-auto" onClick={() => setPreviewDoc({ key: 'docMedicaidBack', name: 'Medicaid (Back)' })}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={!medicaidBackUrl}
+                  aria-label={medicaidBackUrl ? 'Preview Medicaid card back' : 'Medicaid card back not uploaded'}
+                  className="h-auto flex-1 py-1 text-xs disabled:cursor-not-allowed"
+                  onClick={() => setPreviewDoc({ key: 'docMedicaidBack', name: 'Medicaid (Back)' })}
+                >
                   <Eye className="w-3 h-3 mr-1" /> Back
                 </Button>
               </div>
@@ -152,7 +434,22 @@ export default function BillingAuthTab({ client }: { client: any }) {
         
         <CardHeader 
           className={`pb-4 border-b border-white/5 bg-zinc-950/50 ${paStatus === 'APPROVED' ? 'cursor-pointer hover:bg-zinc-900 transition-colors' : ''}`}
-          onClick={() => { if (paStatus === 'APPROVED') setIsAssessmentExpanded(!isAssessmentExpanded); }}
+          role={paStatus === 'APPROVED' ? 'button' : undefined}
+          tabIndex={paStatus === 'APPROVED' ? 0 : undefined}
+          aria-expanded={paStatus === 'APPROVED' ? isAssessmentExpanded : undefined}
+          aria-controls={paStatus === 'APPROVED' ? 'assessment-authorization-details' : undefined}
+          onClick={() => {
+            if (paStatus === 'APPROVED') setIsAssessmentExpanded((expanded) => !expanded);
+          }}
+          onKeyDown={(event) => {
+            if (
+              paStatus === 'APPROVED' &&
+              (event.key === 'Enter' || event.key === ' ')
+            ) {
+              event.preventDefault();
+              setIsAssessmentExpanded((expanded) => !expanded);
+            }
+          }}
         >
           <div className="flex items-center justify-between">
             <div>
@@ -160,7 +457,7 @@ export default function BillingAuthTab({ client }: { client: any }) {
                 <DollarSign className="w-5 h-5 text-brand-blue-500" /> Prior Authorization — Assessment
                 {paStatus === 'APPROVED' && (
                   <span className="text-[10px] font-bold border px-2.5 py-1 rounded-md tracking-wider uppercase bg-green-500/10 border-green-500/30 text-green-400">
-                    AUTHORIZED
+                    APPROVED
                   </span>
                 )}
               </CardTitle>
@@ -175,23 +472,26 @@ export default function BillingAuthTab({ client }: { client: any }) {
         </CardHeader>
         
         {isAssessmentExpanded && (
-        <CardContent className="p-8 animate-in slide-in-from-top-4 fade-in duration-300">
+        <CardContent
+          id="assessment-authorization-details"
+          className="p-8 animate-in slide-in-from-top-4 fade-in duration-300"
+        >
           <div className="relative border-l-2 border-white/10 ml-4 space-y-12">
             
             {/* STEP 1: VOB & Credentialing */}
             <div className="relative pl-8">
               <div className="absolute -left-[17px] top-0 bg-zinc-950 py-2">
-                <StepCircle number={1} active={!hasVob} completed={hasVob} />
+                <StepCircle number={1} active={!preChecksComplete} completed={preChecksComplete} />
               </div>
               
-              <div className={`bg-zinc-900 border ${hasVob ? 'border-green-500/20' : 'border-white/10'} p-5 rounded-xl transition-all`}>
+              <div className={`bg-zinc-900 border ${preChecksComplete ? 'border-green-500/20' : 'border-white/10'} p-5 rounded-xl transition-all`}>
                 <h3 className="text-base font-semibold text-white mb-4 flex items-center">
                   <ShieldCheck className="w-4 h-4 mr-2 text-zinc-400" />
                   Eligibility & Credentialing Check
                 </h3>
                 
                 <div className="space-y-4">
-                  <label className="flex items-start space-x-3 cursor-pointer group">
+                  <label className={`flex items-start space-x-3 group ${hasVob ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
                     <input 
                       type="checkbox" 
                       className="mt-1 w-4 h-4 rounded border-zinc-700 bg-zinc-800 text-brand-blue-500 focus:ring-brand-blue-500 focus:ring-offset-zinc-900" 
@@ -207,7 +507,7 @@ export default function BillingAuthTab({ client }: { client: any }) {
                     </div>
                   </label>
 
-                  <label className="flex items-start space-x-3 cursor-pointer group">
+                  <label className={`flex items-start space-x-3 group ${hasCred ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
                     <input 
                       type="checkbox" 
                       className="mt-1 w-4 h-4 rounded border-zinc-700 bg-zinc-800 text-brand-blue-500 focus:ring-brand-blue-500 focus:ring-offset-zinc-900" 
@@ -223,14 +523,14 @@ export default function BillingAuthTab({ client }: { client: any }) {
                     </div>
                   </label>
 
-                  {!hasVob && (
+                  {!preChecksComplete && (
                     <div className="pt-2">
                       <Button 
                         variant="primary" 
-                        disabled={isPending || hasVob}
+                        disabled={isPending || preChecksComplete}
                         onClick={handleVobSubmit}
                         className={`w-full mt-2 font-bold shadow-lg transition-all duration-300 ${
-                          (vobChecked && credChecked && !hasVob)
+                          (vobChecked && credChecked && !preChecksComplete)
                             ? 'bg-green-500 hover:bg-green-600 shadow-[0_0_20px_rgba(34,197,94,0.4)] text-white hover:scale-[1.02] active:scale-[0.98]' 
                             : 'hover:scale-[1.02] active:scale-[0.98]'
                         }`}
@@ -245,9 +545,9 @@ export default function BillingAuthTab({ client }: { client: any }) {
             </div>
 
             {/* STEP 2: Submit PA */}
-            <div className={`relative pl-8 transition-opacity duration-300 ${!hasVob ? 'opacity-40 pointer-events-none' : 'opacity-100'}`}>
+            <div className={`relative pl-8 transition-opacity duration-300 ${!preChecksComplete ? 'opacity-40 pointer-events-none' : 'opacity-100'}`}>
               <div className="absolute -left-[17px] top-0 bg-zinc-950 py-2">
-                <StepCircle number={2} active={hasVob && !isPaSubmitted} completed={paStatus === 'APPROVED'} />
+                <StepCircle number={2} active={preChecksComplete && !isPaSubmitted} completed={paStatus === 'APPROVED'} />
               </div>
               
               <div className={`bg-zinc-900 border ${paStatus === 'DENIED_CLERICAL' || paStatus === 'DENIED_CLINICAL' ? 'border-red-500/50 bg-red-500/5' : 'border-white/10'} p-5 rounded-xl`}>
@@ -262,13 +562,13 @@ export default function BillingAuthTab({ client }: { client: any }) {
                     </p>
                     
                     <div className="flex gap-2 mb-4">
-                      {formData.docEval?.url ? (
+                      {evalUrl ? (
                         <a 
-                          href={formData.docEval.url} 
+                          href={evalUrl}
                           target="_blank" 
                           rel="noopener noreferrer"
                           onClick={() => setEvalDownloaded(true)}
-                          className={`inline-flex items-center text-xs px-3 py-1.5 rounded-md border transition-colors ${evalDownloaded ? 'bg-green-500/10 border-green-500/30 text-green-400' : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border-zinc-700'}`}
+                          className={`inline-flex cursor-pointer items-center rounded-md border px-3 py-1.5 text-xs transition-colors ${evalDownloaded ? 'bg-green-500/10 border-green-500/30 text-green-400' : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border-zinc-700'}`}
                         >
                           <DownloadCloud className="w-3.5 h-3.5 mr-1.5" /> Diagnostic Eval {evalDownloaded && <Check className="w-3 h-3 ml-1" />}
                         </a>
@@ -278,13 +578,13 @@ export default function BillingAuthTab({ client }: { client: any }) {
                         </span>
                       )}
                       
-                      {formData.docReferral?.url ? (
+                      {referralUrl ? (
                         <a 
-                          href={formData.docReferral.url} 
+                          href={referralUrl}
                           target="_blank" 
                           rel="noopener noreferrer"
                           onClick={() => setReferralDownloaded(true)}
-                          className={`inline-flex items-center text-xs px-3 py-1.5 rounded-md border transition-colors ${referralDownloaded ? 'bg-green-500/10 border-green-500/30 text-green-400' : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border-zinc-700'}`}
+                          className={`inline-flex cursor-pointer items-center rounded-md border px-3 py-1.5 text-xs transition-colors ${referralDownloaded ? 'bg-green-500/10 border-green-500/30 text-green-400' : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border-zinc-700'}`}
                         >
                           <DownloadCloud className="w-3.5 h-3.5 mr-1.5" /> Physician Referral {referralDownloaded && <Check className="w-3 h-3 ml-1" />}
                         </a>
@@ -315,26 +615,49 @@ export default function BillingAuthTab({ client }: { client: any }) {
                 {paStatus === 'DENIED_CLINICAL' && paRequest?.p2pResolved && paRequest.p2pNotes && (
                   <div className="mt-4 bg-zinc-950 border-l-2 border-brand-blue-500 p-3 rounded-r-lg">
                     <p className="text-[10px] text-zinc-500 font-bold uppercase mb-1">BCBA P2P Resolution Notes</p>
-                    <p className="text-sm text-zinc-300 italic">"{paRequest.p2pNotes}"</p>
+                    <p className="text-sm text-zinc-300 italic">
+                      &ldquo;{paRequest.p2pNotes}&rdquo;
+                    </p>
                   </div>
                 )}
 
                 {(!isPaSubmitted || paStatus.includes('DENIED')) && paStatus !== 'APPROVED' && (() => {
-                  const needsEval = !!formData.docEval?.url;
-                  const needsReferral = !!formData.docReferral?.url;
-                  const evalReady = !needsEval || evalDownloaded;
-                  const referralReady = !needsReferral || referralDownloaded;
+                  const needsEval = Boolean(evalUrl);
+                  const needsReferral = Boolean(referralUrl);
+                  const documentsPresent = needsEval && needsReferral;
+                  const evalReady = needsEval && evalDownloaded;
+                  const referralReady = needsReferral && referralDownloaded;
                   const isSubmitReady = evalReady && referralReady && paSubmittedConfirm;
 
                   return (
                     <div className="mt-4 border-t border-white/5 pt-4">
-                      <label className="flex items-start space-x-3 cursor-pointer group mb-4">
+                      {!documentsPresent && (
+                        <p
+                          role="status"
+                          className="mb-4 flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-200"
+                        >
+                          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                          Upload both the diagnostic evaluation and physician referral before
+                          marking this request submitted.
+                        </p>
+                      )}
+                      <label
+                        className={`mb-4 flex items-start space-x-3 group ${
+                          !documentsPresent ||
+                          (paStatus === 'DENIED_CLINICAL' && !paRequest?.p2pResolved)
+                            ? 'cursor-not-allowed'
+                            : 'cursor-pointer'
+                        }`}
+                      >
                         <input 
                           type="checkbox" 
                           className="mt-1 w-4 h-4 rounded border-zinc-700 bg-zinc-800 text-brand-blue-500 focus:ring-brand-blue-500 focus:ring-offset-zinc-900" 
                           checked={paSubmittedConfirm}
                           onChange={(e) => setPaSubmittedConfirm(e.target.checked)}
-                          disabled={paStatus === 'DENIED_CLINICAL' && !paRequest?.p2pResolved}
+                          disabled={
+                            !documentsPresent ||
+                            (paStatus === 'DENIED_CLINICAL' && !paRequest?.p2pResolved)
+                          }
                         />
                         <div>
                           <p className={`text-sm font-medium ${paSubmittedConfirm ? 'text-zinc-300' : 'text-zinc-400'} group-hover:text-white transition-colors`}>
@@ -345,21 +668,16 @@ export default function BillingAuthTab({ client }: { client: any }) {
 
                       <Button 
                         variant="primary" 
-                        disabled={isPending || (paStatus === 'DENIED_CLINICAL' && !paRequest?.p2pResolved)}
+                        disabled={
+                          isPending ||
+                          !isSubmitReady ||
+                          (paStatus === 'DENIED_CLINICAL' && !paRequest?.p2pResolved)
+                        }
                         onClick={() => {
-                          if (paStatus === 'DENIED_CLINICAL' && !paRequest?.p2pResolved) {
-                            toast.error('Waiting for BCBA to resolve Peer-to-Peer review.');
-                            return;
-                          }
-                          if (!isSubmitReady) {
-                            toast.error('Please download required documents and confirm submission.');
-                            return;
-                          }
-                          startTransition(async () => {
-                            const res = await submitPaRequest(client.id);
-                            if (res?.success) toast.success('PA Request Submitted.');
-                            else toast.error(res?.error || 'Failed to submit PA.');
-                          });
+                          runBillingAction(
+                            () => submitPaRequest(client.id),
+                            'Assessment PA request submitted.',
+                          );
                         }}
                         className={`w-full mt-2 font-bold shadow-lg transition-all duration-300 ${
                           isSubmitReady
@@ -390,16 +708,31 @@ export default function BillingAuthTab({ client }: { client: any }) {
               
               <div className={`bg-zinc-900 border ${paStatus === 'APPROVED' ? 'border-green-500/30 bg-green-500/5' : 'border-white/10'} p-5 rounded-xl`}>
                 
-                {paStatus !== 'APPROVED' ? (
+                {paStatus !== 'APPROVED' || !paRequest ? (
                   <>
                     <h3 className="text-base font-semibold text-white mb-2 flex items-center">
                       <PhoneCall className="w-4 h-4 mr-2 text-zinc-400" />
                       Decision Received
                     </h3>
-                    <p className="text-sm text-zinc-400 mb-5">Record the payer's decision for the submitted authorization.</p>
+                    <p className="text-sm text-zinc-400 mb-5">
+                      Record the payer&apos;s decision for the submitted authorization.
+                    </p>
                     <div className="flex space-x-3">
-                      <Button variant="danger" onClick={() => setShowDenyModal(true)}>Log Denial</Button>
-                      <Button className="bg-green-600 hover:bg-green-700 text-white shadow-[0_0_15px_rgba(34,197,94,0.3)]" onClick={() => setShowApproveModal(true)}>
+                      <Button
+                        variant="danger"
+                        disabled={isPending}
+                        onClick={() => {
+                          setActionError(null);
+                          setShowDenyModal(true);
+                        }}
+                      >
+                        Log Denial
+                      </Button>
+                      <Button
+                        disabled={isPending}
+                        className="bg-green-600 hover:bg-green-700 text-white shadow-[0_0_15px_rgba(34,197,94,0.3)]"
+                        onClick={() => openApproval('ASSESSMENT')}
+                      >
                         <CheckCircle className="w-4 h-4 mr-2" /> Log Approval
                       </Button>
                     </div>
@@ -409,25 +742,28 @@ export default function BillingAuthTab({ client }: { client: any }) {
                     <div className="flex justify-between items-start mb-4">
                       <h3 className="text-base font-semibold text-green-400 flex items-center">
                         <CheckCircle className="w-5 h-5 mr-2" />
-                        Authorization Active
+                        Authorization Approved
                       </h3>
                     </div>
                     <div className="grid grid-cols-2 gap-4 bg-zinc-950 p-4 rounded-lg border border-white/5">
                       <div>
                         <div className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Auth Number</div>
-                        <div className="font-mono text-zinc-200">{paRequest.authNumber}</div>
+                        <div className="font-mono text-zinc-200">{displayText(paRequest.authNumber) ?? '—'}</div>
                       </div>
                       <div>
                         <div className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Approved Units</div>
-                        <div className="font-mono text-zinc-200">{paRequest.approvedUnits} Units</div>
+                        <div className="font-mono text-zinc-200">
+                          {formatUnits(paRequest.approvedUnits)}
+                          {typeof paRequest.approvedUnits === 'number' ? ' units' : ''}
+                        </div>
                       </div>
                       <div>
                         <div className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Effective Date</div>
-                        <div className="font-mono text-zinc-200">{new Date(paRequest.effectiveDate).toLocaleDateString()}</div>
+                        <div className="font-mono text-zinc-200">{formatAuthDate(paRequest.effectiveDate)}</div>
                       </div>
                       <div>
                         <div className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Expiration Date</div>
-                        <div className="font-mono text-zinc-200">{new Date(paRequest.expirationDate).toLocaleDateString()}</div>
+                        <div className="font-mono text-zinc-200">{formatAuthDate(paRequest.expirationDate)}</div>
                       </div>
                     </div>
                   </>
@@ -444,20 +780,28 @@ export default function BillingAuthTab({ client }: { client: any }) {
       {/* Denial Modal */}
       {showDenyModal && createPortal(
         <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div className="bg-zinc-900 border border-white/10 rounded-xl w-full max-w-md shadow-2xl overflow-hidden p-6 space-y-4">
-            <h3 className="text-lg font-semibold text-white flex items-center">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="assessment-denial-title"
+            className="bg-zinc-900 border border-white/10 rounded-xl w-full max-w-md shadow-2xl overflow-hidden p-6 space-y-4"
+          >
+            <h3 id="assessment-denial-title" className="text-lg font-semibold text-white flex items-center">
               <AlertTriangle className="w-5 h-5 text-red-500 mr-2" /> Log Authorization Denial
             </h3>
             <p className="text-sm text-zinc-400">What type of denial did the payer issue? This will reset the PA to require resubmission.</p>
+            {actionError && (
+              <p aria-live="polite" className="rounded-lg border border-red-500/25 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+                {actionError}
+              </p>
+            )}
             
             <div className="grid grid-cols-1 gap-3 pt-2">
               <Button 
                 variant="secondary" 
+                disabled={isPending}
                 className="justify-start h-auto py-3 text-left border-red-500/20 hover:border-red-500 hover:bg-red-500/10"
-                onClick={async () => {
-                  await denyPaRequest(paRequest.id, false);
-                  setShowDenyModal(false);
-                }}
+                onClick={() => handleDeny(paRequest, false, 'ASSESSMENT')}
               >
                 <div>
                   <div className="font-bold text-red-400">Clerical Denial</div>
@@ -467,11 +811,9 @@ export default function BillingAuthTab({ client }: { client: any }) {
 
               <Button 
                 variant="secondary" 
+                disabled={isPending}
                 className="justify-start h-auto py-3 text-left border-orange-500/20 hover:border-orange-500 hover:bg-orange-500/10"
-                onClick={async () => {
-                  await denyPaRequest(paRequest.id, true);
-                  setShowDenyModal(false);
-                }}
+                onClick={() => handleDeny(paRequest, true, 'ASSESSMENT')}
               >
                 <div>
                   <div className="font-bold text-orange-400">Clinical Denial</div>
@@ -481,7 +823,16 @@ export default function BillingAuthTab({ client }: { client: any }) {
             </div>
 
             <div className="flex justify-end pt-2">
-              <Button variant="ghost" onClick={() => setShowDenyModal(false)}>Cancel</Button>
+              <Button
+                variant="ghost"
+                disabled={isPending}
+                onClick={() => {
+                  setShowDenyModal(false);
+                  setActionError(null);
+                }}
+              >
+                Cancel
+              </Button>
             </div>
           </div>
         </div>,
@@ -489,21 +840,29 @@ export default function BillingAuthTab({ client }: { client: any }) {
       )}
 
       {showTxDenyModal && createPortal(
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div className="bg-zinc-900 border border-white/10 rounded-xl w-full max-w-md shadow-2xl overflow-hidden p-6 space-y-4">
-            <h3 className="text-lg font-semibold text-white flex items-center">
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="treatment-denial-title"
+            className="bg-zinc-900 border border-white/10 rounded-xl w-full max-w-md shadow-2xl overflow-hidden p-6 space-y-4"
+          >
+            <h3 id="treatment-denial-title" className="text-lg font-semibold text-white flex items-center">
               <AlertTriangle className="w-5 h-5 text-red-500 mr-2" /> Log Treatment PA Denial
             </h3>
             <p className="text-sm text-zinc-400">What type of denial did the payer issue? This will reset the PA to require resubmission.</p>
+            {actionError && (
+              <p aria-live="polite" className="rounded-lg border border-red-500/25 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+                {actionError}
+              </p>
+            )}
             
             <div className="grid grid-cols-1 gap-3 pt-2">
               <Button 
                 variant="secondary" 
+                disabled={isPending}
                 className="justify-start h-auto py-3 text-left border-red-500/20 hover:border-red-500 hover:bg-red-500/10"
-                onClick={async () => {
-                  if (txPaRequest) await denyPaRequest(txPaRequest.id, false);
-                  setShowTxDenyModal(false);
-                }}
+                onClick={() => handleDeny(txPaRequest, false, 'TREATMENT')}
               >
                 <div>
                   <div className="font-bold text-red-400">Clerical Denial</div>
@@ -513,11 +872,9 @@ export default function BillingAuthTab({ client }: { client: any }) {
 
               <Button 
                 variant="secondary" 
+                disabled={isPending}
                 className="justify-start h-auto py-3 text-left border-orange-500/20 hover:border-orange-500 hover:bg-orange-500/10"
-                onClick={async () => {
-                  if (txPaRequest) await denyPaRequest(txPaRequest.id, true);
-                  setShowTxDenyModal(false);
-                }}
+                onClick={() => handleDeny(txPaRequest, true, 'TREATMENT')}
               >
                 <div>
                   <div className="font-bold text-orange-400">Clinical Denial</div>
@@ -527,7 +884,16 @@ export default function BillingAuthTab({ client }: { client: any }) {
             </div>
 
             <div className="flex justify-end pt-2">
-              <Button variant="ghost" onClick={() => setShowTxDenyModal(false)}>Cancel</Button>
+              <Button
+                variant="ghost"
+                disabled={isPending}
+                onClick={() => {
+                  setShowTxDenyModal(false);
+                  setActionError(null);
+                }}
+              >
+                Cancel
+              </Button>
             </div>
           </div>
         </div>,
@@ -547,7 +913,7 @@ export default function BillingAuthTab({ client }: { client: any }) {
                 <FileCheck className="w-5 h-5 text-brand-orange-500" /> Prior Authorization — Treatment
                 {txPaStatus === 'APPROVED' && (
                   <span className="text-[10px] font-bold border px-2.5 py-1 rounded-md tracking-wider uppercase bg-green-500/10 border-green-500/30 text-green-400">
-                    AUTHORIZED
+                    APPROVED
                   </span>
                 )}
               </CardTitle>
@@ -592,19 +958,29 @@ export default function BillingAuthTab({ client }: { client: any }) {
                     {(!isTxPaSubmitted || txPaStatus.includes('DENIED')) && txPaStatus !== 'APPROVED' && (
                       <div className="mt-4">
                           <div className="mb-4">
-                            <a href={`/api/generate-report/${client.id}`} target="_blank" rel="noopener noreferrer">
-                              <Button variant="outline" type="button" className="border-brand-blue-500/30 text-brand-blue-400 hover:bg-brand-blue-500/10">
-                                <FileText className="w-4 h-4 mr-2" /> Download Assembled Packet (PDF)
-                              </Button>
+                            <a
+                              href={`/api/generate-report/${client.id}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex cursor-pointer items-center justify-center rounded-md border border-brand-blue-500/30 px-3 py-2 text-sm font-medium text-brand-blue-400 transition-all duration-300 hover:bg-brand-blue-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue-400"
+                            >
+                              <FileText className="w-4 h-4 mr-2" /> Download Assembled Packet (PDF)
                             </a>
                           </div>
                           
-                          <label className="flex items-start space-x-3 cursor-pointer group mb-4">
+                          <label
+                            className={`mb-4 flex items-start space-x-3 group ${
+                              txPaStatus === 'DENIED_CLINICAL' && !txPaRequest?.p2pResolved
+                                ? 'cursor-not-allowed'
+                                : 'cursor-pointer'
+                            }`}
+                          >
                             <input 
                               type="checkbox" 
                               className="mt-1 w-4 h-4 rounded border-zinc-700 bg-zinc-800 text-brand-blue-500 focus:ring-brand-blue-500 focus:ring-offset-zinc-900" 
                               checked={txSubmitConfirmed}
                               onChange={(e) => setTxSubmitConfirmed(e.target.checked)}
+                              disabled={txPaStatus === 'DENIED_CLINICAL' && !txPaRequest?.p2pResolved}
                             />
                             <div>
                               <p className={`text-sm font-medium ${txSubmitConfirmed ? 'text-zinc-300' : 'text-zinc-400'} group-hover:text-white transition-colors`}>
@@ -614,15 +990,10 @@ export default function BillingAuthTab({ client }: { client: any }) {
                           </label>
                           <Button 
                           onClick={() => {
-                            if (txPaStatus === 'DENIED_CLINICAL' && !txPaRequest?.p2pResolved) {
-                              toast.error('Waiting for BCBA to resolve Peer-to-Peer review.');
-                              return;
-                            }
-                            startTransition(async () => {
-                              const res = await submitTreatmentPaRequest(client.id);
-                              if (res?.success) toast.success('Treatment PA submitted.');
-                              else toast.error(res?.error || 'Failed to submit Treatment PA.');
-                            });
+                            runBillingAction(
+                              () => submitTreatmentPaRequest(client.id),
+                              'Treatment PA request submitted.',
+                            );
                           }} 
                           variant="primary" 
                           size="sm"
@@ -643,7 +1014,9 @@ export default function BillingAuthTab({ client }: { client: any }) {
                   {txPaStatus === 'DENIED_CLINICAL' && txPaRequest?.p2pResolved && txPaRequest.p2pNotes && (
                     <div className="mt-4 bg-zinc-950 border-l-2 border-brand-blue-500 p-3 rounded-r-lg">
                       <p className="text-[10px] text-zinc-500 font-bold uppercase mb-1">BCBA P2P Resolution Notes</p>
-                      <p className="text-sm text-zinc-300 italic">"{txPaRequest.p2pNotes}"</p>
+                      <p className="text-sm text-zinc-300 italic">
+                        &ldquo;{txPaRequest.p2pNotes}&rdquo;
+                      </p>
                     </div>
                   )}
                 </div>
@@ -664,10 +1037,24 @@ export default function BillingAuthTab({ client }: { client: any }) {
                     
                     {txPaStatus !== 'APPROVED' && txPaStatus !== 'DENIED_CLERICAL' && txPaStatus !== 'DENIED_CLINICAL' && (
                       <div className="flex space-x-2">
-                        <Button size="sm" variant="ghost" className="text-red-400 hover:text-red-300 hover:bg-red-500/10 cursor-pointer" onClick={() => setShowTxDenyModal(true)}>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={isPending}
+                          className="text-red-400 hover:text-red-300 hover:bg-red-500/10 cursor-pointer"
+                          onClick={() => {
+                            setActionError(null);
+                            setShowTxDenyModal(true);
+                          }}
+                        >
                           Log Denial
                         </Button>
-                        <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white cursor-pointer" onClick={() => setShowTxApproveModal(true)}>
+                        <Button
+                          size="sm"
+                          disabled={isPending}
+                          className="bg-green-600 hover:bg-green-700 text-white cursor-pointer"
+                          onClick={() => openApproval('TREATMENT')}
+                        >
                           <CheckCircle className="w-4 h-4 mr-1" /> Log Approval
                         </Button>
                       </div>
@@ -678,19 +1065,27 @@ export default function BillingAuthTab({ client }: { client: any }) {
                     <div className="mt-4 bg-zinc-950 rounded-lg p-4 grid grid-cols-2 gap-4 border border-white/5">
                       <div>
                         <p className="text-[10px] uppercase text-zinc-500 font-bold">Auth Number</p>
-                        <p className="text-white font-mono text-sm mt-0.5">{txPaRequest.authNumber}</p>
+                        <p className="text-white font-mono text-sm mt-0.5">
+                          {displayText(txPaRequest.authNumber) ?? '—'}
+                        </p>
                       </div>
                       <div>
                         <p className="text-[10px] uppercase text-zinc-500 font-bold">Approved Units</p>
-                        <p className="text-white font-mono text-sm mt-0.5">{txPaRequest.approvedUnits}</p>
+                        <p className="text-white font-mono text-sm mt-0.5">
+                          {formatUnits(txPaRequest.approvedUnits)}
+                        </p>
                       </div>
                       <div>
                         <p className="text-[10px] uppercase text-zinc-500 font-bold">Effective Date</p>
-                        <p className="text-zinc-300 text-sm mt-0.5">{new Date(txPaRequest.effectiveDate).toLocaleDateString()}</p>
+                        <p className="text-zinc-300 text-sm mt-0.5">
+                          {formatAuthDate(txPaRequest.effectiveDate)}
+                        </p>
                       </div>
                       <div>
                         <p className="text-[10px] uppercase text-zinc-500 font-bold">Expiration Date</p>
-                        <p className="text-zinc-300 text-sm mt-0.5">{new Date(txPaRequest.expirationDate).toLocaleDateString()}</p>
+                        <p className="text-zinc-300 text-sm mt-0.5">
+                          {formatAuthDate(txPaRequest.expirationDate)}
+                        </p>
                       </div>
                     </div>
                   )}
@@ -702,50 +1097,115 @@ export default function BillingAuthTab({ client }: { client: any }) {
         </Card>
       )}
 
-      {/* Deny Modal (Assessment Only) */}
+      {/* Assessment approval modal */}
       {showApproveModal && createPortal(
         <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div className="bg-zinc-900 border border-white/10 rounded-xl w-full max-w-md shadow-2xl overflow-hidden p-6 space-y-4">
-            <h3 className="text-lg font-semibold text-white flex items-center">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="assessment-approval-title"
+            className="bg-zinc-900 border border-white/10 rounded-xl w-full max-w-md shadow-2xl overflow-hidden p-6 space-y-4"
+          >
+            <h3 id="assessment-approval-title" className="text-lg font-semibold text-white flex items-center">
               <CheckCircle className="w-5 h-5 text-green-500 mr-2" /> Log Authorization Approval
             </h3>
             <p className="text-sm text-zinc-400 mb-4">Enter the authorization details provided by the payer.</p>
+            {actionError && (
+              <p aria-live="polite" className="rounded-lg border border-red-500/25 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+                {actionError}
+              </p>
+            )}
             
-            <form action={async () => {
-              if (!paRequest?.id) return;
-              await approvePaRequest(paRequest.id, {
-                authNumber,
-                approvedUnits: parseInt(units, 10),
-                effectiveDate: new Date(effective),
-                expirationDate: new Date(expiration)
-              });
-              setShowApproveModal(false);
-            }} className="space-y-4">
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                handleApprovalSubmit('ASSESSMENT');
+              }}
+              className="space-y-4"
+            >
               
               <div className="space-y-1">
-                <label className="text-xs font-semibold text-zinc-400 uppercase">Auth Number</label>
-                <input required type="text" value={authNumber} onChange={e => setAuthNumber(e.target.value)} className="w-full bg-zinc-950 border border-white/10 rounded-md p-2 text-white outline-none focus:border-green-500" />
+                <label htmlFor="assessment-auth-number" className="text-xs font-semibold text-zinc-400 uppercase">
+                  Auth Number
+                </label>
+                <input
+                  id="assessment-auth-number"
+                  required
+                  disabled={isPending}
+                  type="text"
+                  autoComplete="off"
+                  value={authNumber}
+                  onChange={e => setAuthNumber(e.target.value)}
+                  className="w-full bg-zinc-950 border border-white/10 rounded-md p-2 text-white outline-none focus:border-green-500 disabled:cursor-not-allowed disabled:opacity-60"
+                />
               </div>
               
               <div className="space-y-1">
-                <label className="text-xs font-semibold text-zinc-400 uppercase">Approved Units (97151)</label>
-                <input required type="number" min="1" value={units} onChange={e => setUnits(e.target.value)} className="w-full bg-zinc-950 border border-white/10 rounded-md p-2 text-white outline-none focus:border-green-500" />
+                <label htmlFor="assessment-approved-units" className="text-xs font-semibold text-zinc-400 uppercase">
+                  Approved Units (97151)
+                </label>
+                <input
+                  id="assessment-approved-units"
+                  required
+                  disabled={isPending}
+                  type="number"
+                  min="1"
+                  step="1"
+                  inputMode="numeric"
+                  value={units}
+                  onChange={e => setUnits(e.target.value)}
+                  className="w-full bg-zinc-950 border border-white/10 rounded-md p-2 text-white outline-none focus:border-green-500 disabled:cursor-not-allowed disabled:opacity-60"
+                />
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
-                  <label className="text-xs font-semibold text-zinc-400 uppercase">Effective Date</label>
-                  <input required type="date" value={effective} onChange={e => setEffective(e.target.value)} className="w-full bg-zinc-950 border border-white/10 rounded-md p-2 text-zinc-300 outline-none focus:border-green-500 [color-scheme:dark]" />
+                  <label htmlFor="assessment-effective-date" className="text-xs font-semibold text-zinc-400 uppercase">
+                    Effective Date
+                  </label>
+                  <input
+                    id="assessment-effective-date"
+                    required
+                    disabled={isPending}
+                    type="date"
+                    value={effective}
+                    onChange={e => setEffective(e.target.value)}
+                    className="w-full bg-zinc-950 border border-white/10 rounded-md p-2 text-zinc-300 outline-none focus:border-green-500 [color-scheme:dark] disabled:cursor-not-allowed disabled:opacity-60"
+                  />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs font-semibold text-zinc-400 uppercase">Expiration Date</label>
-                  <input required type="date" value={expiration} onChange={e => setExpiration(e.target.value)} className="w-full bg-zinc-950 border border-white/10 rounded-md p-2 text-zinc-300 outline-none focus:border-green-500 [color-scheme:dark]" />
+                  <label htmlFor="assessment-expiration-date" className="text-xs font-semibold text-zinc-400 uppercase">
+                    Expiration Date
+                  </label>
+                  <input
+                    id="assessment-expiration-date"
+                    required
+                    disabled={isPending}
+                    type="date"
+                    min={effective || undefined}
+                    value={expiration}
+                    onChange={e => setExpiration(e.target.value)}
+                    className="w-full bg-zinc-950 border border-white/10 rounded-md p-2 text-zinc-300 outline-none focus:border-green-500 [color-scheme:dark] disabled:cursor-not-allowed disabled:opacity-60"
+                  />
                 </div>
               </div>
 
               <div className="flex justify-end space-x-3 pt-4">
-                <Button type="button" variant="secondary" onClick={() => setShowApproveModal(false)}>Cancel</Button>
-                <Button type="submit" className="bg-green-600 hover:bg-green-700 text-white">Save Authorization</Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={isPending}
+                  onClick={() => closeApproval('ASSESSMENT')}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  isLoading={isPending}
+                  className="bg-green-600 hover:bg-green-700 text-white disabled:cursor-not-allowed"
+                >
+                  Save Authorization
+                </Button>
               </div>
             </form>
           </div>
@@ -756,47 +1216,112 @@ export default function BillingAuthTab({ client }: { client: any }) {
       {/* TX Approval Modal */}
       {showTxApproveModal && createPortal(
         <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div className="bg-zinc-900 border border-white/10 rounded-xl w-full max-w-md shadow-2xl overflow-hidden p-6 space-y-4">
-            <h3 className="text-lg font-semibold text-white flex items-center">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="treatment-approval-title"
+            className="bg-zinc-900 border border-white/10 rounded-xl w-full max-w-md shadow-2xl overflow-hidden p-6 space-y-4"
+          >
+            <h3 id="treatment-approval-title" className="text-lg font-semibold text-white flex items-center">
               <CheckCircle className="w-5 h-5 text-green-500 mr-2" /> Log Treatment PA Approval
             </h3>
             <p className="text-sm text-zinc-400 mb-4">Enter the authorization details provided by the payer for 97153, 97155, 97156.</p>
+            {actionError && (
+              <p aria-live="polite" className="rounded-lg border border-red-500/25 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+                {actionError}
+              </p>
+            )}
             
-            <form action={async () => {
-              if (!txPaRequest?.id) return;
-              await approveTreatmentPaRequest(txPaRequest.id, {
-                authNumber,
-                approvedUnits: parseInt(units, 10),
-                effectiveDate: new Date(effective),
-                expirationDate: new Date(expiration)
-              });
-              setShowTxApproveModal(false);
-            }} className="space-y-4">
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                handleApprovalSubmit('TREATMENT');
+              }}
+              className="space-y-4"
+            >
               
               <div className="space-y-1">
-                <label className="text-xs font-semibold text-zinc-400 uppercase">Auth Number</label>
-                <input required type="text" value={authNumber} onChange={e => setAuthNumber(e.target.value)} className="w-full bg-zinc-950 border border-white/10 rounded-md p-2 text-white outline-none focus:border-green-500" />
+                <label htmlFor="treatment-auth-number" className="text-xs font-semibold text-zinc-400 uppercase">
+                  Auth Number
+                </label>
+                <input
+                  id="treatment-auth-number"
+                  required
+                  disabled={isPending}
+                  type="text"
+                  autoComplete="off"
+                  value={authNumber}
+                  onChange={e => setAuthNumber(e.target.value)}
+                  className="w-full bg-zinc-950 border border-white/10 rounded-md p-2 text-white outline-none focus:border-green-500 disabled:cursor-not-allowed disabled:opacity-60"
+                />
               </div>
               
               <div className="space-y-1">
-                <label className="text-xs font-semibold text-zinc-400 uppercase">Total Approved Units</label>
-                <input required type="number" min="1" value={units} onChange={e => setUnits(e.target.value)} className="w-full bg-zinc-950 border border-white/10 rounded-md p-2 text-white outline-none focus:border-green-500" />
+                <label htmlFor="treatment-approved-units" className="text-xs font-semibold text-zinc-400 uppercase">
+                  Total Approved Units
+                </label>
+                <input
+                  id="treatment-approved-units"
+                  required
+                  disabled={isPending}
+                  type="number"
+                  min="1"
+                  step="1"
+                  inputMode="numeric"
+                  value={units}
+                  onChange={e => setUnits(e.target.value)}
+                  className="w-full bg-zinc-950 border border-white/10 rounded-md p-2 text-white outline-none focus:border-green-500 disabled:cursor-not-allowed disabled:opacity-60"
+                />
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
-                  <label className="text-xs font-semibold text-zinc-400 uppercase">Effective Date</label>
-                  <input required type="date" value={effective} onChange={e => setEffective(e.target.value)} className="w-full bg-zinc-950 border border-white/10 rounded-md p-2 text-zinc-300 outline-none focus:border-green-500 [color-scheme:dark]" />
+                  <label htmlFor="treatment-effective-date" className="text-xs font-semibold text-zinc-400 uppercase">
+                    Effective Date
+                  </label>
+                  <input
+                    id="treatment-effective-date"
+                    required
+                    disabled={isPending}
+                    type="date"
+                    value={effective}
+                    onChange={e => setEffective(e.target.value)}
+                    className="w-full bg-zinc-950 border border-white/10 rounded-md p-2 text-zinc-300 outline-none focus:border-green-500 [color-scheme:dark] disabled:cursor-not-allowed disabled:opacity-60"
+                  />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs font-semibold text-zinc-400 uppercase">Expiration Date</label>
-                  <input required type="date" value={expiration} onChange={e => setExpiration(e.target.value)} className="w-full bg-zinc-950 border border-white/10 rounded-md p-2 text-zinc-300 outline-none focus:border-green-500 [color-scheme:dark]" />
+                  <label htmlFor="treatment-expiration-date" className="text-xs font-semibold text-zinc-400 uppercase">
+                    Expiration Date
+                  </label>
+                  <input
+                    id="treatment-expiration-date"
+                    required
+                    disabled={isPending}
+                    type="date"
+                    min={effective || undefined}
+                    value={expiration}
+                    onChange={e => setExpiration(e.target.value)}
+                    className="w-full bg-zinc-950 border border-white/10 rounded-md p-2 text-zinc-300 outline-none focus:border-green-500 [color-scheme:dark] disabled:cursor-not-allowed disabled:opacity-60"
+                  />
                 </div>
               </div>
 
               <div className="flex justify-end space-x-3 pt-4">
-                <Button type="button" variant="secondary" onClick={() => setShowTxApproveModal(false)}>Cancel</Button>
-                <Button type="submit" className="bg-green-600 hover:bg-green-700 text-white">Save Authorization</Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={isPending}
+                  onClick={() => closeApproval('TREATMENT')}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  isLoading={isPending}
+                  className="bg-green-600 hover:bg-green-700 text-white disabled:cursor-not-allowed"
+                >
+                  Save Authorization
+                </Button>
               </div>
             </form>
           </div>
@@ -805,20 +1330,34 @@ export default function BillingAuthTab({ client }: { client: any }) {
       )}
 
       {/* Preview Modal */}
-      {mounted && previewDoc && createPortal(
+      {previewDoc && createPortal(
         <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-200">
-          <div className="bg-zinc-900 border border-white/10 rounded-2xl w-full max-w-4xl shadow-2xl overflow-hidden flex flex-col h-[80vh]">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="document-preview-title"
+            className="bg-zinc-900 border border-white/10 rounded-2xl w-full max-w-4xl shadow-2xl overflow-hidden flex flex-col h-[80vh]"
+          >
             <div className="flex justify-between items-center p-4 border-b border-white/10 bg-zinc-950">
-              <h3 className="font-semibold text-white flex items-center">
+              <h3 id="document-preview-title" className="font-semibold text-white flex items-center">
                 <Eye className="w-5 h-5 mr-2 text-brand-blue-500"/> Preview: {previewDoc.name}
               </h3>
-              <button onClick={() => setPreviewDoc(null)} className="text-zinc-400 hover:text-white transition-colors p-1">
+              <button
+                type="button"
+                onClick={() => setPreviewDoc(null)}
+                aria-label="Close document preview"
+                className="cursor-pointer rounded-md p-1 text-zinc-400 transition-colors hover:bg-white/5 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue-400"
+              >
                 <X className="w-6 h-6"/>
               </button>
             </div>
             <div className="flex-1 p-8 flex items-center justify-center bg-zinc-900/50 overflow-y-auto">
-              {parsedFormData[previewDoc.key] ? (
-                <img src={parsedFormData[previewDoc.key]} alt="Document Preview" className="max-w-full max-h-full rounded shadow-lg object-contain" />
+              {previewUrl ? (
+                <iframe
+                  src={previewUrl}
+                  title={`${previewDoc.name} preview`}
+                  className="h-full w-full rounded-lg border border-white/10 bg-white shadow-lg"
+                />
               ) : (
                 <p className="text-zinc-500 flex flex-col items-center">
                   <FileCheck className="w-12 h-12 mb-3 opacity-20" />

@@ -29,7 +29,7 @@ export default function RbtPublicLanding() {
   const faqs = [
     {
       q: 'Do I need RBT certification to apply?',
-      a: "No! We accept candidates who have a passion for working with children and are willing to complete the 40-hour training course. We provide full guidance and study support throughout the certification process.",
+      a: 'No. Candidates may apply before certification. Training and study resources may be available; confirm current certification requirements with BACB and HR.',
     },
     {
       q: 'What are the typical work hours?',
@@ -49,7 +49,7 @@ export default function RbtPublicLanding() {
     },
     {
       q: 'What training do you provide?',
-      a: 'We provide free access to the 40-hour RBT training course, 1-on-1 mentorship from certified BCBAs, hands-on clinical orientation, and exam prep material.',
+      a: 'Training support may include access to a 40-hour course, clinical orientation, and exam-prep resources. Confirm any supervision arrangements with HR and the assigned qualified supervisor.',
     },
   ];
 
@@ -141,7 +141,7 @@ export default function RbtPublicLanding() {
             </h1>
 
             <p className="text-base text-slate-700 max-w-2xl leading-relaxed font-sans font-medium">
-              Join Rise &amp; Shine ABA as a Registered Behavior Technician (RBT). Work 1-on-1 with children with autism, grow under expert BCBA clinical supervision, and be part of a team that truly supports you!
+              Join Rise &amp; Shine ABA as a Registered Behavior Technician (RBT). Work 1-on-1 with children with autism, build skills with training and case support, and confirm assignment-specific supervision arrangements with HR and your qualified supervisor.
             </p>
 
             <div className="flex flex-wrap gap-4 pt-2">
@@ -188,24 +188,24 @@ export default function RbtPublicLanding() {
               <div className="w-12 h-12 rounded-2xl bg-orange-100 text-[#F97316] flex items-center justify-center border border-orange-300">
                 <Users className="w-6 h-6" />
               </div>
-              <p className="text-3xl font-black text-slate-900 mt-4 font-heading">48+</p>
-              <p className="text-xs text-slate-600 font-mono font-bold mt-0.5">RBTs Active in NYC</p>
+              <p className="text-3xl font-black text-slate-900 mt-4 font-heading">NYC</p>
+              <p className="text-xs text-slate-600 font-mono font-bold mt-0.5">Local Service Team</p>
             </div>
 
             <div className="bg-white border-2 border-emerald-200/90 rounded-3xl p-6 shadow-xl shadow-emerald-500/10 hover:-translate-y-2 hover:shadow-2xl hover:border-emerald-500 transition-all duration-300">
               <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-300">
                 <HeartHandshake className="w-6 h-6" />
               </div>
-              <p className="text-3xl font-black text-slate-900 mt-4 font-heading">95%</p>
-              <p className="text-xs text-slate-600 font-mono font-bold mt-0.5">Candidate Satisfaction</p>
+              <p className="text-3xl font-black text-slate-900 mt-4 font-heading">Flexible</p>
+              <p className="text-xs text-slate-600 font-mono font-bold mt-0.5">Scheduling Options</p>
             </div>
 
             <div className="bg-white border-2 border-amber-200/90 rounded-3xl p-6 shadow-xl shadow-amber-500/10 hover:-translate-y-2 hover:shadow-2xl hover:border-amber-500 transition-all duration-300">
               <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center border border-amber-300">
                 <Award className="w-6 h-6" />
               </div>
-              <p className="text-3xl font-black text-slate-900 mt-4 font-heading">5★</p>
-              <p className="text-xs text-slate-600 font-mono font-bold mt-0.5">RBT Team Rating</p>
+              <p className="text-3xl font-black text-slate-900 mt-4 font-heading">Support</p>
+              <p className="text-xs text-slate-600 font-mono font-bold mt-0.5">Training &amp; Case Resources</p>
             </div>
 
             <div className="bg-white border-2 border-cyan-200/90 rounded-3xl p-6 shadow-xl shadow-cyan-500/10 hover:-translate-y-2 hover:shadow-2xl hover:border-cyan-500 transition-all duration-300">
@@ -222,10 +222,10 @@ export default function RbtPublicLanding() {
       {/* CONTINUOUS NEWS SLIDESHOW MARQUEE TICKER BANNER */}
       <section className="bg-[#F97316] py-4 overflow-hidden shadow-lg shadow-orange-500/20 w-full relative z-10">
         <div className="animate-marquee flex whitespace-nowrap text-white font-mono font-black text-xs sm:text-sm tracking-wider uppercase">
-          <span className="px-6">Flexible Hours • NYC Service Area • Competitive Pay • Free 40-hr Training • BCBA Supervision • Career Growth • Make a Difference •</span>
-          <span className="px-6">Flexible Hours • NYC Service Area • Competitive Pay • Free 40-hr Training • BCBA Supervision • Career Growth • Make a Difference •</span>
-          <span className="px-6">Flexible Hours • NYC Service Area • Competitive Pay • Free 40-hr Training • BCBA Supervision • Career Growth • Make a Difference •</span>
-          <span className="px-6">Flexible Hours • NYC Service Area • Competitive Pay • Free 40-hr Training • BCBA Supervision • Career Growth • Make a Difference •</span>
+          <span className="px-6">Flexible Hours • NYC Service Area • Competitive Pay • Free 40-hr Training • Supervision Plan Guidance • Career Growth • Make a Difference •</span>
+          <span className="px-6">Flexible Hours • NYC Service Area • Competitive Pay • Free 40-hr Training • Supervision Plan Guidance • Career Growth • Make a Difference •</span>
+          <span className="px-6">Flexible Hours • NYC Service Area • Competitive Pay • Free 40-hr Training • Supervision Plan Guidance • Career Growth • Make a Difference •</span>
+          <span className="px-6">Flexible Hours • NYC Service Area • Competitive Pay • Free 40-hr Training • Supervision Plan Guidance • Career Growth • Make a Difference •</span>
         </div>
       </section>
 
@@ -266,7 +266,7 @@ export default function RbtPublicLanding() {
             </div>
             <h3 className="text-lg font-bold text-slate-900 font-heading">Grow Your Skills</h3>
             <p className="text-xs text-slate-600 leading-relaxed font-medium">
-              Learn directly from Board Certified Behavior Analysts (BCBAs) in real clinical sessions with ongoing supervision.
+              Build skills through training and case support. Ask HR how assignment-specific supervision would be coordinated with an assigned qualified supervisor.
             </p>
           </div>
         </div>
@@ -312,8 +312,8 @@ export default function RbtPublicLanding() {
               hoverBorder: 'hover:border-cyan-500',
             },
             {
-              title: 'BCBA Supervision',
-              desc: 'Learn directly from certified master-level BCBAs on every case with regular check-ins.',
+              title: 'Supervision Plan Guidance',
+              desc: 'Supervision requirements depend on current certification standards, the assigned qualified supervisor, agency policy, payer contract, and jurisdiction. Certification, agency, payer, and jurisdictional requirements remain separate. Confirm your current supervision plan with HR and your qualified supervisor. This site does not calculate or verify supervision compliance.',
               icon: ShieldCheck,
               color: 'text-purple-600',
               bg: 'bg-purple-50 border-purple-300',
@@ -329,7 +329,7 @@ export default function RbtPublicLanding() {
             },
             {
               title: 'Career Pathway',
-              desc: 'A clear pathway from RBT to BCBA with tuition assistance and supervision hours.',
+              desc: 'Explore training and role-development options with HR; availability and eligibility are confirmed individually.',
               icon: ArrowRight,
               color: 'text-rose-600',
               bg: 'bg-rose-50 border-rose-300',
@@ -371,7 +371,7 @@ export default function RbtPublicLanding() {
               'Genuine passion for working with children with autism',
               'Reliable transit to client home locations in NYC',
               'Willing to complete the 40-hour RBT training course (we guide you!)',
-              'Already certified RBTs are fast-tracked into client matching',
+              'Certification documents, if submitted, are reviewed by staff before assignment decisions.',
             ].map((req, i) => (
               <div key={i} className="flex items-center gap-3 p-4 rounded-2xl bg-orange-50/70 border border-orange-200 font-bold">
                 <Check className="w-5 h-5 text-[#F97316] shrink-0 stroke-[3]" />
@@ -509,9 +509,9 @@ export default function RbtPublicLanding() {
               <ul className="space-y-2 text-orange-100 font-medium">
                 <li><a href="#benefits" className="hover:text-white transition-colors">Free 40-Hour RBT Training</a></li>
                 <li><a href="#benefits" className="hover:text-white transition-colors">Competitive Hourly Pay Rates</a></li>
-                <li><a href="#benefits" className="hover:text-white transition-colors">1-on-1 BCBA Clinical Mentorship</a></li>
+                <li><a href="#benefits" className="hover:text-white transition-colors">Supervision Plan Guidance</a></li>
                 <li><a href="#benefits" className="hover:text-white transition-colors">Flexible After-School &amp; Weekends</a></li>
-                <li><Link href="/apply" className="hover:text-white transition-colors">Fast-Track BACB Matching</Link></li>
+                <li><Link href="/apply" className="hover:text-white transition-colors">Application &amp; Certification Details</Link></li>
               </ul>
             </div>
 
@@ -532,7 +532,7 @@ export default function RbtPublicLanding() {
                 <li><a href="#requirements" className="hover:text-white transition-colors">Application Requirements</a></li>
                 <li><a href="#process" className="hover:text-white transition-colors">4-Step Hiring Timeline</a></li>
                 <li><a href="#faq" className="hover:text-white transition-colors">Candidate FAQ Accordion</a></li>
-                <li><a href="https://www.bacb.com/" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">BACB Certification Verification</a></li>
+                <li><a href="https://www.bacb.com/" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">BACB Certification Resources</a></li>
                 <li><Link href="/login" className="hover:text-white transition-colors">Returning RBT Employee Login</Link></li>
               </ul>
             </div>
@@ -550,7 +550,7 @@ export default function RbtPublicLanding() {
                 </p>
                 <p className="flex items-center gap-2">
                   <ShieldCheck className="w-4 h-4 text-amber-200 shrink-0" />
-                  <span>BACB Approved Clinical Standards</span>
+                  <span>Current Standards Vary by Assignment</span>
                 </p>
               </div>
             </div>
@@ -568,7 +568,7 @@ export default function RbtPublicLanding() {
               <a href="#" className="hover:text-white transition-colors">Privacy Policy</a>
               <a href="#" className="hover:text-white transition-colors">Terms of Service</a>
               <a href="#" className="hover:text-white transition-colors">HIPAA Compliance</a>
-              <a href="#" className="hover:text-white transition-colors">BACB Standards</a>
+              <a href="#" className="hover:text-white transition-colors">Certification Standards</a>
             </div>
           </div>
         </div>

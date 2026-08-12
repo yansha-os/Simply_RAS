@@ -1,30 +1,61 @@
 'use client';
 
-import React, { useTransition, useActionState } from 'react';
+import React from 'react';
+import Link from 'next/link';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
-import { Button } from '@/components/ui/Button';
-import { assignStaff, activateClient, collectSignature } from '@/app/(dashboard)/case/actions';
-import { Users, CheckCircle, PenTool } from 'lucide-react';
+import { Users, ArrowRight, ShieldCheck, Clock } from 'lucide-react';
 
-const assignInitialState: { error?: string; success?: boolean } = {};
+const STALLED_DAYS = 14;
 
-export default function CasePipelineClient({ staffingQueue, missingSigs, pendingOnboards, rbts, bcbas }: any) {
-  const [assignState, assignAction, isAssigning] = useActionState<any, FormData>(assignStaff, assignInitialState);
-  const [isActivating, startTransition] = useTransition();
+type StaffingClient = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  updatedAt: string | Date;
+  rbtId: string | null;
+  bcbaId: string | null;
+};
 
-  const handleActivate = (clientId: string) => {
-    startTransition(async () => {
-      await activateClient(clientId);
-    });
+type PendingOnboard = {
+  id: string;
+  bacbVerified: boolean;
+  backgroundCleared: boolean;
+  artemisAccountSetup: boolean;
+  payrollComplete: boolean;
+  payerCredentialed: boolean;
+  rbt: { firstName: string; lastName: string };
+  client: { firstName: string };
+};
+
+type MissingSignature = {
+  id: string;
+  parentSigned: boolean;
+  bcbaSigned: boolean;
+  session: {
+    scheduledStart: string | Date;
+    client: { firstName: string; lastName: string };
   };
+};
 
-  const handleSign = (noteId: string, type: 'PARENT' | 'BCBA') => {
-    startTransition(async () => {
-      await collectSignature(noteId, type);
-    });
-  };
+type CasePipelineClientProps = {
+  staffingQueue: StaffingClient[];
+  missingSigs: MissingSignature[];
+  pendingOnboards: PendingOnboard[];
+};
 
+function daysInStage(updatedAt: string | Date | undefined): number | null {
+  if (!updatedAt) return null;
+  const ms = Date.now() - new Date(updatedAt).getTime();
+  if (Number.isNaN(ms) || ms < 0) return null;
+  return Math.floor(ms / (24 * 60 * 60 * 1000));
+}
+
+export default function CasePipelineClient({
+  staffingQueue,
+  missingSigs,
+  pendingOnboards,
+}: CasePipelineClientProps) {
   return (
     <div className="mt-8 grid gap-8 md:grid-cols-2 lg:grid-cols-3 max-w-7xl">
       
@@ -36,67 +67,69 @@ export default function CasePipelineClient({ staffingQueue, missingSigs, pending
         </div>
 
         <div className="grid gap-4">
-          {staffingQueue?.map((client: any) => (
-            <Card key={client.id} className="border-teal-200 dark:border-teal-900 shadow-sm">
+          {staffingQueue?.map((client) => {
+            const stageDays = daysInStage(client.updatedAt);
+            const isStalled = stageDays !== null && stageDays > STALLED_DAYS;
+            return (
+            <Card key={client.id} className={`shadow-sm ${isStalled ? 'border-amber-300 dark:border-amber-800' : 'border-teal-200 dark:border-teal-900'}`}>
               <CardContent className="p-4 space-y-4">
                 <div className="flex justify-between items-start">
                   <div>
                     <p className="font-semibold text-lg">{client.firstName} {client.lastName}</p>
                     <p className="text-xs text-slate-500">Tx Auth Approved</p>
                   </div>
-                  <Badge variant="outline" className="bg-teal-50 text-teal-700">Staffing</Badge>
+                  <div className="flex flex-col items-end gap-1">
+                    <Badge variant="outline" className="bg-teal-50 text-teal-700">Staffing</Badge>
+                    {isStalled && (
+                      <Badge variant="warning" className="bg-amber-500/10 text-amber-500 border border-amber-500/20 font-mono text-[10px]">
+                        <Clock className="w-3 h-3 mr-1" />
+                        {stageDays}d in stage
+                      </Badge>
+                    )}
+                  </div>
                 </div>
 
                 {(!client.rbtId || !client.bcbaId) ? (
-                  <form action={assignAction} className="space-y-3 border-t pt-3 border-teal-100">
-                    <input type="hidden" name="clientId" value={client.id} />
-                    
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-slate-600">Assign RBT</label>
-                      <select name="rbtId" className="w-full text-sm border p-2 rounded-md bg-[var(--color-surface)] dark:bg-slate-800" required>
-                        <option value="">Select RBT...</option>
-                        {rbts.map((rbt: any) => (
-                          <option key={rbt.id} value={rbt.id}>{rbt.firstName} {rbt.lastName}</option>
-                        ))}
-                      </select>
+                  <div className="space-y-2 border-t border-teal-100 pt-3">
+                    <p className="text-xs leading-relaxed text-slate-500">
+                      BCBA assignment is managed in Clinical. RBT assignment is created only
+                      after the selected Job Board application reaches parent acceptance.
+                    </p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Link
+                        href={`/client/${client.id}?mode=bcba&tab=overview`}
+                        className="inline-flex cursor-pointer items-center justify-center rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-2 py-2 text-xs font-bold text-cyan-700 transition-colors hover:bg-cyan-500/15"
+                      >
+                        Clinical
+                      </Link>
+                      <Link
+                        href={`/client/${client.id}?mode=case_coord&tab=case_coord_schedule&subtab=job_board`}
+                        className="inline-flex cursor-pointer items-center justify-center rounded-lg border border-teal-500/30 bg-teal-500/10 px-2 py-2 text-xs font-bold text-teal-700 transition-colors hover:bg-teal-500/15"
+                      >
+                        <Users className="mr-1 h-3 w-3" />
+                        Job Board
+                      </Link>
                     </div>
-                    
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-slate-600">Assign BCBA</label>
-                      <select name="bcbaId" className="w-full text-sm border p-2 rounded-md bg-[var(--color-surface)] dark:bg-slate-800" required>
-                        <option value="">Select BCBA...</option>
-                        {bcbas.map((bcba: any) => (
-                          <option key={bcba.id} value={bcba.id}>{bcba.firstName} {bcba.lastName}</option>
-                        ))}
-                      </select>
-                    </div>
-                    
-                    <Button type="submit" size="sm" variant="primary" className="w-full h-8 text-xs bg-teal-600 hover:bg-teal-700" isLoading={isAssigning}>
-                      <Users className="w-3 h-3 mr-2" />
-                      Save Staffing
-                    </Button>
-                  </form>
+                  </div>
                 ) : (
                   <div className="space-y-3 border-t pt-3 border-teal-100">
                     <div className="text-xs bg-teal-50 text-teal-800 p-2 rounded-md border border-teal-200">
                       <p><strong>RBT Assigned:</strong> Yes</p>
                       <p><strong>BCBA Assigned:</strong> Yes</p>
                     </div>
-                    <Button 
-                      variant="primary" 
-                      size="sm" 
-                      className="w-full bg-brand-blue-500 hover:bg-brand-blue-600"
-                      onClick={() => handleActivate(client.id)}
-                      isLoading={isActivating}
+                    <Link
+                      href={`/client/${client.id}?mode=case_coord&tab=case_coord_schedule&subtab=activation`}
+                      className="inline-flex w-full cursor-pointer items-center justify-center rounded-lg bg-brand-blue-500 px-3 py-2 text-xs font-bold text-white transition-colors hover:bg-brand-blue-600"
                     >
-                      <CheckCircle className="w-4 h-4 mr-2" />
-                      Verify Schedule & Activate
-                    </Button>
+                      <ArrowRight className="mr-2 h-4 w-4" />
+                      Open first-session workflow
+                    </Link>
                   </div>
                 )}
               </CardContent>
             </Card>
-          ))}
+            );
+          })}
 
           {(!staffingQueue || staffingQueue.length === 0) && (
             <div className="text-center p-8 text-slate-500 border rounded-xl border-dashed">
@@ -114,7 +147,7 @@ export default function CasePipelineClient({ staffingQueue, missingSigs, pending
         </div>
 
         <div className="grid gap-4">
-          {pendingOnboards?.map((onboard: any) => (
+          {pendingOnboards?.map((onboard) => (
             <Card key={onboard.id} className="border-amber-200 dark:border-amber-900 shadow-sm bg-amber-50/10">
               <CardContent className="p-4 space-y-4">
                 <div className="flex justify-between items-start">
@@ -139,7 +172,7 @@ export default function CasePipelineClient({ staffingQueue, missingSigs, pending
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span>Artemis Account:</span>
+                    <span>RAS Clinical Chart:</span>
                     <span className={onboard.artemisAccountSetup ? "text-green-600" : "text-amber-600 font-bold"}>
                       {onboard.artemisAccountSetup ? 'Tested' : 'Pending'}
                     </span>
@@ -177,7 +210,7 @@ export default function CasePipelineClient({ staffingQueue, missingSigs, pending
         </div>
 
         <div className="grid gap-4">
-          {missingSigs?.map((sig: any) => (
+          {missingSigs?.map((sig) => (
             <Card key={sig.id} className="border-red-200 dark:border-red-900 shadow-sm bg-red-50/20 dark:bg-red-900/10">
               <CardContent className="p-4 space-y-4">
                 <div className="flex justify-between items-start">
@@ -190,26 +223,18 @@ export default function CasePipelineClient({ staffingQueue, missingSigs, pending
                 
                 <div className="space-y-2 border-t pt-3 border-red-100 dark:border-red-900/50">
                   {!sig.parentSigned && (
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
-                      className="w-full h-8 text-xs text-red-600 border-red-200 hover:bg-red-100"
-                      onClick={() => handleSign(sig.id, 'PARENT')}
-                    >
-                      <PenTool className="w-3 h-3 mr-2" />
-                      Collect Parent Signature
-                    </Button>
+                    <div className="flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/10 p-2 text-xs text-red-700 dark:text-red-300">
+                      <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      Parent attestation must be completed by the caregiver in the authorized
+                      session workflow.
+                    </div>
                   )}
                   {!sig.bcbaSigned && (
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
-                      className="w-full h-8 text-xs text-slate-600 border-slate-200 hover:bg-slate-50"
-                      onClick={() => handleSign(sig.id, 'BCBA')}
-                    >
-                      <PenTool className="w-3 h-3 mr-2" />
-                      Collect BCBA Signature
-                    </Button>
+                    <div className="flex items-start gap-2 rounded-lg border border-slate-500/20 bg-slate-500/10 p-2 text-xs text-slate-700 dark:text-slate-300">
+                      <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      BCBA attestation remains pending in the assigned clinician&apos;s canonical
+                      e-sign queue.
+                    </div>
                   )}
                 </div>
               </CardContent>

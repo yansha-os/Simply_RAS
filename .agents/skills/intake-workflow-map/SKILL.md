@@ -11,27 +11,35 @@ description: >
 This is the authoritative state machine for the client intake pipeline in Simple RAS CRM.
 Read this before writing any status logic, badge conditions, or status transitions.
 
+Also see: `docs/superpowers/specs/2026-08-11-aba-crm-hrm-spine-roadmap.md` for CRM/HRM spine sequencing.
+
 ---
 
 ## Client Status (`ClientStatus` enum)
 
 ```
 INQUIRY → MAGIC_LINK_SENT → DOCS_SUBMITTED → DOCS_APPROVED_INTAKE
-       → CLINICAL_REVIEW_APPROVED → VOB_COMPLETED → PA_SUBMITTED
-       → PA_APPROVED → ACTIVE → DISCHARGED
+       → CLINICAL_REVIEW_APPROVED → VOB_COMPLETED → PA_SUBMITTED → PA_APPROVED
+       → ASSESSMENT_SCHEDULED → REPORT_ASSEMBLED → TX_PA_SUBMITTED → TX_PA_APPROVED
+       → STAFFING_PENDING → ACTIVE → DISCHARGED
 ```
 
 | Status | Who sets it | Trigger |
 |---|---|---|
-| `INQUIRY` | System (default) | Client created in CRM |
-| `MAGIC_LINK_SENT` | `generateMagicLink()` action | Magic link generated for parent |
-| `DOCS_SUBMITTED` | `submitIntakePacket()` action | Parent completes & submits all forms |
-| `DOCS_APPROVED_INTAKE` | `sendToClinical()` action | Intake coordinator approves all docs |
-| `CLINICAL_REVIEW_APPROVED` | Clinical team action | BCBA approves medical necessity |
-| `VOB_COMPLETED` | Billing action | Verification of Benefits done |
-| `PA_SUBMITTED` | Billing action | Prior Authorization submitted to payer |
-| `PA_APPROVED` | Billing action | PA approved by payer |
-| `ACTIVE` | Case coordinator | Client is receiving services |
+| `INQUIRY` | System (default) | Client created in CRM (`createInquiry`) |
+| `MAGIC_LINK_SENT` | `generateMagicLink()` | Magic link generated for parent |
+| `DOCS_SUBMITTED` | `submitIntakePacket()` | Parent completes & submits all forms |
+| `DOCS_APPROVED_INTAKE` | `sendToClinical()` | Intake coordinator approves all docs |
+| `CLINICAL_REVIEW_APPROVED` | Clinical support / clinical action | Medical necessity / clinical double-check approved |
+| `VOB_COMPLETED` | `completeVobAndCreds()` (billing) | Verification of Benefits + credentialing marked done |
+| `PA_SUBMITTED` | `submitPaRequest()` (billing) | Assessment Prior Authorization submitted (manual Plutus tracker) |
+| `PA_APPROVED` | `approvePaRequest()` (billing) | Assessment PA approved by payer (tracker) |
+| `ASSESSMENT_SCHEDULED` | Assessment schedule action / clinical-support schedule | Real assessment datetime persisted; status advances |
+| `REPORT_ASSEMBLED` | Report assembly / TP submit path | Treatment Plan assembled (BCBA submit + packet ready) |
+| `TX_PA_SUBMITTED` | `submitTreatmentPaRequest()` (billing) | Treatment PA submitted (manual tracker) |
+| `TX_PA_APPROVED` | `approveTreatmentPaRequest()` (billing) | Treatment PA approved; may immediately hand off |
+| `STAFFING_PENDING` | `approveTreatmentPaRequest()` / explicit handoff / parent schedule save when already `TX_PA_APPROVED` | Authorized client ready for Case Coord staffing (job board) |
+| `ACTIVE` | First durable `Session` only (Bridge E) | **Not** granted by RBT approve, Case Coord assign, or parent accept alone |
 | `DISCHARGED` | Case coordinator | Client discharged |
 
 ---
@@ -140,9 +148,17 @@ Form field rejections use `formField_${fieldId}` as the key.
 
 ## Magic Link Flow
 
+### Link security (2026-08-12 — expiry / revocation / fingerprint)
+
+- `generateMagicLink()` stamps `magicLinkExpiresAt` = **30 days** (`newMagicLinkExpiry()` in `src/lib/magicLinkGuard.ts`). `NULL` expiry = legacy link, still accepted.
+- Staff **reset**: `regenerateMagicLink()` — new token + fresh expiry, clears `magicLinkRevokedAt` and the device lock. Staff **revoke**: `revokeMagicLink()` — sets `magicLinkRevokedAt`, link dies immediately. Fields live on `IntakePacket` (parent) and `CandidateOnboardingPacket` (HRM applicant).
+- Every parent-facing action must gate through `requireParentPacketAccess()` (or `requireStaffOrParent()`) from `src/lib/magicLinkGuard.ts`: live token (not revoked/expired) **and** the `device_fingerprint` httpOnly cookie bound on first open. Staff sessions bypass the fingerprint via `requireStaffOrParent`.
+- `submitMagicLinkPacket()` validates **every** required form field and document server-side and rejects incomplete packets — the old prototype that auto-checked all items is gone.
+- Documents upload to the **private** Supabase Storage bucket `client-documents` via `/api/upload`; they render via the authenticated `/api/documents?path=…` signed-URL redirect. Nothing is stored under `public/uploads`.
+
 ```
 Admin generates link → client.status = MAGIC_LINK_SENT
-                     → IntakePacket created with PENDING_CLIENT_SUBMISSION
+                     → IntakePacket created with PENDING_CLIENT_SUBMISSION + 30-day magicLinkExpiresAt
 
 Parent opens link → ContinuousIntakeForm renders
                  → Shows Form01 (client intake) + Form02 (consent) + DocumentUploads
@@ -163,6 +179,19 @@ Admin clicks "Approve & Send to Clinical" → client.status = DOCS_APPROVED_INTA
 
 ---
 
+## Post-intake clinical → staffing (summary)
+
+```
+Billing: VOB → Assessment PA submit/approve
+BCBA / Clin Supp: schedule assessment → build TP → assemble report
+Parent: typed-name TP sign + preferred schedule
+Billing: Treatment PA submit/approve → STAFFING_PENDING
+Case Coord: readiness checklist → CaseOpening → review apps → parent accept
+ACTIVE: only after a real first Session (Bridge E) — staffing accept alone does NOT activate
+```
+
+---
+
 ## Key Files
 
 | File | Purpose |
@@ -170,8 +199,13 @@ Admin clicks "Approve & Send to Clinical" → client.status = DOCS_APPROVED_INTA
 | `src/app/(dashboard)/client/[id]/page.tsx` | Server page — fetches `client` with `intakePacket` |
 | `src/components/client-profile/FlowMap.tsx` | Pipeline visualization — reads packet status |
 | `src/components/client-profile/tabs/IntakeDocumentsTab.tsx` | Admin review UI |
-| `src/app/(dashboard)/portal-case/actions.ts` | All admin-side actions (approve, reject, generate link) |
-| `src/app/actions/intake.ts` | Client-side submission actions |
-| `src/app/magic-link/actions.ts` | Magic link page actions |
+| `src/app/(dashboard)/portal-case/actions.ts` | Intake / assign / RBT approve actions |
+| `src/app/(dashboard)/portal-case/actions/billing.ts` | VOB + Assessment/Treatment PA tracker (canonical) |
+| `src/app/(dashboard)/portal-case/actions/clinical-support.ts` | Assessment schedule / report assemble status flips |
+| `src/app/actions/intake.ts` | Client-side submission + parent schedule save |
+| `src/app/actions/caseOpeningActions.ts` | Job board openings / applications / parent accept |
+| `src/app/magic-link/actions.ts` | Magic link page actions (field-validated `submitMagicLinkPacket`) |
+| `src/lib/magicLinkGuard.ts` | Parent gate: token + expiry + revocation + device fingerprint |
+| `src/app/api/upload/route.ts` + `api/documents/route.ts` | Private `client-documents` bucket upload / signed-URL read |
 | `src/components/magic-link/ContinuousIntakeForm.tsx` | Parent-facing form |
 | `src/components/magic-link/InitialBlock.tsx` | First screen on magic link — shows status |

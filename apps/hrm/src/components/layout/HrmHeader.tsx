@@ -7,6 +7,11 @@ import { useHrmRole } from '@/lib/useHrmRole';
 import { useTheme } from './ThemeContext';
 import ThemeSettingsModal from './ThemeSettingsModal';
 import { toast } from 'sonner';
+import {
+  ensureActiveApplicantId,
+  getActiveApplicantEmail,
+  getActiveApplicantName,
+} from '@/lib/syncAtsProgress';
 
 export function HrmHeader() {
   const { role } = useHrmRole();
@@ -19,8 +24,8 @@ export function HrmHeader() {
   useEffect(() => {
     function loadApplicantProfile() {
       try {
-        const impName = localStorage.getItem('ras_active_impersonated_applicant_name');
-        const impEmail = localStorage.getItem('ras_active_impersonated_applicant_email');
+        const impName = getActiveApplicantName();
+        const impEmail = getActiveApplicantEmail();
         if (impName && impEmail) {
           setApplicantProfile({ name: impName, email: impEmail });
           return;
@@ -32,20 +37,24 @@ export function HrmHeader() {
           if (parsed.fullName && parsed.email) {
             setApplicantProfile({
               name: parsed.fullName,
-              email: parsed.email
+              email: parsed.email,
             });
             return;
           }
         }
       } catch (e) {}
+      setApplicantProfile(null);
     }
 
+    void ensureActiveApplicantId().then(() => loadApplicantProfile());
     loadApplicantProfile();
     window.addEventListener('storage', loadApplicantProfile);
     window.addEventListener('hrm_role_changed', loadApplicantProfile);
+    window.addEventListener('ras_applicant_session_changed', loadApplicantProfile);
     return () => {
       window.removeEventListener('storage', loadApplicantProfile);
       window.removeEventListener('hrm_role_changed', loadApplicantProfile);
+      window.removeEventListener('ras_applicant_session_changed', loadApplicantProfile);
     };
   }, []);
 
@@ -55,7 +64,14 @@ export function HrmHeader() {
     HEAD_HR: { name: 'Eleanor Vance', title: 'Head of HR & Dispatch Lead', badge: 'HEAD HR', email: 'eleanor.vance@riseandshine.com' },
     HR_AGENT: { name: 'Marcus Vance', title: 'ATS Recruiter & Onboarding Specialist', badge: 'HR AGENT', email: 'marcus.v@riseandshine.nyc' },
     FINANCE: { name: 'Robert Sterling', title: 'Payroll & Compensation Lead', badge: 'FINANCE', email: 'robert.s@riseandshine.com' },
-    RBT: { name: 'David Miller, RBT', title: 'Active RBT Staff', badge: 'RBT EMR', email: 'david.m@riseandshine.nyc' },
+    RBT: {
+      name: applicantProfile?.name
+        ? (applicantProfile.name.includes('RBT') ? applicantProfile.name : `${applicantProfile.name}, RBT`)
+        : 'David Miller, RBT',
+      title: 'Registered Behavior Technician',
+      badge: 'RBT',
+      email: applicantProfile?.email || 'david.m@riseandshine.nyc',
+    },
     APPLICANT: { 
       name: applicantProfile?.name || 'Jane Doe', 
       title: 'RBT Job Applicant', 
@@ -64,7 +80,15 @@ export function HrmHeader() {
     },
   };
 
-  const currentProfile = (role in userProfiles) ? userProfiles[role as keyof typeof userProfiles] : userProfiles.HEAD_HR;
+  const currentProfile =
+    role in userProfiles
+      ? userProfiles[role as keyof typeof userProfiles]
+      : {
+          name: '…',
+          title: 'Loading role…',
+          badge: '…',
+          email: '',
+        };
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {

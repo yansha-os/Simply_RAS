@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
-import { Target, ChevronRight, ChevronLeft, CheckCircle2, Sparkles, X, Lightbulb, Minimize2, Maximize2, Info, ArrowRight } from 'lucide-react';
+import { Target, ChevronLeft, X, Lightbulb, Minimize2, Maximize2, Info, ArrowRight } from 'lucide-react';
 import { toast } from 'sonner';
 
 export interface ScribeStep {
@@ -26,62 +26,62 @@ export interface ScribeGuideMeEngineProps {
 const SCRIBE_STREAMLINED_STEPS: ScribeStep[] = [
   {
     stepNumber: 1,
-    title: 'Active Live Sessions Hub',
-    elementType: 'ACTIVE SESSIONS TAB',
-    currentStepExplanation: 'You are currently viewing the Active Live Sessions tab. This tab displays real-time ticking EVV timers, live CPT 97153 units, and trial accuracy for therapy sessions currently in progress.',
-    nextStepTitle: 'Step 2: Incomplete Notes & Claims Needed Tab',
-    requiredActionText: 'Click the "Incomplete Notes / Claims Needed" Tab button above to explore unbilled session notes.',
-    clinicalRationale: 'Rise & Shine ABA standard: RBTs can monitor active EVV clocks and jump right back into live data collection with 1 click.',
+    title: 'Active Practice Session Hub',
+    elementType: 'SIMULATION ACTIVE TAB',
+    currentStepExplanation: 'You are viewing a fictional active-session card with a local practice timer, sample unit estimate, and sample trial summary.',
+    nextStepTitle: 'Step 2: Incomplete Note Samples',
+    requiredActionText: 'Choose the "Incomplete Note Samples" tab to inspect fictional missing-documentation examples.',
+    clinicalRationale: 'This teaches where an RBT would review unfinished documentation without opening or changing a real session.',
     targetElementId: 'tab-incomplete-sessions'
   },
   {
     stepNumber: 2,
-    title: 'Incomplete Session Audits & 1-Click Fix',
-    elementType: 'INCOMPLETE SESSIONS TAB',
-    currentStepExplanation: 'You are now viewing the Incomplete Sessions tab. Session notes clocked out via EVV requiring missing caregiver signatures or SOAP summaries are flagged here with 1-click completion drawers.',
-    nextStepTitle: 'Step 3: Upcoming Weekly Schedule Tab',
-    requiredActionText: 'Click the "Upcoming Schedule" Tab button above to explore your session calendar.',
-    clinicalRationale: 'Prevents incomplete documentation from stalling insurance claim submission and RBT payroll calculations.',
+    title: 'Incomplete Note Practice Samples',
+    elementType: 'SIMULATION INCOMPLETE TAB',
+    currentStepExplanation: 'This tab contains fictional cards that demonstrate how missing acknowledgments or narratives might be surfaced.',
+    nextStepTitle: 'Step 3: Sample Schedule Tab',
+    requiredActionText: 'Choose the "Sample Schedule" tab to explore the fictional calendar.',
+    clinicalRationale: 'The practice view helps RBTs recognize missing documentation while keeping live notes and payroll holds untouched.',
     targetElementId: 'tab-upcoming-schedule'
   },
   {
     stepNumber: 3,
-    title: 'Upcoming Session Schedule Grid',
-    elementType: 'UPCOMING SCHEDULE TAB',
-    currentStepExplanation: 'You are now viewing the Upcoming Schedule tab. This matrix displays confirmed therapy sessions for the week, emergency call-out buttons, and EVV clock-in triggers.',
-    nextStepTitle: 'Step 4: Completed & Rendered Claims Tab',
-    requiredActionText: 'Click the "Completed & Rendered" Tab button above to inspect locked claims.',
-    clinicalRationale: 'Gives RBTs full visibility into weekly assigned cases and 1-tap emergency sick day dispatching.',
+    title: 'Fictional Schedule Grid',
+    elementType: 'SIMULATION SCHEDULE TAB',
+    currentStepExplanation: 'This matrix contains sample sessions, a local call-out form, and a practice-session launch button.',
+    nextStepTitle: 'Step 4: Completed Samples Tab',
+    requiredActionText: 'Choose the "Completed Samples" tab to inspect fictional completed-state cards.',
+    clinicalRationale: 'This demonstrates schedule navigation without clocking in, changing assignments, or contacting dispatch.',
     targetElementId: 'tab-completed-claims'
   },
   {
     stepNumber: 4,
-    title: 'Completed & Rendered Claims Queue',
-    elementType: 'COMPLETED CLAIMS TAB',
-    currentStepExplanation: 'You are now viewing the Completed Claims tab. Sessions shown here are 100% audit-proof, dual-signed by parent and RBT, and locked for EDI 837P insurance claim payout.',
-    nextStepTitle: 'Step 5: Return to Schedule to EVV Clock-In',
-    requiredActionText: 'Click the "Upcoming Schedule" Tab button to locate today\'s session for clock-in.',
-    clinicalRationale: 'Audit-proof claims guarantee zero payer denials and fast reimbursement for Rise & Shine ABA.',
+    title: 'Completed Workflow Samples',
+    elementType: 'SIMULATION COMPLETED TAB',
+    currentStepExplanation: 'These cards are visual examples only. They are not signed notes, verified claims, or proof of reimbursement.',
+    nextStepTitle: 'Step 5: Return to the Sample Schedule',
+    requiredActionText: 'Choose the "Sample Schedule" tab to locate a fictional practice session.',
+    clinicalRationale: 'A completed-state example helps trainees understand the workflow without making payer or audit guarantees.',
     targetElementId: 'tab-upcoming-schedule'
   },
   {
     stepNumber: 5,
-    title: 'Launch Today\'s Session EVV Clock-In',
-    elementType: 'EVV CLOCK-IN BUTTON',
-    currentStepExplanation: 'You are back on the Schedule tab. This green EVV Start Session button validates GPS location and opens the live EMR data collection engine.',
-    nextStepTitle: 'Step 6: Ticking EVV Session Clock',
-    requiredActionText: 'Click "▶️ EVV Start Session Data Collection"',
-    clinicalRationale: '21st Century Cures Act requirement: EVV validates GPS location and exact session start timestamp.',
+    title: 'Launch a Fictional Practice Session',
+    elementType: 'SIMULATION START BUTTON',
+    currentStepExplanation: 'This button opens the in-memory training collector. It does not validate GPS or create an EVV visit.',
+    nextStepTitle: 'Step 6: Local Practice Timer',
+    requiredActionText: 'Choose "Start Practice Session".',
+    clinicalRationale: 'The interaction demonstrates the handoff from schedule to data collection while live EVV remains untouched.',
     targetElementId: 'btn-evv-start-session'
   },
   {
     stepNumber: 6,
-    title: 'Active EVV Session Timer Badge',
-    elementType: 'EVV CLOCK TIMER BADGE',
-    currentStepExplanation: 'You are looking at the Active EVV Clock badge. It tracks ticking session duration and automatically calculates billable CPT 97153 units under 8-minute rounding rules.',
+    title: 'Local Practice Timer',
+    elementType: 'SIMULATION TIMER',
+    currentStepExplanation: 'The local timer demonstrates elapsed-time controls and shows a sample 97153 unit estimate. It is not an EVV clock or billable duration.',
     nextStepTitle: 'Step 7: Procedure 1 - Discrete Trial Training (DTT)',
-    requiredActionText: 'Click the ▶️ Start button on the active EVV clock badge at the top to start session timing.',
-    clinicalRationale: 'EVV timers track exact billable minutes under CPT 97153 8-minute rounding rules.',
+    requiredActionText: 'Choose Start on the practice timer.',
+    clinicalRationale: 'This illustrates timer handling and unit estimation without creating billable time.',
     targetElementId: 'btn-evv-timer-start'
   },
   {
@@ -136,35 +136,37 @@ const SCRIBE_STREAMLINED_STEPS: ScribeStep[] = [
   },
   {
     stepNumber: 12,
-    title: 'Emergency Supervisory Signal & BIP Sheet',
-    elementType: 'SUPERVISORY ALERT & PROTOCOL SHEET',
-    currentStepExplanation: 'You are looking at the BCBA Emergency Signal button and BIP Protocol sheet trigger. This feature alerts your BCBA for live remote supervision during crisis situations.',
-    nextStepTitle: 'Step 13: 1-Tap AI SOAP Note Assistant',
-    requiredActionText: 'Click "🚨 Signal BCBA Supervisor" or "BIP Protocol Sheet"',
-    clinicalRationale: 'Enables instant supervisory alerts during crisis events without leaving the data collection screen.',
+    title: 'Practice Supervisor Signal & Sample BIP',
+    elementType: 'SIMULATION SUPPORT CONTROLS',
+    currentStepExplanation: 'The signal button displays training feedback only; it does not contact a BCBA. The BIP drawer contains fictional reference content.',
+    nextStepTitle: 'Step 13: Practice SOAP Note Builder',
+    requiredActionText: 'Choose "Practice supervisor signal" or open the sample BIP sheet.',
+    clinicalRationale: 'This teaches where support controls appear while making clear that emergencies still require the approved live escalation path.',
     targetElementId: 'btn-signal-bcba'
   },
   {
     stepNumber: 13,
-    title: '1-Tap AI SOAP Note Assistant',
-    elementType: 'CLINICAL QUICK-CHIP ASSISTANT',
-    currentStepExplanation: 'You are looking at the AI SOAP Note Assistant. Tapping clinical quick-chips automatically compiles audit-proof Subjective, Objective, Assessment, and Plan narratives.',
-    nextStepTitle: 'Step 14: Caregiver E-Signature & Claim Submission',
-    requiredActionText: 'Click "+ Alert & Happy" Clinical Quick-Chip',
-    clinicalRationale: 'Quick-chips compile compliant clinical narratives in seconds while preserving accuracy.',
+    title: 'Practice SOAP Note Builder',
+    elementType: 'SIMULATION NARRATIVE HELPER',
+    currentStepExplanation: 'Quick chips replace the fictional draft text so you can practice editing SOAP sections. They do not generate a clinical note.',
+    nextStepTitle: 'Step 14: Finish the Practice Attempt',
+    requiredActionText: 'Choose "+ Alert & Happy" to replace the fictional subjective text.',
+    clinicalRationale: 'Practice chips demonstrate efficient drafting, but the trainee remains responsible for accurate live documentation.',
     targetElementId: 'chip-soap-subjective'
   },
   {
     stepNumber: 14,
-    title: 'Caregiver E-Signature & Claim Payout',
-    elementType: 'CAREGIVER SIGNATURE FIELD',
-    currentStepExplanation: 'You are at the final Caregiver E-Signature input box and Submit trigger. Typing the parent name validates dual-signatures and locks the note for insurance reimbursement.',
-    nextStepTitle: 'Tutorial Completed!',
-    requiredActionText: 'Type "Elena Miller" in Parent Signature box & Click "Submit Audit-Proof Billing Claim"',
-    clinicalRationale: 'Guarantees dual signatures and 5-point audit shield clearance for insurance claim payout.',
-    targetElementId: 'input-parent-signature'
+    title: 'Finish the Practice Attempt',
+    elementType: 'SIMULATION FINISH BUTTON',
+    currentStepExplanation: 'After all six practice checks are complete, the finish button records only training progress. It never signs a note or creates a claim.',
+    nextStepTitle: 'Guide Walkthrough Finished',
+    requiredActionText: 'Complete the remaining practice checks, type the fictional acknowledgment, then choose "Finish Practice Attempt".',
+    clinicalRationale: 'Separating training progress from clinical and billing records prevents a simulated interaction from becoming source-of-truth data.',
+    targetElementId: 'btn-finish-simulation'
   }
 ];
+
+const subscribeToClient = () => () => {};
 
 export function ScribeGuideMeEngine({
   isActive,
@@ -173,12 +175,31 @@ export function ScribeGuideMeEngine({
   onStepChange
 }: ScribeGuideMeEngineProps) {
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
-  const [mounted, setMounted] = useState(false);
+  const mounted = useSyncExternalStore(
+    subscribeToClient,
+    () => true,
+    () => false
+  );
   const [isMinimized, setIsMinimized] = useState(false);
+  const closeGuide = React.useCallback(() => {
+    setCurrentStepIndex(0);
+    setIsMinimized(false);
+    onClose();
+  }, [onClose]);
+  const completeGuide = React.useCallback(() => {
+    setCurrentStepIndex(0);
+    setIsMinimized(false);
+    onGuideComplete();
+  }, [onGuideComplete]);
 
   useEffect(() => {
-    setMounted(true);
-  }, []);
+    if (!isActive) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeGuide();
+    };
+    document.addEventListener('keydown', closeOnEscape);
+    return () => document.removeEventListener('keydown', closeOnEscape);
+  }, [closeGuide, isActive]);
 
   const totalSteps = SCRIBE_STREAMLINED_STEPS.length;
   const currentStep = SCRIBE_STREAMLINED_STEPS[currentStepIndex];
@@ -218,7 +239,7 @@ export function ScribeGuideMeEngine({
       const closestTarget = clickedEl.closest(`[data-scribe-id="${currentStep.targetElementId}"]`);
 
       if (closestTarget) {
-        toast.success(`✓ Step ${currentStep.stepNumber} Complete! ${currentStep.title}`);
+        toast.success(`Guide step ${currentStep.stepNumber} observed: ${currentStep.title}`);
 
         closestTarget.classList.remove(
           'ring-4', 
@@ -233,8 +254,8 @@ export function ScribeGuideMeEngine({
         if (currentStepIndex < totalSteps - 1) {
           setCurrentStepIndex(prev => prev + 1);
         } else {
-          toast.success('🎉 Scribe Interactive Guide Complete! You mastered Rise & Shine ABA Session management!');
-          onGuideComplete();
+          toast.info('Guide walkthrough finished. Training progress is saved only by the practice finish button.');
+          completeGuide();
         }
       }
     };
@@ -257,22 +278,24 @@ export function ScribeGuideMeEngine({
         );
       }
     };
-  }, [isActive, currentStepIndex, currentStep, totalSteps, onGuideComplete, onStepChange]);
+  }, [isActive, currentStepIndex, currentStep, totalSteps, completeGuide, onStepChange]);
 
   if (!isActive) return null;
 
   // MINIMIZED SLEEK FLOATING PILL
   if (isMinimized) {
     const minimizedPill = (
-      <div className="fixed bottom-6 right-6 z-[9999999] animate-fade-in pointer-events-auto select-none">
+      <div className="fixed bottom-6 right-6 z-[9999999] animate-fade-in pointer-events-auto">
         <button
+          type="button"
           onClick={() => setIsMinimized(false)}
+          aria-label={`Expand simulation guide, step ${currentStep.stepNumber} of ${totalSteps}`}
           className="bg-white border-2 border-[#F97316] rounded-full px-4 py-2.5 shadow-2xl flex items-center gap-3 text-slate-900 font-extrabold text-xs hover:bg-orange-50 cursor-pointer transition-all"
         >
           <span className="w-6 h-6 rounded-full bg-[#F97316] text-white flex items-center justify-center font-black text-[10px] font-mono shadow-sm shrink-0">
             {currentStep.stepNumber}
           </span>
-          <span className="max-w-[220px] truncate text-slate-900">🎓 Scribe ({currentStep.stepNumber}/{totalSteps}): {currentStep.title}</span>
+          <span className="max-w-[220px] truncate text-slate-900">Simulation guide ({currentStep.stepNumber}/{totalSteps}): {currentStep.title}</span>
           <Maximize2 className="w-4 h-4 text-[#F97316] shrink-0" />
         </button>
       </div>
@@ -281,9 +304,13 @@ export function ScribeGuideMeEngine({
   }
 
   const cardContent = (
-    <div className="fixed bottom-6 right-6 max-w-md w-full z-[9999999] animate-fade-in pointer-events-auto select-none">
-      {/* 🌟 100% ULTRA-PREMIUM LIGHT MODE CONTAINER */}
-      <div className="bg-white border-4 border-[#F97316] rounded-3xl p-6 shadow-[0_20px_60px_rgba(249,115,22,0.35)] text-slate-900 space-y-4 relative opacity-100">
+    <div className="fixed bottom-6 right-6 max-w-md w-full z-[9999999] animate-fade-in pointer-events-auto">
+      <div
+        role="dialog"
+        aria-modal="false"
+        aria-labelledby="scribe-guide-title"
+        className="bg-white border-4 border-[#F97316] rounded-3xl p-6 shadow-[0_20px_60px_rgba(249,115,22,0.35)] text-slate-900 space-y-4 relative opacity-100"
+      >
         {/* Step Counter Header */}
         <div className="flex items-center justify-between border-b-2 border-orange-100 pb-3">
           <div className="flex items-center gap-2.5">
@@ -292,17 +319,19 @@ export function ScribeGuideMeEngine({
             </span>
             <div>
               <span className="text-[10px] font-mono font-black text-[#F97316] uppercase tracking-widest block">
-                SCRIBE TUTORIAL ({currentStep.stepNumber}/{totalSteps})
+                SIMULATION GUIDE · NO LIVE ACTIONS ({currentStep.stepNumber}/{totalSteps})
               </span>
-              <h4 className="text-sm font-black font-heading text-slate-900">{currentStep.title}</h4>
+              <h4 id="scribe-guide-title" className="text-sm font-black font-heading text-slate-900">{currentStep.title}</h4>
             </div>
           </div>
 
           <div className="flex items-center gap-1.5">
             {/* MINIMIZE BUTTON */}
             <button
+              type="button"
               onClick={() => setIsMinimized(true)}
-              title="Minimize Scribe Tutorial"
+              aria-label="Minimize simulation guide"
+              title="Minimize simulation guide"
               className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 flex items-center justify-center cursor-pointer transition-all"
             >
               <Minimize2 className="w-3.5 h-3.5" />
@@ -310,8 +339,10 @@ export function ScribeGuideMeEngine({
 
             {/* CLOSE BUTTON */}
             <button
-              onClick={onClose}
-              title="Close Scribe Tutorial"
+              type="button"
+              onClick={closeGuide}
+              aria-label="Close simulation guide"
+              title="Close simulation guide"
               className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 flex items-center justify-center cursor-pointer transition-all"
             >
               <X className="w-4 h-4" />
@@ -320,7 +351,14 @@ export function ScribeGuideMeEngine({
         </div>
 
         {/* Progress Bar */}
-        <div className="w-full bg-orange-100 h-2.5 rounded-full overflow-hidden border border-orange-200">
+        <div
+          className="w-full bg-orange-100 h-2.5 rounded-full overflow-hidden border border-orange-200"
+          role="progressbar"
+          aria-label="Simulation guide progress"
+          aria-valuemin={1}
+          aria-valuemax={totalSteps}
+          aria-valuenow={currentStep.stepNumber}
+        >
           <div
             className="bg-[#F97316] h-full transition-all duration-500"
             style={{ width: `${(currentStep.stepNumber / totalSteps) * 100}%` }}
@@ -350,10 +388,9 @@ export function ScribeGuideMeEngine({
           </p>
         </div>
 
-        {/* 🌟 3. CLINICAL RATIONALE BOX */}
         <div className="p-3.5 bg-emerald-50 rounded-2xl border-2 border-emerald-200 text-[11px] text-emerald-950 font-extrabold space-y-1 shadow-sm">
           <span className="text-[10px] font-mono font-black text-emerald-800 uppercase block flex items-center gap-1">
-            <Lightbulb className="w-3.5 h-3.5 text-amber-500" /> CLINICAL RATIONALE
+            <Lightbulb className="w-3.5 h-3.5 text-amber-500" /> WHY THIS MATTERS
           </span>
           <p className="text-emerald-900">{currentStep.clinicalRationale}</p>
         </div>
@@ -361,37 +398,26 @@ export function ScribeGuideMeEngine({
         {/* Navigation Footer */}
         <div className="flex items-center justify-between pt-2 text-xs">
           <button
+            type="button"
             disabled={currentStepIndex === 0}
             onClick={() => setCurrentStepIndex(prev => prev - 1)}
-            className="text-slate-500 hover:text-slate-900 font-bold flex items-center gap-1 disabled:opacity-30 cursor-pointer"
+            className="text-slate-500 hover:text-slate-900 font-bold flex items-center gap-1 disabled:opacity-30 cursor-pointer disabled:cursor-not-allowed"
           >
             <ChevronLeft className="w-4 h-4" /> Prev Step
           </button>
 
           <button
+            type="button"
             onClick={() => {
               if (currentStepIndex < totalSteps - 1) {
                 setCurrentStepIndex(prev => prev + 1);
               } else {
-                onGuideComplete();
+                completeGuide();
               }
             }}
             className="px-3.5 py-1.5 bg-orange-100 border-2 border-orange-300 text-[#F97316] font-black rounded-xl text-xs hover:bg-orange-200 cursor-pointer shadow-sm"
           >
-            Next Step →
-          </button>
-
-          <button
-            onClick={() => {
-              if (currentStepIndex < totalSteps - 1) {
-                setCurrentStepIndex(prev => prev + 1);
-              } else {
-                onGuideComplete();
-              }
-            }}
-            className="text-[#F97316] hover:text-orange-600 font-black flex items-center gap-1 cursor-pointer"
-          >
-            Skip Step <ChevronRight className="w-4 h-4" />
+            {currentStepIndex < totalSteps - 1 ? 'Preview next step →' : 'Finish guide only'}
           </button>
         </div>
       </div>

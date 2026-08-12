@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      # The two schema.prisma copies must never fork (secondary audit L3).
+      - name: Schema parity check
+        run: git diff --no-index --exit-code prisma/schema.prisma packages/db/prisma/schema.prisma
+
+      - name: Generate Prisma client
+        run: npm run db:generate
+
+      - name: Lint
+        # Pre-existing app lint debt; keep visible but non-blocking until cleaned up.
+        run: npm run lint
+        continue-on-error: true
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      # Builds must succeed without real secrets — dummy env only.
+      # Prisma/Supabase clients are instantiated lazily or with placeholders,
+      # so no live DB/Supabase is contacted during `next build`.
+      - name: Build CRM
+        run: npm run build:crm
+        env:
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-anon-key
+          NEXT_PUBLIC_HRM_URL: http://localhost:3001
+          NEXT_PUBLIC_CRM_URL: http://localhost:3000
+
+      - name: Build HRM
+        run: npm run build:hrm
+        env:
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-anon-key
+          NEXT_PUBLIC_HRM_URL: http://localhost:3001
+          NEXT_PUBLIC_CRM_URL: http://localhost:3000

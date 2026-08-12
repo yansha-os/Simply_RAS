@@ -1,149 +1,242 @@
 'use client';
 
 import React from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
-import { Button } from '@/components/ui/Button';
-import { Stethoscope, Calendar, FileText, ArrowRight, CheckCircle2, Clock, Sparkles, Layers, ShieldCheck } from 'lucide-react';
+import { Card, CardContent } from '@/components/ui/Card';
+import {
+  ArrowRight,
+  CalendarClock,
+  ClipboardCheck,
+  FileCheck2,
+  Send,
+  Workflow,
+  type LucideIcon,
+} from 'lucide-react';
 import Link from 'next/link';
-import { AreaChartWidget, BarChartWidget } from '@/components/ui/AnalyticsCharts';
+import ClinicalSupportClient from './ClinicalSupportClient';
+import {
+  buildClinicalSupportQueues,
+  type ClinicalSupportClient as ClinicalSupportClientSummary,
+} from './clinicalSupportWorkflow';
 
-export default function ClinicalSupportDashboard({ clients }: { clients: any[] }) {
-  const docsCrossCheck = clients.filter(c => c.status === 'DOCS_APPROVED_INTAKE').length;
-  const assessmentScheduling = clients.filter(c => c.status === 'PA_APPROVED').length;
-  const reportAssembly = clients.filter(c => c.status === 'ASSESSMENT_SCHEDULED').length;
-  const completedReports = clients.filter(c => c.status === 'REPORT_ASSEMBLED' || c.status === 'ACTIVE').length;
+type DashboardView = 'overview' | 'queue';
+
+type KpiCard = {
+  label: string;
+  detail: string;
+  value: number;
+  icon: LucideIcon;
+  badge: string;
+  styles: {
+    label: string;
+    badge: string;
+    icon: string;
+    hover: string;
+    bar: string;
+  };
+};
+
+export default function ClinicalSupportDashboard({
+  clients,
+  view = 'overview',
+}: {
+  clients: ClinicalSupportClientSummary[];
+  view?: DashboardView;
+}) {
+  const queues = buildClinicalSupportQueues(clients);
+  const kpis: KpiCard[] = [
+    {
+      label: 'Docs to verify',
+      detail: 'Intake-approved packets awaiting clinical review',
+      value: queues.documentReview.length,
+      icon: ClipboardCheck,
+      badge: 'Clinical review',
+      styles: {
+        label: 'text-brand-orange-400',
+        badge:
+          'border-brand-orange-500/20 bg-brand-orange-500/10 text-brand-orange-400',
+        icon:
+          'border-brand-orange-500/20 bg-brand-orange-500/10 text-brand-orange-400',
+        hover: 'hover:border-brand-orange-500/50',
+        bar: 'bg-brand-orange-500',
+      },
+    },
+    {
+      label: 'Assessments to schedule',
+      detail: 'Approved 97151 authorizations needing a real ET date',
+      value: queues.assessmentScheduling.length,
+      icon: CalendarClock,
+      badge: 'PA approved',
+      styles: {
+        label: 'text-amber-400',
+        badge: 'border-amber-500/20 bg-amber-500/10 text-amber-400',
+        icon: 'border-amber-500/20 bg-amber-500/10 text-amber-400',
+        hover: 'hover:border-amber-500/50',
+        bar: 'bg-amber-500',
+      },
+    },
+    {
+      label: 'Reports to assemble',
+      detail: 'Scheduled assessments waiting on plan and signatures',
+      value: queues.reportAssembly.length,
+      icon: FileCheck2,
+      badge: 'Report prep',
+      styles: {
+        label: 'text-cyan-400',
+        badge: 'border-cyan-500/20 bg-cyan-500/10 text-cyan-400',
+        icon: 'border-cyan-500/20 bg-cyan-500/10 text-cyan-400',
+        hover: 'hover:border-cyan-500/50',
+        bar: 'bg-cyan-500',
+      },
+    },
+    {
+      label: 'Ready for Billing',
+      detail: 'Assembled packets awaiting Treatment PA submission',
+      value: queues.billingHandoff.length,
+      icon: Send,
+      badge: 'Plutus handoff',
+      styles: {
+        label: 'text-emerald-400',
+        badge: 'border-emerald-500/20 bg-emerald-500/10 text-emerald-400',
+        icon: 'border-emerald-500/20 bg-emerald-500/10 text-emerald-400',
+        hover: 'hover:border-emerald-500/50',
+        bar: 'bg-emerald-500',
+      },
+    },
+  ];
+  const largestQueue = Math.max(1, ...kpis.map((item) => item.value));
 
   return (
-    <div className="space-y-8 mt-6 pb-12 animate-fade-in-up">
-      {/* Hero Master Clinical Support Command Banner */}
-      <div className="relative overflow-hidden p-8 rounded-3xl bg-gradient-to-r from-zinc-950 via-zinc-900 to-zinc-950 border border-white/10 shadow-2xl backdrop-blur-2xl group">
-        <div className="absolute top-0 right-1/4 w-96 h-96 bg-brand-orange-500/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute bottom-0 left-10 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
+    <div className="mt-6 space-y-8 pb-12 animate-fade-in-up">
+      {view === 'overview' && (
+        <div className="group relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-r from-zinc-950 via-zinc-900 to-zinc-950 p-7 shadow-2xl backdrop-blur-2xl md:p-8">
+          <div className="pointer-events-none absolute right-1/4 top-0 h-96 w-96 rounded-full bg-brand-orange-500/10 blur-3xl" />
+          <div className="pointer-events-none absolute bottom-0 left-10 h-96 w-96 rounded-full bg-cyan-500/10 blur-3xl" />
 
-        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-          <div className="space-y-3">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-brand-orange-500/10 border border-brand-orange-500/20 text-brand-orange-400 font-mono text-[11px] font-bold">
-              <span className="dot-live"></span>
-              <span>CLINICAL SUPPORT COMMAND CENTER • REPORT ASSEMBLY SYNC</span>
+          <div className="relative z-10 flex flex-col justify-between gap-6 lg:flex-row lg:items-center">
+            <div className="space-y-3">
+              <div className="inline-flex items-center gap-2 rounded-full border border-brand-orange-500/20 bg-brand-orange-500/10 px-3 py-1 font-mono text-[11px] font-bold text-brand-orange-400">
+                <span className="dot-live" />
+                <span>CLINICAL SUPPORT · LIVE HANDOFFS</span>
+              </div>
+
+              <h1 className="font-heading text-3xl font-extrabold leading-tight tracking-tight text-white lg:text-4xl">
+                Clinical Support{' '}
+                <span className="bg-gradient-to-r from-brand-orange-400 via-amber-300 to-cyan-300 bg-clip-text text-transparent">
+                  Workflow Command
+                </span>
+              </h1>
+
+              <p className="max-w-2xl text-sm leading-relaxed text-zinc-400">
+                Move each client through one durable handoff at a time: clinical
+                verification, 97151 scheduling in ET, signed report assembly, then
+                Billing&apos;s manual Plutus tracker.
+              </p>
             </div>
-            
-            <h1 className="text-3xl lg:text-4xl font-extrabold text-white font-heading tracking-tight leading-tight">
-              Clinical Support <span className="text-transparent bg-clip-text bg-gradient-to-r from-brand-orange-400 via-amber-300 to-cyan-300">Dashboard &amp; Logistics</span>
-            </h1>
-            
-            <p className="text-sm text-zinc-400 max-w-2xl font-sans leading-relaxed">
-              Supervise clinical document cross-checks, coordinate assessment appointment dates with parents, assemble initial evaluation reports, and route to Billing.
-            </p>
-          </div>
 
+            <Link
+              href="/clinical-support/clients"
+              className="flex h-11 flex-shrink-0 cursor-pointer items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-brand-orange-500 to-orange-600 px-5 text-xs font-bold text-white shadow-[0_0_20px_rgba(255,107,0,0.3)] transition-all hover:scale-105 hover:from-brand-orange-600 hover:to-orange-700"
+            >
+              <span>Open full queue</span>
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
+        {kpis.map((item) => {
+          const Icon = item.icon;
+          return (
+            <Card
+              key={item.label}
+              className={`relative overflow-hidden rounded-2xl border border-white/10 bg-zinc-950/80 shadow-xl backdrop-blur-xl transition-all duration-300 hover:scale-[1.02] ${item.styles.hover}`}
+            >
+              <CardContent className="space-y-4 p-6">
+                <div className="flex items-center justify-between gap-3">
+                  <span
+                    className={`font-mono text-[11px] font-bold uppercase tracking-wider ${item.styles.label}`}
+                  >
+                    {item.label}
+                  </span>
+                  <span
+                    className={`rounded-full border px-2.5 py-1 font-mono text-[9px] font-bold uppercase tracking-wider ${item.styles.badge}`}
+                  >
+                    {item.badge}
+                  </span>
+                </div>
+                <div className="flex items-end justify-between gap-4">
+                  <div>
+                    <h3 className="font-mono text-3xl font-black tracking-tight text-white">
+                      {item.value}
+                    </h3>
+                    <p className="mt-1 text-xs leading-relaxed text-zinc-400">
+                      {item.detail}
+                    </p>
+                  </div>
+                  <div
+                    className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border ${item.styles.icon}`}
+                  >
+                    <Icon className="h-5 w-5" />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+
+      <Card className="overflow-hidden rounded-2xl border border-white/10 bg-zinc-950/70 shadow-2xl backdrop-blur-xl">
+        <CardContent className="p-5 md:p-6">
+          <div className="flex flex-col justify-between gap-3 border-b border-white/5 pb-4 sm:flex-row sm:items-center">
+            <div>
+              <h2 className="flex items-center gap-2 font-heading text-base font-bold text-white">
+                <Workflow className="h-4 w-4 text-cyan-400" />
+                Live workload distribution
+              </h2>
+              <p className="mt-1 text-xs text-zinc-500">
+                Current queue volume only — no forecasted or placeholder metrics.
+              </p>
+            </div>
+            <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-zinc-300">
+              {queues.total} open handoff{queues.total === 1 ? '' : 's'}
+            </span>
+          </div>
+          <div className="mt-5 grid gap-4 lg:grid-cols-4">
+            {kpis.map((item) => (
+              <div key={item.label} className="space-y-2">
+                <div className="flex items-center justify-between gap-2 font-mono text-[10px] font-bold uppercase tracking-wider">
+                  <span className="truncate text-zinc-400">{item.label}</span>
+                  <span className="text-white">{item.value}</span>
+                </div>
+                <div className="h-1.5 overflow-hidden rounded-full bg-zinc-800">
+                  <div
+                    className={`h-full rounded-full transition-all duration-500 ${item.styles.bar}`}
+                    style={{ width: `${(item.value / largestQueue) * 100}%` }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      <ClinicalSupportClient
+        queues={queues}
+        limitPerLane={view === 'overview' ? 3 : undefined}
+      />
+
+      {view === 'overview' && queues.total > 0 && (
+        <div className="flex justify-center">
           <Link
             href="/clinical-support/clients"
-            className="bg-gradient-to-r from-brand-orange-500 to-orange-600 hover:from-brand-orange-600 hover:to-orange-700 text-white font-bold text-xs px-5 h-11 rounded-xl shadow-[0_0_20px_rgba(255,107,0,0.3)] transition-all hover:scale-105 cursor-pointer flex items-center justify-center gap-2 flex-shrink-0"
+            className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-white/10 bg-zinc-950/70 px-4 py-2.5 text-xs font-bold text-zinc-300 transition-all duration-300 hover:border-brand-orange-500/40 hover:text-white"
           >
-            <span>View All Clinical Clients</span>
-            <ArrowRight className="w-4 h-4" />
+            Review every open handoff
+            <ArrowRight className="h-3.5 w-3.5" />
           </Link>
         </div>
-      </div>
-
-      {/* 4 Clinical Support KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
-        <Card className="relative overflow-hidden bg-zinc-950/80 backdrop-blur-xl border border-white/10 shadow-xl rounded-2xl transition-all duration-300 hover:scale-[1.02] hover:border-brand-orange-500/50">
-          <CardContent className="p-6 space-y-4">
-            <div className="flex justify-between items-center">
-              <span className="text-xs font-mono font-bold text-brand-orange-400 uppercase tracking-wider">DOCS TO CHECK</span>
-              <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-brand-orange-500/10 text-brand-orange-400 border border-brand-orange-500/20">
-                PENDING
-              </span>
-            </div>
-
-            <div>
-              <h3 className="text-3xl font-black text-white font-mono tracking-tight">{docsCrossCheck}</h3>
-              <p className="text-xs text-zinc-400 mt-1">Intake Packets Awaiting Verification</p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="relative overflow-hidden bg-zinc-950/80 backdrop-blur-xl border border-white/10 shadow-xl rounded-2xl transition-all duration-300 hover:scale-[1.02] hover:border-amber-500/50">
-          <CardContent className="p-6 space-y-4">
-            <div className="flex justify-between items-center">
-              <span className="text-xs font-mono font-bold text-amber-400 uppercase tracking-wider">TO SCHEDULE</span>
-              <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                PA APPROVED
-              </span>
-            </div>
-
-            <div>
-              <h3 className="text-3xl font-black text-white font-mono tracking-tight">{assessmentScheduling}</h3>
-              <p className="text-xs text-zinc-400 mt-1">Assessments Awaiting Appointment Date</p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="relative overflow-hidden bg-zinc-950/80 backdrop-blur-xl border border-white/10 shadow-xl rounded-2xl transition-all duration-300 hover:scale-[1.02] hover:border-cyan-500/50">
-          <CardContent className="p-6 space-y-4">
-            <div className="flex justify-between items-center">
-              <span className="text-xs font-mono font-bold text-cyan-400 uppercase tracking-wider">TO ASSEMBLE</span>
-              <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
-                REPORT PREP
-              </span>
-            </div>
-
-            <div>
-              <h3 className="text-3xl font-black text-white font-mono tracking-tight">{reportAssembly}</h3>
-              <p className="text-xs text-zinc-400 mt-1">Evaluations Under Report Assembly</p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="relative overflow-hidden bg-zinc-950/80 backdrop-blur-xl border border-white/10 shadow-xl rounded-2xl transition-all duration-300 hover:scale-[1.02] hover:border-emerald-500/50">
-          <CardContent className="p-6 space-y-4">
-            <div className="flex justify-between items-center">
-              <span className="text-xs font-mono font-bold text-emerald-400 uppercase tracking-wider">COMPLETED</span>
-              <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                ROUTED TO TX
-              </span>
-            </div>
-
-            <div>
-              <h3 className="text-3xl font-black text-white font-mono tracking-tight">{completedReports}</h3>
-              <p className="text-xs text-zinc-400 mt-1">Reports Assembled &amp; Routed to Billing</p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Interactive Analytics Graphs */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2">
-          <AreaChartWidget
-            title="Monthly Clinical Report Assembly Velocity"
-            subtitle="Real-time volume curve of completed BCBA evaluation reports"
-            color="#06B6D4"
-            data={[
-              { label: 'Jan', value: 8 },
-              { label: 'Feb', value: 14 },
-              { label: 'Mar', value: 22 },
-              { label: 'Apr', value: 29 },
-              { label: 'May', value: 38 },
-              { label: 'Jun', value: 46 },
-              { label: 'Jul', value: completedReports || 52 },
-            ]}
-          />
-        </div>
-
-        <div>
-          <BarChartWidget
-            title="Clinical Logistics SLA Breakdown"
-            subtitle="Turnaround times across clinical support workflow stages"
-            data={[
-              { label: 'Docs Verification (&lt;24h)', value: docsCrossCheck || 12, color: '#FF7A45' },
-              { label: 'Assessment Scheduling (&lt;48h)', value: assessmentScheduling || 8, color: '#F59E0B' },
-              { label: 'Report Assembly (&lt;72h)', value: reportAssembly || 15, color: '#06B6D4' },
-            ]}
-          />
-        </div>
-      </div>
+      )}
     </div>
   );
 }

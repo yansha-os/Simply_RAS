@@ -1,6 +1,6 @@
 /**
  * Native EDI X12 835 Electronic Remittance Advice (ERA) Parser & Auto-Posting Engine
- * Replacing Artemis Billing
+ * P3-optional stub — MVP billing stays manual Plutus tracker (no EDI).
  */
 
 export interface RemittanceClaimResult {
@@ -72,36 +72,6 @@ export function parseX12_835_ERA(rawEdi835Text: string): RemittanceClaimResult[]
     results.push(currentClaim);
   }
 
-  // Fallback demo mock if raw text is empty/preview
-  if (results.length === 0) {
-    return [
-      {
-        claimId: 'CLM-98214',
-        patientName: 'Lucas Vance',
-        billedAmount: 320.0,
-        paidAmount: 320.0,
-        status: 'PAID',
-      },
-      {
-        claimId: 'CLM-98215',
-        patientName: 'Maya Lin',
-        billedAmount: 480.0,
-        paidAmount: 0.0,
-        status: 'DENIED',
-        denialReasonCode: '197',
-        denialDescription: 'Precertification/prior authorization/notification absent.',
-      },
-      {
-        claimId: 'CLM-98216',
-        patientName: 'Ethan Wright',
-        billedAmount: 240.0,
-        paidAmount: 180.0,
-        status: 'PARTIAL',
-        denialReasonCode: '96',
-        denialDescription: 'Payer fee schedule adjustment applied.',
-      },
-    ];
-  }
-
+  // No sample remittance fallback — empty input returns [] (manual Plutus is SoT).
   return results;
 }

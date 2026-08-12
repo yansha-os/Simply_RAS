@@ -3,17 +3,44 @@
 import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { Activity, Play, Square, Plus, CheckCircle2, Clock, ShieldCheck, PenTool, Send, FileText, Lock } from 'lucide-react';
+import { Activity, Play, Square, CheckCircle2, ShieldCheck, Send, FileText, Lock } from 'lucide-react';
 import { toast } from 'sonner';
+
+type DeidentifiedClientContext = {
+  deidentifiedName: string;
+  childAge: number;
+  cptCode: string;
+  location: string;
+};
+
+type SkillTarget = {
+  id: string;
+  name: string;
+  domain: string;
+  trials: {
+    independent: number;
+    prompted: number;
+    total: number;
+  };
+};
+
+type BehaviorSummary = {
+  id: string;
+  name: string;
+  count: number;
+  durationMinutes: number;
+};
 
 export default function RbtDeidentifiedSessionView() {
   // Session State
   const [sessionActive, setSessionActive] = useState(false);
   const [sessionTimeSeconds, setSessionTimeSeconds] = useState(0);
-  const [timerInterval, setTimerInterval] = useState<any>(null);
+  const [timerInterval, setTimerInterval] = useState<ReturnType<typeof window.setInterval> | null>(
+    null
+  );
 
   // De-identified Client Context (ZERO PHI)
-  const clientContext = {
+  const clientContext: DeidentifiedClientContext = {
     deidentifiedName: 'Liam M.',
     childAge: 4,
     cptCode: '97153 (Adaptive Behavior Tx)',
@@ -21,14 +48,14 @@ export default function RbtDeidentifiedSessionView() {
   };
 
   // Skill Acquisition Targets
-  const [targets, setTargets] = useState([
+  const [targets, setTargets] = useState<SkillTarget[]>([
     { id: '1', name: 'Expressive Identification (Objects)', domain: 'Mand/Tact', trials: { independent: 5, prompted: 2, total: 7 } },
     { id: '2', name: 'Receptive Instruction Following', domain: 'Listener Responding', trials: { independent: 8, prompted: 1, total: 9 } },
     { id: '3', name: 'Peer Social Turn-Taking', domain: 'Social Skills', trials: { independent: 3, prompted: 4, total: 7 } },
   ]);
 
   // Behavior Reduction (BRP) Counters
-  const [behaviors, setBehaviors] = useState([
+  const [behaviors, setBehaviors] = useState<BehaviorSummary[]>([
     { id: 'b1', name: 'Tantrum / Crying', count: 2, durationMinutes: 4 },
     { id: 'b2', name: 'Elopement', count: 0, durationMinutes: 0 },
   ]);

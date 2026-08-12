@@ -1,6 +1,6 @@
 /**
  * Native EDI X12 837P Claim Payload Generator & Clearinghouse Engine
- * Replacing Artemis Billing
+ * P3-optional stub — MVP billing stays manual Plutus tracker (no EDI).
  */
 
 export interface ClaimLineInput {
@@ -34,16 +34,13 @@ export function calculateBillingUnits(durationMinutes: number, rule: 'MEDICAID_8
     return Math.floor(durationMinutes / 15);
   }
 
-  // Medicaid 8-Minute Rule Table
+  // Medicaid 8-minute rule, closed form. Matches the CMS tier table at every
+  // boundary (8–22 → 1, 23–37 → 2, …) and keeps counting past 97 min, where the
+  // old hard-coded table fell back to floor(min/15) and undercounted 98–104 min
+  // sessions by one unit. Must stay identical to HRM's
+  // `billableUnitsFromSeconds` (apps/hrm/src/lib/sessionStudio.ts).
   if (durationMinutes < 8) return 0;
-  if (durationMinutes >= 8 && durationMinutes <= 22) return 1;
-  if (durationMinutes >= 23 && durationMinutes <= 37) return 2;
-  if (durationMinutes >= 38 && durationMinutes <= 52) return 3;
-  if (durationMinutes >= 53 && durationMinutes <= 67) return 4;
-  if (durationMinutes >= 68 && durationMinutes <= 82) return 5;
-  if (durationMinutes >= 83 && durationMinutes <= 97) return 6;
-
-  return Math.floor(durationMinutes / 15);
+  return Math.floor((durationMinutes + 7) / 15);
 }
 
 /**

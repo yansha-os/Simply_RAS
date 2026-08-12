@@ -1,63 +1,19 @@
 'use server'
 
-import { prisma } from '@/lib/prisma'
-import { revalidatePath } from 'next/cache'
+import { requireStaff, CASE_COORD_ROLES } from '@/lib/auth-guard'
 
-export async function assignStaff(prevState: any, formData: FormData) {
-  try {
-    const clientId = String(formData.get('clientId'))
-    const rbtId = String(formData.get('rbtId'))
-    const bcbaId = String(formData.get('bcbaId'))
+export async function assignStaff(prevState: unknown, formData: FormData) {
+  const gate = await requireStaff(CASE_COORD_ROLES)
+  if (!gate.ok) return { error: gate.error }
 
-    if (!clientId || !rbtId || !bcbaId) {
-      return { error: 'Both RBT and BCBA must be assigned.' }
-    }
-
-    await prisma.client.update({
-      where: { id: clientId },
-      data: {
-        rbtId,
-        bcbaId
-      }
-    })
-
-    revalidatePath('/case')
-    return { success: true }
-  } catch (error) {
-    console.error(error)
-    return { error: 'Failed to assign staff.' }
-  }
-}
-
-export async function activateClient(clientId: string) {
-  try {
-    await prisma.client.update({
-      where: { id: clientId },
-      data: { status: 'ACTIVE' }
-    })
-    
-    revalidatePath('/case')
-    return { success: true }
-  } catch (error) {
-    console.error(error)
-    return { error: 'Failed to activate client.' }
-  }
-}
-
-export async function collectSignature(noteId: string, signerType: 'PARENT' | 'BCBA') {
-  try {
-    const dataToUpdate = signerType === 'PARENT' ? { parentSigned: true } : { bcbaSigned: true }
-
-    await prisma.sessionNote.update({
-      where: { id: noteId },
-      data: dataToUpdate
-    })
-
-    revalidatePath('/case')
-    revalidatePath('/notes')
-    return { success: true }
-  } catch (error) {
-    console.error(error)
-    return { error: 'Failed to collect signature.' }
+  // Retained only as a compatibility facade for the legacy Case Pipeline form.
+  // Caller-selected RBT/BCBA IDs are no longer accepted here: RBT assignment is
+  // established by the audited CaseOpening parent-decision transaction, and
+  // BCBA assignment is owned by the expected-current Clinical action.
+  void prevState
+  void formData
+  return {
+    error:
+      'Direct staff assignment is disabled. Assign the BCBA in Clinical and the RBT through Job Board parent acceptance.',
   }
 }

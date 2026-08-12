@@ -1,94 +1,265 @@
 'use client';
 
-import React, { useState, useEffect, Suspense } from 'react';
+import React, {
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  Suspense,
+} from 'react';
 import { useRouter } from 'next/navigation';
 import { createPortal } from 'react-dom';
 import { RbtScheduleView } from '@/components/rbt/RbtScheduleView';
 import { RbtDataCollectionEngine } from '@/components/emr/RbtDataCollectionEngine';
 import { ScribeGuideMeEngine } from '@/components/emr/ScribeGuideMeEngine';
+import {
+  completionScopeForPersistResult,
+  type SimulationCompletionScope,
+} from '@/components/emr/rbtSimulationTraining';
 import { Button } from '@/components/ui/Button';
 import { toast } from 'sonner';
-import { Sparkles, CheckCircle2, ArrowRight, Play, Trophy, Calendar, BookOpen, Lock, Unlock } from 'lucide-react';
+import {
+  ArrowRight,
+  CheckCircle2,
+  Database,
+  Loader2,
+  Monitor,
+  RotateCcw,
+  ShieldCheck,
+  Sparkles,
+} from 'lucide-react';
+
+const LOCAL_ATTEMPT_KEY = 'ras_rbt_simulation_local_attempt';
+const subscribeToClient = () => () => {};
 
 function SimulationContent() {
   const router = useRouter();
   const [activeView, setActiveView] = useState<'SCHEDULE_PRACTICE' | 'EMR_PRACTICE'>('SCHEDULE_PRACTICE');
   const [isGuideStarted, setIsGuideStarted] = useState(false);
-  const [simCompleted, setSimCompleted] = useState(false);
+  const [completionScope, setCompletionScope] = useState<SimulationCompletionScope | null>(null);
   const [showTutorialPromptModal, setShowTutorialPromptModal] = useState(false);
-  const [showCelebrationModal, setShowCelebrationModal] = useState(false);
-  const [mounted, setMounted] = useState(false);
+  const mounted = useSyncExternalStore(
+    subscribeToClient,
+    () => true,
+    () => false
+  );
+  const [isHydrating, setIsHydrating] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [attemptKey, setAttemptKey] = useState(0);
+  const tutorialStartRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    setMounted(true);
-    const done = localStorage.getItem('ras_rbt_sim_completed') === 'true' || localStorage.getItem('ras_rbt_simulation_completed') === 'true';
-    if (done) {
-      setSimCompleted(true);
-    } else {
-      // Auto-trigger interactive tutorial prompt modal for new applicants
-      setShowTutorialPromptModal(true);
-    }
+    let cancelled = false;
+
+    const hydrateProgress = async () => {
+      try {
+        const { loadAtsProgress } = await import('@/lib/syncAtsProgress');
+        const data = await loadAtsProgress();
+        if (cancelled) return;
+
+        if (data?.simulationDone) {
+          setCompletionScope('PERSISTED');
+          sessionStorage.removeItem(LOCAL_ATTEMPT_KEY);
+        } else if (sessionStorage.getItem(LOCAL_ATTEMPT_KEY) === 'complete') {
+          setCompletionScope('LOCAL_SESSION');
+        } else {
+          setShowTutorialPromptModal(true);
+        }
+      } catch {
+        if (cancelled) return;
+        if (sessionStorage.getItem(LOCAL_ATTEMPT_KEY) === 'complete') {
+          setCompletionScope('LOCAL_SESSION');
+        } else {
+          setShowTutorialPromptModal(true);
+        }
+      } finally {
+        if (!cancelled) setIsHydrating(false);
+      }
+    };
+
+    void hydrateProgress();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const handleSimDone = () => {
-    setSimCompleted(true);
+  useEffect(() => {
+    if (!showTutorialPromptModal) return;
+    tutorialStartRef.current?.focus();
+
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setShowTutorialPromptModal(false);
+    };
+    document.addEventListener('keydown', closeOnEscape);
+    return () => document.removeEventListener('keydown', closeOnEscape);
+  }, [showTutorialPromptModal]);
+
+  const persistAttempt = async (): Promise<SimulationCompletionScope> => {
+    // There is no durable assessment-attempt record yet, so practice cannot
+    // satisfy the evidence-derived onboarding requirement.
+    const scope = completionScopeForPersistResult(false);
+    sessionStorage.setItem(LOCAL_ATTEMPT_KEY, 'complete');
+    return scope;
+  };
+
+  const handleSimDone = async () => {
+    if (isSaving) return;
+    setIsSaving(true);
+    const scope = await persistAttempt();
+    setCompletionScope(scope);
     setIsGuideStarted(false);
-    localStorage.setItem('ras_rbt_sim_completed', 'true');
-    localStorage.setItem('ras_rbt_simulation_completed', 'true');
+    setIsSaving(false);
 
-    const activeId = localStorage.getItem('ras_active_impersonated_applicant_id') || localStorage.getItem('ras_active_applicant_id');
-    const activeEmail = localStorage.getItem('ras_active_impersonated_applicant_email');
-    if (activeId) {
-      localStorage.setItem(`ras_rbt_sim_completed_${activeId}`, 'true');
+    if (scope === 'PERSISTED') {
+      toast.success('Training walkthrough saved to your onboarding record.');
+    } else {
+      toast.info('Practice attempt saved only for this browser tab; onboarding was not updated.');
     }
-    if (activeEmail) {
-      localStorage.setItem(`ras_rbt_sim_completed_${activeEmail.toLowerCase().trim()}`, 'true');
-    }
+  };
 
-    window.dispatchEvent(new Event('rbt_sim_changed'));
-    window.dispatchEvent(new Event('simulationCompleted'));
-    window.dispatchEvent(new Event('storage'));
-    setShowCelebrationModal(true);
+  const handleRetryPersist = async () => {
+    if (isSaving) return;
+    setIsSaving(true);
+    const scope = await persistAttempt();
+    setCompletionScope(scope);
+    setIsSaving(false);
+    if (scope === 'PERSISTED') {
+      toast.success('Onboarding progress is now saved.');
+    } else {
+      toast.error('Still unable to bind this attempt to an onboarding record.');
+    }
+  };
+
+  const resetPracticeWorkspace = () => {
+    const hadPersistedCompletion = completionScope === 'PERSISTED';
+    sessionStorage.removeItem(LOCAL_ATTEMPT_KEY);
+    setCompletionScope(null);
+    setActiveView('SCHEDULE_PRACTICE');
+    setIsGuideStarted(false);
+    setShowTutorialPromptModal(false);
+    setAttemptKey((current) => current + 1);
+    toast.info(
+      hadPersistedCompletion
+        ? 'Practice workspace reset. Your saved onboarding record was not changed.'
+        : 'Practice workspace reset. Unsaved, tab-only progress was cleared.'
+    );
   };
 
   const handleStartTutorial = () => {
     setShowTutorialPromptModal(false);
+    setActiveView('SCHEDULE_PRACTICE');
     setIsGuideStarted(true);
-    toast.success('🚀 Interactive Practice Tutorial Started! Follow Scribe live visual guidance.');
+    toast.info('Guided practice started. Highlighted actions use fictional training data.');
   };
 
-  if (simCompleted) {
+  if (isHydrating) {
     return (
-      <div className="max-w-2xl mx-auto py-12 px-6 text-center select-none space-y-6 animate-fade-in">
-        <div className="bg-white border-4 border-emerald-300 rounded-3xl p-8 sm:p-10 shadow-2xl space-y-6">
-          <div className="w-20 h-20 rounded-3xl bg-emerald-100 border-2 border-emerald-300 text-emerald-700 flex items-center justify-center mx-auto shadow-md">
-            <CheckCircle2 className="w-10 h-10 text-emerald-600" />
+      <div
+        className="mx-auto flex max-w-2xl items-center justify-center gap-3 rounded-3xl border border-white/10 bg-slate-950/95 px-8 py-16 text-slate-200 shadow-2xl"
+        role="status"
+        aria-live="polite"
+      >
+        <Loader2 className="h-5 w-5 animate-spin text-orange-400" aria-hidden="true" />
+        <span className="text-sm font-black">Checking saved training progress…</span>
+      </div>
+    );
+  }
+
+  if (completionScope) {
+    const isPersisted = completionScope === 'PERSISTED';
+    return (
+      <div className="relative mx-auto max-w-3xl overflow-hidden rounded-[2rem] border border-white/10 bg-slate-950/95 px-6 py-10 text-center text-white shadow-2xl sm:px-10">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(249,115,22,0.18),_transparent_48%)]" />
+        <div className="relative space-y-7">
+          <div className={`mx-auto flex h-20 w-20 items-center justify-center rounded-3xl border shadow-2xl ${
+            isPersisted
+              ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300'
+              : 'border-amber-400/30 bg-amber-400/10 text-amber-300'
+          }`}>
+            {isPersisted ? (
+              <Database className="h-9 w-9" aria-hidden="true" />
+            ) : (
+              <Monitor className="h-9 w-9" aria-hidden="true" />
+            )}
           </div>
 
           <div className="space-y-2">
-            <span className="bg-emerald-100 text-emerald-800 border border-emerald-300 text-[10px] font-mono font-black px-3.5 py-1 rounded-full uppercase tracking-wider">
-              ✓ REQUIREMENT COMPLETED
+            <span className={`inline-flex rounded-full border px-3.5 py-1 font-mono text-[10px] font-black uppercase tracking-wider ${
+              isPersisted
+                ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300'
+                : 'border-amber-400/30 bg-amber-400/10 text-amber-300'
+            }`}>
+              {isPersisted ? 'Onboarding progress saved' : 'Local browser-session attempt'}
             </span>
-            <h2 className="text-2xl font-black font-heading text-slate-900 tracking-tight">
-              ABA Clinical Trial Simulator Passed (10/10 Accuracy)
-            </h2>
-            <p className="text-xs text-slate-600 font-semibold max-w-lg mx-auto leading-relaxed">
-              Great job! You have successfully completed your mandatory ABA Data Collection Simulation. This requirement is complete. Please finish any remaining onboarding tasks on your <strong>My Tasks</strong> page.
+            <h1 className="font-heading text-3xl font-black tracking-tight text-white">
+              {isPersisted
+                ? 'Training walkthrough recorded'
+                : 'Practice finished, but onboarding was not updated'}
+            </h1>
+            <p className="mx-auto max-w-xl text-sm font-semibold leading-relaxed text-slate-300">
+              {isPersisted
+                ? 'Your applicant record now shows this practice walkthrough as complete. This records participation only; it is not a clinical competency score or an accuracy certification.'
+                : 'This result exists only in this browser tab because no applicant record could be bound. It does not satisfy onboarding until the attempt is saved to your applicant record.'}
             </p>
           </div>
 
-          <div className="flex flex-col sm:flex-row justify-center gap-3 pt-2">
-            <button
-              onClick={() => router.push('/rbt')}
-              className="bg-[#F97316] hover:bg-orange-600 text-white font-black text-xs px-6 py-3.5 rounded-2xl shadow-xl cursor-pointer transition-all flex items-center justify-center gap-2"
+          <div className="mx-auto grid max-w-xl gap-3 text-left sm:grid-cols-2">
+            <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/5 p-4">
+              <span className="flex items-center gap-2 font-mono text-[10px] font-black uppercase text-emerald-300">
+                <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+                Training boundary
+              </span>
+              <p className="mt-2 text-xs font-semibold leading-relaxed text-slate-300">
+                No client chart, EVV record, session note, authorization balance, claim, or payroll row was created.
+              </p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+              <span className="font-mono text-[10px] font-black uppercase text-slate-300">
+                Reset behavior
+              </span>
+              <p className="mt-2 text-xs font-semibold leading-relaxed text-slate-300">
+                Starting another attempt clears practice inputs. A saved onboarding record remains unchanged.
+              </p>
+            </div>
+          </div>
+
+          {!isPersisted && (
+            <div
+              className="mx-auto max-w-xl rounded-2xl border border-amber-400/30 bg-amber-400/10 p-4 text-left"
+              role="status"
             >
-              <span>Go to My Tasks &amp; Complete Requirements →</span>
+              <p className="text-xs font-bold text-amber-100">
+                Sign in or restore your applicant device session, then retry saving this attempt.
+              </p>
+            </div>
+          )}
+
+          <div className="flex flex-col justify-center gap-3 pt-1 sm:flex-row">
+            {!isPersisted && (
+              <button
+                type="button"
+                onClick={handleRetryPersist}
+                disabled={isSaving}
+                className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-6 py-3.5 text-xs font-black text-slate-950 shadow-xl transition-all hover:scale-[1.01] hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isSaving && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+                Retry onboarding save
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => router.push('/rbt')}
+              className="inline-flex cursor-pointer items-center justify-center rounded-2xl bg-orange-500 px-6 py-3.5 text-xs font-black text-white shadow-xl transition-all hover:scale-[1.01] hover:bg-orange-400"
+            >
+              Go to My Tasks
             </button>
             <button
-              onClick={() => setSimCompleted(false)}
-              className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs px-5 py-3.5 rounded-2xl cursor-pointer transition-all"
+              type="button"
+              onClick={resetPracticeWorkspace}
+              className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-white/15 bg-white/5 px-5 py-3.5 text-xs font-bold text-slate-200 transition-all hover:border-orange-400/40 hover:bg-white/10"
             >
-              Re-Take Practice Simulation
+              <RotateCcw className="h-4 w-4" aria-hidden="true" />
+              Start another attempt
             </button>
           </div>
         </div>
@@ -97,173 +268,152 @@ function SimulationContent() {
   }
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6 pb-12 text-slate-900 select-none relative">
-      {/* HEADER BAR WITH PROMPT BANNER */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-[#F0F7FF] border-2 border-[#BFDBFE] p-5 rounded-3xl shadow-md">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-[#F97316] text-white flex items-center justify-center font-bold shadow-md">
-            <Sparkles className="w-5 h-5 animate-spin" />
+    <div className="relative mx-auto max-w-5xl space-y-6 pb-12 text-slate-900">
+      <section className="relative overflow-hidden rounded-3xl border border-white/10 bg-slate-950/95 p-5 text-white shadow-2xl">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(249,115,22,0.2),_transparent_48%)]" />
+        <div className="relative flex flex-col justify-between gap-5 lg:flex-row lg:items-center">
+          <div className="flex items-start gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-orange-400/30 bg-orange-400/10 text-orange-300 shadow-lg">
+              <Sparkles className="h-5 w-5" aria-hidden="true" />
+            </div>
+            <div>
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <span className="rounded-full border border-orange-400/30 bg-orange-400/10 px-2.5 py-1 font-mono text-[10px] font-black uppercase tracking-wider text-orange-300">
+                  Simulation · fictional records
+                </span>
+                <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2.5 py-1 font-mono text-[10px] font-black uppercase tracking-wider text-emerald-300">
+                  No clinical or billing writes
+                </span>
+              </div>
+              <h1 className="font-heading text-xl font-black tracking-tight text-white">
+                RBT Session Workflow Training Lab
+              </h1>
+              <p className="mt-1 max-w-2xl text-xs font-semibold leading-relaxed text-slate-300">
+                Practice schedule navigation and five data-entry procedures with sample people and sample values. Only the onboarding completion flag is saved—and only after all training checks are met.
+              </p>
+            </div>
           </div>
-          <div>
-            <h2 className="text-base font-black text-slate-900 font-heading">
-              Rise &amp; Shine ABA Data Simulation &amp; Session Management Hub
-            </h2>
-            <p className="text-[#F97316] font-bold text-xs mt-1">
-              Interactive EMR &amp; Billing Practice Engine · Master Active EVV Clocks, Incomplete Audits, and 5 ABA Procedures
-            </p>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              onClick={handleStartTutorial}
+              variant="outline"
+              className="cursor-pointer rounded-2xl border border-orange-400/40 bg-orange-400/10 px-4 py-2.5 text-xs font-black text-orange-200 shadow-lg hover:bg-orange-400/20"
+            >
+              <Sparkles className="h-4 w-4" aria-hidden="true" />
+              Guided practice
+            </Button>
+            <button
+              type="button"
+              onClick={resetPracticeWorkspace}
+              className="inline-flex cursor-pointer items-center gap-2 rounded-2xl border border-white/15 bg-white/5 px-4 py-2.5 text-xs font-black text-slate-200 transition-all hover:border-orange-400/40 hover:bg-white/10"
+            >
+              <RotateCcw className="h-4 w-4" aria-hidden="true" />
+              Reset attempt
+            </button>
+            <span
+              className={`rounded-full border px-3 py-1.5 font-mono text-[10px] font-black uppercase tracking-wide ${
+                isGuideStarted
+                  ? 'border-sky-400/30 bg-sky-400/10 text-sky-300'
+                  : 'border-white/10 bg-white/5 text-slate-300'
+              }`}
+              role="status"
+              aria-live="polite"
+            >
+              {isGuideStarted ? 'Guide active' : 'Practice mode'}
+            </span>
           </div>
         </div>
+      </section>
 
-        <div className="flex items-center gap-3">
-          <Button
-            onClick={handleStartTutorial}
-            variant="outline"
-            className="bg-orange-50 hover:bg-orange-100 text-[#F97316] border-2 border-[#F97316] font-black text-xs px-4 py-2 rounded-2xl flex items-center gap-2 cursor-pointer shadow-md"
-          >
-            <Sparkles className="w-4 h-4 text-[#F97316] animate-pulse" />
-            <span>Scribe Tutorial Engine</span>
-          </Button>
-
-          <span className="px-3.5 py-1.5 rounded-full text-xs font-black uppercase tracking-wide border shadow-sm bg-orange-100 text-[#F97316] border-orange-300">
-            TUTORIAL IN PROGRESS
-          </span>
-        </div>
-      </div>
-
-      {/* PRIMARY VIEW: EXACT REPLICA OF THE SCHEDULE & SESSION HUB */}
       {activeView === 'SCHEDULE_PRACTICE' ? (
         <RbtScheduleView
+          key={`schedule-${attemptKey}`}
           mode="SIMULATION"
           onStartEvvClick={() => setActiveView('EMR_PRACTICE')}
         />
       ) : (
         <RbtDataCollectionEngine
+          key={`collector-${attemptKey}`}
           mode="SIMULATION"
           onSimulationComplete={handleSimDone}
         />
       )}
 
-      {/* 🚀 HANDS-ON SCRIBE GUIDE ME ENGINE */}
       <ScribeGuideMeEngine
+        key={`guide-${attemptKey}`}
         isActive={isGuideStarted}
         onClose={() => setIsGuideStarted(false)}
-        onGuideComplete={handleSimDone}
+        onGuideComplete={() => {
+          setIsGuideStarted(false);
+          toast.info('Guide finished. Complete all training checks and submit the practice note to save progress.');
+        }}
       />
 
-      {/* 🌟 CELEBRATION MODAL (ON TUTORIAL COMPLETION) */}
-      {mounted && showCelebrationModal && createPortal(
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[9999999] flex items-center justify-center p-4">
-          <div className="bg-white border-4 border-[#F97316] rounded-3xl max-w-lg w-full p-8 space-y-6 shadow-[0_20px_60px_rgba(249,115,22,0.4)] text-slate-900 animate-fade-in text-center relative z-[10000000]">
-            <div className="w-20 h-20 rounded-3xl bg-gradient-to-tr from-amber-400 to-[#F97316] text-white flex items-center justify-center font-bold mx-auto shadow-2xl animate-bounce">
-              <Trophy className="w-10 h-10 text-yellow-100" />
-            </div>
-
-            <div className="space-y-2">
-              <span className="bg-emerald-100 text-emerald-800 border border-emerald-300 text-[10px] font-mono font-black px-3 py-1 rounded-full uppercase tracking-wider">
-                ✓ ONBOARDING REQUIREMENT MET
-              </span>
-              <h3 className="text-2xl font-black font-heading text-slate-900 tracking-tight">
-                🎉 Congratulations! You Completed the Simple Data Simulation!
-              </h3>
-              <p className="text-xs text-slate-600 font-semibold leading-relaxed">
-                You have successfully completed one of your mandatory Rise &amp; Shine ABA onboarding requirements.
-              </p>
-            </div>
-
-            {/* UNLOCKED SCHEDULE TAB BADGE */}
-            <div className="p-4 bg-emerald-50 rounded-2xl border-2 border-emerald-200 text-xs text-left space-y-1 text-emerald-950 shadow-sm">
-              <span className="font-mono font-black text-emerald-800 uppercase text-[10px] flex items-center gap-1">
-                <Unlock className="w-4 h-4 text-emerald-600" /> MY SCHEDULE TAB UNLOCKED
-              </span>
-              <p className="font-extrabold text-slate-800">
-                You now have full access to your official <strong>My Schedule &amp; Calendar</strong> tab in your navigation menu!
-              </p>
-            </div>
-
-            {/* VIDEO RESOURCES REFRESHER BOX */}
-            <div className="p-4 bg-orange-50 rounded-2xl border-2 border-orange-200 text-xs text-left space-y-1 text-slate-900 shadow-sm">
-              <span className="font-mono font-black text-[#F97316] uppercase text-[10px] flex items-center gap-1">
-                <BookOpen className="w-4 h-4 text-[#F97316]" /> NEED A REFRESHER LATER?
-              </span>
-              <p className="font-bold text-slate-700">
-                If you ever need more information or video guides on how to complete session notes and data collection, check out the <strong>Resources tab</strong> anytime!
-              </p>
-            </div>
-
-            <div className="pt-2 flex flex-col sm:flex-row gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowCelebrationModal(false);
-                  router.push('/rbt/resources');
-                }}
-                className="w-full sm:w-1/2 px-4 py-3.5 rounded-2xl border-2 border-orange-300 bg-orange-50 hover:bg-orange-100 text-[#F97316] font-black text-xs cursor-pointer flex items-center justify-center gap-1.5"
-              >
-                <BookOpen className="w-4 h-4" />
-                <span>View Video Resources</span>
-              </button>
-
-              <Button
-                type="button"
-                onClick={() => {
-                  setShowCelebrationModal(false);
-                  router.push('/rbt/schedule');
-                }}
-                className="w-full sm:w-1/2 bg-[#F97316] hover:bg-orange-600 text-white font-black text-xs py-4 rounded-2xl shadow-xl flex items-center justify-center gap-2 cursor-pointer text-sm"
-              >
-                <Calendar className="w-4 h-4" />
-                <span>Go to My Schedule →</span>
-              </Button>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
-
-      {/* 🚀 FIRST-VISIT "BEGIN GUIDED TUTORIAL" MODAL PROMPT PORTAL TO BODY */}
       {mounted && showTutorialPromptModal && createPortal(
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[999999] flex items-center justify-center p-4">
-          <div className="bg-slate-950 border-4 border-[#F97316] rounded-3xl max-w-lg w-full p-8 space-y-6 shadow-[0_10px_50px_rgba(249,115,22,0.6)] text-white animate-fade-in text-center relative z-[1000000]">
-            <div className="w-16 h-16 rounded-3xl bg-[#F97316] text-white flex items-center justify-center font-bold mx-auto shadow-xl">
-              <Sparkles className="w-8 h-8 text-yellow-200 animate-spin" />
+        <div className="fixed inset-0 z-[999999] flex items-center justify-center bg-black/85 p-4 backdrop-blur-md">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="simulation-welcome-title"
+            aria-describedby="simulation-welcome-description"
+            className="relative z-[1000000] w-full max-w-lg space-y-6 rounded-3xl border border-orange-400/40 bg-slate-950 p-8 text-center text-white shadow-[0_20px_80px_rgba(249,115,22,0.35)]"
+          >
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl border border-orange-300/30 bg-orange-500 text-white shadow-xl">
+              <Sparkles className="h-8 w-8 text-yellow-100" aria-hidden="true" />
             </div>
 
             <div className="space-y-2">
-              <h3 className="text-2xl font-black font-heading text-white tracking-tight">
-                Welcome to Rise &amp; Shine ABA Session &amp; Schedule Tutorial!
-              </h3>
-              <p className="text-xs text-slate-300 font-semibold leading-relaxed">
-                Learn how to manage <strong>Active Live Sessions</strong>, resolve <strong>Incomplete Session Notes</strong> in 1 click, and perform live trial data collection.
+              <span className="inline-flex rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 font-mono text-[10px] font-black uppercase tracking-wider text-emerald-300">
+                Training only · no live writes
+              </span>
+              <h2
+                id="simulation-welcome-title"
+                className="font-heading text-2xl font-black tracking-tight text-white"
+              >
+                Welcome to the RBT workflow training lab
+              </h2>
+              <p
+                id="simulation-welcome-description"
+                className="text-xs font-semibold leading-relaxed text-slate-300"
+              >
+                Every person, session, signature, unit count, and claim reference on this page is fictional. Practice actions never contact staff or write to clinical, billing, EVV, or payroll records.
               </p>
             </div>
 
-            <div className="p-4 bg-slate-900 rounded-2xl border border-slate-800 text-xs text-left space-y-2 text-slate-300">
-              <p className="font-bold text-orange-300 flex items-center gap-1.5">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400" /> What you will master in this 2-minute tutorial:
+            <div className="space-y-3 rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-left text-xs text-slate-300">
+              <p className="flex items-center gap-1.5 font-bold text-orange-300">
+                <CheckCircle2 className="h-4 w-4 text-emerald-400" aria-hidden="true" />
+                What this attempt asks you to practice
               </p>
-              <ul className="space-y-1 list-disc list-inside text-[11px] font-medium text-slate-300">
-                <li>Resuming <strong>Active Live Sessions</strong> with real-time EVV ticking</li>
-                <li>Resolving <strong>Incomplete Sessions</strong> via 1-click Fix Drawer</li>
-                <li>Requesting emergency sick day call-outs to Marcus Vance</li>
-                <li>Logging DTT trials, prompt levels, and rendering 837P EDI claims</li>
+              <ul className="space-y-1.5 text-[11px] font-medium text-slate-300">
+                <li>• Navigate the fictional active, incomplete, schedule, and completed views.</li>
+                <li>• Record one new DTT trial and one task-analysis response.</li>
+                <li>• Use frequency/latency, interval, and ABC practice controls.</li>
+                <li>• Type a practice acknowledgment and finish the training note.</li>
               </ul>
+              <p className="border-t border-white/10 pt-3 text-[11px] font-bold text-slate-400">
+                Successful save updates only the ATS onboarding completion flag. Without an applicant session, the result is labeled local to this browser tab.
+              </p>
             </div>
 
-            <div className="pt-2 flex flex-col sm:flex-row gap-3">
+            <div className="flex flex-col gap-3 pt-2 sm:flex-row">
               <button
                 type="button"
                 onClick={() => setShowTutorialPromptModal(false)}
-                className="w-full sm:w-1/3 px-4 py-3.5 rounded-2xl border-2 border-slate-700 text-xs font-bold text-slate-400 hover:text-white cursor-pointer"
+                className="w-full cursor-pointer rounded-2xl border border-white/15 bg-white/5 px-4 py-3.5 text-xs font-bold text-slate-300 transition-all hover:border-white/30 hover:bg-white/10 hover:text-white sm:w-1/3"
               >
-                Explore Alone
+                Explore independently
               </button>
               <Button
+                ref={tutorialStartRef}
                 type="button"
                 onClick={handleStartTutorial}
-                className="w-full sm:w-2/3 bg-[#F97316] hover:bg-orange-600 text-white font-black text-xs py-4 rounded-2xl shadow-xl flex items-center justify-center gap-2 cursor-pointer text-sm"
+                className="w-full cursor-pointer rounded-2xl bg-orange-500 py-4 text-sm font-black text-white shadow-xl hover:bg-orange-400 sm:w-2/3"
               >
-                <span>Begin Guided Tutorial</span>
-                <ArrowRight className="w-4 h-4" />
+                <span>Begin guided practice</span>
+                <ArrowRight className="h-4 w-4" aria-hidden="true" />
               </Button>
             </div>
           </div>
@@ -277,8 +427,12 @@ function SimulationContent() {
 export default function RbtSimulationPage() {
   return (
     <Suspense fallback={
-      <div className="p-8 text-center font-black text-slate-500 animate-pulse">
-        Loading Data Simulation &amp; Schedule Practice Hub...
+      <div
+        className="p-8 text-center font-black text-slate-500 animate-pulse"
+        role="status"
+        aria-live="polite"
+      >
+        Loading RBT training lab…
       </div>
     }>
       <SimulationContent />

@@ -1,385 +1,653 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
-import { Badge } from '@/components/ui/Badge';
-import { 
-  AlertTriangle, 
-  Clock, 
-  ShieldAlert, 
-  Users, 
-  FileText, 
-  Activity, 
-  ShieldCheck, 
-  ArrowRight, 
-  RefreshCw,
-  TrendingUp,
-  Layers,
-  Sparkles,
-  Zap,
-  BarChart3,
-  CheckCircle2
-} from 'lucide-react';
-import OpsAuditReportCompiler from './OpsAuditReportCompiler';
-import { AreaChartWidget, BarChartWidget, DonutChartWidget } from '@/components/ui/AnalyticsCharts';
-import { getOpsDepartmentMetrics } from '@/app/(dashboard)/ops/actions';
+import React, { useState, useTransition } from 'react';
 import Link from 'next/link';
+import {
+  AlertTriangle,
+  ArrowRight,
+  BarChart3,
+  CheckCircle2,
+  CircleSlash2,
+  Clock,
+  Database,
+  RefreshCw,
+  ShieldAlert,
+} from 'lucide-react';
+import { Card, CardContent } from '@/components/ui/Card';
+import OpsAuditReportCompiler from './OpsAuditReportCompiler';
+import {
+  getOpsDepartmentMetrics,
+  type OpsDashboardData,
+  type OpsDashboardResult,
+} from '@/app/(dashboard)/ops/actions';
+import { CLINIC_TIME_ZONE } from '@/lib/clinicTimezone';
 
-export default function OpsDashboardClient({ agedSessions, atRiskAuths }: any) {
-  const [metrics, setMetrics] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+const DAY_MS = 24 * 60 * 60 * 1000;
+const CLINIC_DATE = new Intl.DateTimeFormat('en-US', {
+  timeZone: CLINIC_TIME_ZONE,
+  month: 'short',
+  day: 'numeric',
+  year: 'numeric',
+});
+const CLINIC_DATE_TIME = new Intl.DateTimeFormat('en-US', {
+  timeZone: CLINIC_TIME_ZONE,
+  month: 'short',
+  day: 'numeric',
+  year: 'numeric',
+  hour: 'numeric',
+  minute: '2-digit',
+  timeZoneName: 'short',
+});
 
-  useEffect(() => {
-    getOpsDepartmentMetrics().then(res => {
-      if (res.success) {
-        setMetrics(res.metrics);
-      }
-      setLoading(false);
-    });
-  }, []);
+type DepartmentCardProps = {
+  index: string;
+  label: string;
+  value: number;
+  description: string;
+  badge: string;
+  evidenceLabel: string;
+  evidenceValue: string;
+  evidenceNote: string;
+  href: string;
+  linkLabel: string;
+  accent: {
+    text: string;
+    border: string;
+    badge: string;
+    glow: string;
+  };
+};
+
+function DepartmentCard({
+  index,
+  label,
+  value,
+  description,
+  badge,
+  evidenceLabel,
+  evidenceValue,
+  evidenceNote,
+  href,
+  linkLabel,
+  accent,
+}: DepartmentCardProps) {
+  return (
+    <Card
+      className={`group relative overflow-hidden rounded-2xl border border-white/10 bg-zinc-950/80 shadow-xl backdrop-blur-xl transition-all duration-300 hover:scale-[1.01] ${accent.border} ${accent.glow}`}
+    >
+      <CardContent className="space-y-4 p-6">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <div
+              className={`flex h-8 w-8 items-center justify-center rounded-xl border bg-white/[0.03] text-xs font-bold ${accent.text}`}
+            >
+              {index}
+            </div>
+            <span className={`font-mono text-xs font-bold uppercase tracking-wider ${accent.text}`}>
+              {label}
+            </span>
+          </div>
+          <span
+            className={`rounded-full border px-2.5 py-1 font-mono text-[10px] font-bold ${accent.badge}`}
+          >
+            {badge}
+          </span>
+        </div>
+
+        <div>
+          <h3 className="font-mono text-3xl font-black tracking-tight text-white">{value}</h3>
+          <p className="mt-1 text-xs text-zinc-400">{description}</p>
+        </div>
+
+        <div className="space-y-1.5 border-t border-white/5 pt-3">
+          <div className="flex items-center justify-between gap-3 font-mono text-[11px]">
+            <span className="text-zinc-500">{evidenceLabel}</span>
+            <span className="font-bold text-zinc-200">{evidenceValue}</span>
+          </div>
+          <p className="text-[10px] leading-relaxed text-zinc-600">{evidenceNote}</p>
+        </div>
+
+        <Link
+          href={href}
+          className={`flex cursor-pointer items-center justify-between pt-1 text-xs font-bold transition-all group-hover:translate-x-1 hover:text-white ${accent.text}`}
+        >
+          <span>{linkLabel}</span>
+          <ArrowRight className="h-4 w-4" />
+        </Link>
+      </CardContent>
+    </Card>
+  );
+}
+
+function RateCard({
+  title,
+  value,
+  detail,
+  colorClass,
+}: {
+  title: string;
+  value: number | null;
+  detail: string;
+  colorClass: string;
+}) {
+  return (
+    <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-zinc-950/80 p-5 shadow-xl backdrop-blur-xl">
+      <div className="absolute -right-10 -top-10 h-28 w-28 rounded-full bg-white/[0.03] blur-2xl" />
+      <p className="relative font-mono text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+        {title}
+      </p>
+      {value === null ? (
+        <div className="relative mt-3">
+          <p className="font-heading text-xl font-bold text-zinc-300">Unavailable</p>
+          <p className="mt-1 text-xs leading-relaxed text-zinc-500">{detail}</p>
+        </div>
+      ) : (
+        <div className="relative mt-3 flex items-end justify-between gap-3">
+          <div>
+            <p className={`font-mono text-3xl font-black ${colorClass}`}>{value}%</p>
+            <p className="mt-1 text-xs leading-relaxed text-zinc-500">{detail}</p>
+          </div>
+          <div
+            className={`h-12 w-12 rounded-full border border-white/10 bg-zinc-900 p-1.5 ${colorClass}`}
+          >
+            <div
+              className="h-full w-full rounded-full border-4 border-current opacity-70"
+              style={{ color: value === 0 ? '#71717a' : undefined }}
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MonthlyClientChart({ data }: { data: OpsDashboardData['monthlyNewClients'] }) {
+  const max = Math.max(...data.map((point) => point.value), 0);
 
   return (
-    <div className="space-y-8 mt-6 pb-12">
-      {/* Hero Master Operations Command Banner */}
-      <div className="relative overflow-hidden p-8 rounded-3xl bg-gradient-to-r from-zinc-950 via-zinc-900 to-zinc-950 border border-white/10 shadow-2xl backdrop-blur-2xl group">
-        {/* Ambient Radial Background Glows */}
-        <div className="absolute top-0 right-1/4 w-96 h-96 bg-brand-orange-500/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute bottom-0 left-10 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl pointer-events-none" />
+    <div className="rounded-2xl border border-white/10 bg-zinc-950/80 p-5 shadow-xl backdrop-blur-xl lg:col-span-2">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="font-heading text-sm font-bold text-white">Monthly New Client Records</h2>
+          <p className="mt-1 text-xs text-zinc-500">
+            Client rows created in each UTC calendar month; this is not a conversion metric.
+          </p>
+        </div>
+        <Database className="h-5 w-5 shrink-0 text-brand-orange-400" />
+      </div>
 
-        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+      {max === 0 ? (
+        <div className="mt-5 rounded-xl border border-dashed border-white/10 bg-zinc-950/60 px-5 py-10 text-center">
+          <CircleSlash2 className="mx-auto h-7 w-7 text-zinc-600" />
+          <p className="mt-2 text-sm font-semibold text-zinc-300">No client records in this window</p>
+          <p className="mt-1 text-xs text-zinc-600">All seven monthly database counts returned zero.</p>
+        </div>
+      ) : (
+        <div
+          className="mt-6 grid h-48 grid-cols-7 items-end gap-2"
+          role="img"
+          aria-label={`Monthly new client counts: ${data
+            .map((point) => `${point.label} ${point.value}`)
+            .join(', ')}`}
+        >
+          {data.map((point) => {
+            const height = point.value === 0 ? 2 : Math.max((point.value / max) * 100, 8);
+            return (
+              <div key={point.label} className="flex h-full min-w-0 flex-col justify-end gap-2">
+                <span className="text-center font-mono text-[10px] font-bold text-zinc-300">
+                  {point.value}
+                </span>
+                <div className="flex h-32 items-end overflow-hidden rounded-lg border border-white/5 bg-zinc-900/80 p-1">
+                  <div
+                    className="w-full rounded-md bg-gradient-to-t from-brand-orange-600 to-amber-300 shadow-[0_0_18px_rgba(255,107,0,0.2)] transition-all duration-500"
+                    style={{ height: `${height}%` }}
+                  />
+                </div>
+                <span className="truncate text-center font-mono text-[10px] text-zinc-500">
+                  {point.label}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function OpsDashboardClient({
+  initialResult,
+}: {
+  initialResult: OpsDashboardResult;
+}) {
+  const [data, setData] = useState<OpsDashboardData | null>(
+    initialResult.success ? initialResult.data : null
+  );
+  const [error, setError] = useState<string | null>(
+    initialResult.success ? null : initialResult.error
+  );
+  const [isRefreshing, startRefresh] = useTransition();
+
+  const refresh = () => {
+    startRefresh(async () => {
+      try {
+        const result = await getOpsDepartmentMetrics();
+        if (result.success) {
+          setData(result.data);
+          setError(null);
+          return;
+        }
+        setError(result.error);
+      } catch {
+        setError('Unable to refresh the operations snapshot. Please try again.');
+      }
+    });
+  };
+
+  if (!data) {
+    return (
+      <div className="relative mt-6 overflow-hidden rounded-3xl border border-rose-500/20 bg-zinc-950/90 p-10 shadow-2xl backdrop-blur-2xl">
+        <div className="pointer-events-none absolute -right-20 -top-20 h-72 w-72 rounded-full bg-rose-500/10 blur-3xl" />
+        <div className="relative mx-auto max-w-xl text-center">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-rose-500/20 bg-rose-500/10 text-rose-400 shadow-[0_0_24px_rgba(244,63,94,0.15)]">
+            <AlertTriangle className="h-7 w-7" />
+          </div>
+          <h1 className="mt-5 font-heading text-2xl font-bold text-white">
+            Operations snapshot unavailable
+          </h1>
+          <p className="mt-2 text-sm leading-relaxed text-zinc-400">
+            {error ?? 'The command center could not load its database snapshot.'}
+          </p>
+          <button
+            type="button"
+            onClick={refresh}
+            disabled={isRefreshing}
+            className="mt-6 inline-flex cursor-pointer items-center gap-2 rounded-xl border border-rose-500/30 bg-rose-500/10 px-5 py-2.5 text-xs font-bold text-rose-300 transition-all hover:border-rose-400/50 hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+            {isRefreshing ? 'Retrying…' : 'Retry database snapshot'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const { metrics } = data;
+  const snapshotTime = new Date(data.generatedAt).getTime();
+  const snapshotLabel = CLINIC_DATE_TIME.format(new Date(data.generatedAt));
+  const agedCutoffLabel = CLINIC_DATE_TIME.format(new Date(data.scope.agedNoteCutoff));
+  const paWindowEndLabel = CLINIC_DATE.format(new Date(data.scope.paRiskWindowEnd));
+  const allOperationalCountsZero =
+    metrics.totalClients === 0 &&
+    metrics.agedUnconvertedNotes === 0 &&
+    metrics.caseCoordOpenActionItems === 0 &&
+    metrics.paAdjudicatedCount === 0;
+
+  return (
+    <div className="mt-6 space-y-8 pb-12">
+      <div className="group relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-r from-zinc-950 via-zinc-900 to-zinc-950 p-8 shadow-2xl backdrop-blur-2xl">
+        <div className="pointer-events-none absolute right-1/4 top-0 h-96 w-96 rounded-full bg-brand-orange-500/10 blur-3xl" />
+        <div className="pointer-events-none absolute bottom-0 left-10 h-96 w-96 rounded-full bg-purple-500/10 blur-3xl" />
+
+        <div className="relative z-10 flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
           <div className="space-y-3">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-brand-orange-500/10 border border-brand-orange-500/20 text-brand-orange-400 font-mono text-[11px] font-bold">
-              <span className="dot-live"></span>
-              <span>OPERATIONS COMMAND CENTER • REAL-TIME DEPT SYNC</span>
+            <div className="inline-flex items-center gap-2 rounded-full border border-brand-orange-500/20 bg-brand-orange-500/10 px-3 py-1 font-mono text-[11px] font-bold text-brand-orange-400">
+              <Database className="h-3.5 w-3.5" />
+              <span>OPERATIONS COMMAND CENTER • DATABASE SNAPSHOT</span>
             </div>
-            
-            <h1 className="text-3xl lg:text-4xl font-extrabold text-white font-heading tracking-tight leading-tight">
-              Master Operations <span className="text-transparent bg-clip-text bg-gradient-to-r from-brand-orange-400 via-amber-300 to-teal-300">&amp; Executive Supervision</span>
+
+            <h1 className="font-heading text-3xl font-extrabold leading-tight tracking-tight text-white lg:text-4xl">
+              Master Operations{' '}
+              <span className="bg-gradient-to-r from-brand-orange-400 via-amber-300 to-teal-300 bg-clip-text text-transparent">
+                &amp; Executive Supervision
+              </span>
             </h1>
-            
-            <p className="text-sm text-zinc-400 max-w-2xl font-sans leading-relaxed">
-              Real-time throughput monitoring across Intake, Billing, Clinical, and Case Coordination. Supervise departmental SLAs, clear operational bottlenecks, and generate executive audit reports.
+
+            <p className="max-w-2xl text-sm leading-relaxed text-zinc-400">
+              Bounded queue previews and exact aggregate counts across Intake, Billing, Clinical,
+              and Case Coordination. Snapshot generated {snapshotLabel}.
             </p>
+
+            <button
+              type="button"
+              onClick={refresh}
+              disabled={isRefreshing}
+              className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-white/10 bg-zinc-900/80 px-3.5 py-2 font-mono text-[11px] font-bold text-zinc-300 transition-all hover:border-brand-orange-500/30 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+              {isRefreshing ? 'Refreshing snapshot…' : 'Refresh snapshot'}
+            </button>
           </div>
 
-          {/* KPI Snapshot Pills */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 flex-shrink-0">
-            <div className="p-3.5 bg-zinc-900/90 rounded-2xl border border-white/10 backdrop-blur-md shadow-sm">
-              <span className="text-[10px] text-zinc-400 font-mono font-bold uppercase block">TOTAL CLIENTS</span>
-              <p className="text-xl font-black text-white font-mono mt-1">{metrics?.totalClients || 0}</p>
+          <div className="grid flex-shrink-0 grid-cols-2 gap-3 sm:grid-cols-3">
+            <div className="rounded-2xl border border-white/10 bg-zinc-900/90 p-3.5 shadow-sm backdrop-blur-md">
+              <span className="block font-mono text-[10px] font-bold uppercase text-zinc-400">
+                TOTAL CLIENTS
+              </span>
+              <p className="mt-1 font-mono text-xl font-black text-white">{metrics.totalClients}</p>
             </div>
-            <div className="p-3.5 bg-zinc-900/90 rounded-2xl border border-white/10 backdrop-blur-md shadow-sm">
-              <span className="text-[10px] text-emerald-400 font-mono font-bold uppercase block">ACTIVE CASELOAD</span>
-              <p className="text-xl font-black text-emerald-400 font-mono mt-1">{metrics?.activeClientsCount || 0}</p>
+            <div className="rounded-2xl border border-white/10 bg-zinc-900/90 p-3.5 shadow-sm backdrop-blur-md">
+              <span className="block font-mono text-[10px] font-bold uppercase text-emerald-400">
+                ACTIVE CASELOAD
+              </span>
+              <p className="mt-1 font-mono text-xl font-black text-emerald-400">
+                {metrics.activeClients}
+              </p>
             </div>
-            <div className="p-3.5 bg-zinc-900/90 rounded-2xl border border-white/10 backdrop-blur-md shadow-sm col-span-2 sm:col-span-1">
-              <span className="text-[10px] text-teal-400 font-mono font-bold uppercase block">SLA HEALTH INDEX</span>
-              <p className="text-xl font-black text-teal-400 font-mono mt-1">98.4%</p>
+            <div className="col-span-2 rounded-2xl border border-amber-500/20 bg-amber-500/5 p-3.5 shadow-sm backdrop-blur-md sm:col-span-1">
+              <span className="block font-mono text-[10px] font-bold uppercase text-amber-400">
+                SLA HEALTH
+              </span>
+              <p className="mt-1 font-mono text-sm font-black text-amber-300">NOT TRACKED</p>
+              <p className="mt-0.5 text-[9px] text-zinc-500">No durable transition timestamps</p>
             </div>
           </div>
         </div>
       </div>
 
-      {/* 4 Department Bottleneck & SLA Supervision Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
-        {/* 1. Intake Department */}
-        <Card className="relative overflow-hidden bg-zinc-950/80 backdrop-blur-xl border border-white/10 shadow-xl rounded-2xl transition-all duration-300 hover:scale-[1.02] hover:border-brand-orange-500/50 hover:shadow-[0_0_30px_rgba(255,122,69,0.15)] group cursor-pointer">
-          <CardContent className="p-6 space-y-4">
-            <div className="flex justify-between items-center">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-brand-orange-500/10 border border-brand-orange-500/20 flex items-center justify-center text-brand-orange-400 font-bold text-xs">
-                  01
-                </div>
-                <span className="text-xs font-mono font-bold text-brand-orange-400 uppercase tracking-wider">INTAKE DEPT</span>
-              </div>
-              <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-brand-orange-500/10 text-brand-orange-400 border border-brand-orange-500/20">
-                {metrics?.intakePendingDocs || 0} PENDING
-              </span>
-            </div>
-
+      {error && (
+        <div className="flex flex-col gap-3 rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4 text-sm text-amber-200 shadow-xl sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
             <div>
-              <h3 className="text-3xl font-black text-white font-mono tracking-tight">{metrics?.intakePendingDocs || 0}</h3>
-              <p className="text-xs text-zinc-400 mt-1">Unprocessed Intake Packets (&gt;48 hrs)</p>
+              <p className="font-semibold">Refresh failed — showing the prior snapshot</p>
+              <p className="mt-0.5 text-xs text-amber-200/70">{error}</p>
             </div>
+          </div>
+          <span className="font-mono text-[10px] text-amber-300/70">{snapshotLabel}</span>
+        </div>
+      )}
 
-            <div className="space-y-1.5 pt-2 border-t border-white/5">
-              <div className="flex justify-between text-[11px] font-mono">
-                <span className="text-zinc-500">Review SLA Rate</span>
-                <span className="text-white font-bold">96.2%</span>
-              </div>
-              <div className="w-full bg-zinc-900 h-1.5 rounded-full overflow-hidden">
-                <div className="bg-brand-orange-500 h-full w-[96%] rounded-full"></div>
-              </div>
-            </div>
-
-            <Link href="/portal-case" className="pt-2 text-xs font-bold text-brand-orange-400 hover:text-white flex items-center justify-between group-hover:translate-x-1 transition-transform">
-              <span>Supervise Intake Queue</span>
-              <ArrowRight className="w-4 h-4" />
-            </Link>
-          </CardContent>
-        </Card>
-
-        {/* 2. Billing Department */}
-        <Card className="relative overflow-hidden bg-zinc-950/80 backdrop-blur-xl border border-white/10 shadow-xl rounded-2xl transition-all duration-300 hover:scale-[1.02] hover:border-emerald-500/50 hover:shadow-[0_0_30px_rgba(16,185,129,0.15)] group cursor-pointer">
-          <CardContent className="p-6 space-y-4">
-            <div className="flex justify-between items-center">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 font-bold text-xs">
-                  02
-                </div>
-                <span className="text-xs font-mono font-bold text-emerald-400 uppercase tracking-wider">BILLING DEPT</span>
-              </div>
-              <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                {metrics?.billingExpiringPas || 0} EXPIRING PAs
-              </span>
-            </div>
-
+      {allOperationalCountsZero && (
+        <div className="relative overflow-hidden rounded-2xl border border-cyan-500/20 bg-cyan-500/5 p-5 shadow-xl">
+          <div className="pointer-events-none absolute -right-10 -top-10 h-32 w-32 rounded-full bg-cyan-500/10 blur-2xl" />
+          <div className="relative flex items-start gap-3">
+            <Database className="mt-0.5 h-5 w-5 shrink-0 text-cyan-400" />
             <div>
-              <h3 className="text-3xl font-black text-white font-mono tracking-tight">{metrics?.billingPendingVob || 0}</h3>
-              <p className="text-xs text-zinc-400 mt-1">Pending VOBs &amp; PA Renewals</p>
+              <p className="font-heading text-sm font-bold text-white">Connected snapshot, zero records</p>
+              <p className="mt-1 text-xs leading-relaxed text-zinc-500">
+                The aggregate queries completed, but no client, adjudicated PA, aged-note, or
+                coordinator action-item records were found. Zeros below are database results, not
+                placeholders.
+              </p>
             </div>
+          </div>
+        </div>
+      )}
 
-            <div className="space-y-1.5 pt-2 border-t border-white/5">
-              <div className="flex justify-between text-[11px] font-mono">
-                <span className="text-zinc-500">VOB Turnaround SLA</span>
-                <span className="text-white font-bold">98.1%</span>
-              </div>
-              <div className="w-full bg-zinc-900 h-1.5 rounded-full overflow-hidden">
-                <div className="bg-emerald-500 h-full w-[98%] rounded-full"></div>
-              </div>
-            </div>
-
-            <Link href="/portal-billing" className="pt-2 text-xs font-bold text-emerald-400 hover:text-white flex items-center justify-between group-hover:translate-x-1 transition-transform">
-              <span>Supervise Billing Queue</span>
-              <ArrowRight className="w-4 h-4" />
-            </Link>
-          </CardContent>
-        </Card>
-
-        {/* 3. Clinical Department */}
-        <Card className="relative overflow-hidden bg-zinc-950/80 backdrop-blur-xl border border-white/10 shadow-xl rounded-2xl transition-all duration-300 hover:scale-[1.02] hover:border-cyan-500/50 hover:shadow-[0_0_30px_rgba(6,182,212,0.15)] group cursor-pointer">
-          <CardContent className="p-6 space-y-4">
-            <div className="flex justify-between items-center">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400 font-bold text-xs">
-                  03
-                </div>
-                <span className="text-xs font-mono font-bold text-cyan-400 uppercase tracking-wider">CLINICAL DEPT</span>
-              </div>
-              <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
-                {metrics?.clinicalPendingReports || 0} OVERDUE
-              </span>
-            </div>
-
-            <div>
-              <h3 className="text-3xl font-black text-white font-mono tracking-tight">{metrics?.clinicalPendingReports || 0}</h3>
-              <p className="text-xs text-zinc-400 mt-1">Pending BCBA Assessment Reports</p>
-            </div>
-
-            <div className="space-y-1.5 pt-2 border-t border-white/5">
-              <div className="flex justify-between text-[11px] font-mono">
-                <span className="text-zinc-500">BCBA Assembly SLA</span>
-                <span className="text-white font-bold">94.8%</span>
-              </div>
-              <div className="w-full bg-zinc-900 h-1.5 rounded-full overflow-hidden">
-                <div className="bg-cyan-500 h-full w-[95%] rounded-full"></div>
-              </div>
-            </div>
-
-            <Link href="/portal-clinical" className="pt-2 text-xs font-bold text-cyan-400 hover:text-white flex items-center justify-between group-hover:translate-x-1 transition-transform">
-              <span>Supervise BCBA Suite</span>
-              <ArrowRight className="w-4 h-4" />
-            </Link>
-          </CardContent>
-        </Card>
-
-        {/* 4. Case Coordination */}
-        <Card className="relative overflow-hidden bg-zinc-950/80 backdrop-blur-xl border border-white/10 shadow-xl rounded-2xl transition-all duration-300 hover:scale-[1.02] hover:border-purple-500/50 hover:shadow-[0_0_30px_rgba(168,85,247,0.15)] group cursor-pointer">
-          <CardContent className="p-6 space-y-4">
-            <div className="flex justify-between items-center">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400 font-bold text-xs">
-                  04
-                </div>
-                <span className="text-xs font-mono font-bold text-purple-400 uppercase tracking-wider">CASE COORD</span>
-              </div>
-              <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-purple-500/10 text-purple-400 border border-purple-500/20">
-                {metrics?.caseCoordActionItems || 0} TICKETS
-              </span>
-            </div>
-
-            <div>
-              <h3 className="text-3xl font-black text-white font-mono tracking-tight">{metrics?.activeClientsCount || 0}</h3>
-              <p className="text-xs text-zinc-400 mt-1">Active Client Caseload Monitoring</p>
-            </div>
-
-            <div className="space-y-1.5 pt-2 border-t border-white/5">
-              <div className="flex justify-between text-[11px] font-mono">
-                <span className="text-zinc-500">Ticket Resolution Rate</span>
-                <span className="text-white font-bold">99.1%</span>
-              </div>
-              <div className="w-full bg-zinc-900 h-1.5 rounded-full overflow-hidden">
-                <div className="bg-purple-500 h-full w-[99%] rounded-full"></div>
-              </div>
-            </div>
-
-            <Link href="/portal-case-coord" className="pt-2 text-xs font-bold text-purple-400 hover:text-white flex items-center justify-between group-hover:translate-x-1 transition-transform">
-              <span>Supervise Case Coordination</span>
-              <ArrowRight className="w-4 h-4" />
-            </Link>
-          </CardContent>
-        </Card>
+      <div className="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-4">
+        <DepartmentCard
+          index="01"
+          label="Intake"
+          value={metrics.intakeSubmittedPackets}
+          description="Packets whose status is SUBMITTED"
+          badge={`${metrics.intakeSubmittedOver48h} >48H`}
+          evidenceLabel="Age signal"
+          evidenceValue={`${metrics.intakeSubmittedOver48h} last updated >48h`}
+          evidenceNote="Uses IntakePacket.updatedAt because a dedicated submitted-at timestamp is not stored."
+          href="/portal-case"
+          linkLabel="Open intake queue"
+          accent={{
+            text: 'text-brand-orange-400',
+            border: 'hover:border-brand-orange-500/50',
+            badge: 'bg-brand-orange-500/10 text-brand-orange-400 border-brand-orange-500/20',
+            glow: 'hover:shadow-[0_0_30px_rgba(255,122,69,0.15)]',
+          }}
+        />
+        <DepartmentCard
+          index="02"
+          label="Billing"
+          value={metrics.billingAwaitingVob}
+          description="Clients at CLINICAL_REVIEW_APPROVED awaiting VOB"
+          badge={`${metrics.billingExpiringPas} PA RISK`}
+          evidenceLabel="VOB turnaround SLA"
+          evidenceValue="Not tracked"
+          evidenceNote="The schema does not persist VOB start/completion timestamps."
+          href="/portal-billing"
+          linkLabel="Open billing queue"
+          accent={{
+            text: 'text-emerald-400',
+            border: 'hover:border-emerald-500/50',
+            badge: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+            glow: 'hover:shadow-[0_0_30px_rgba(16,185,129,0.15)]',
+          }}
+        />
+        <DepartmentCard
+          index="03"
+          label="Clinical"
+          value={metrics.clinicalAwaitingReports}
+          description="Clients currently at ASSESSMENT_SCHEDULED"
+          badge={`${metrics.clinicalAwaitingReports} WAITING`}
+          evidenceLabel="Report assembly SLA"
+          evidenceValue="Not tracked"
+          evidenceNote="Status transition timestamps needed for an elapsed-time SLA are not stored."
+          href="/portal-clinical"
+          linkLabel="Open clinical suite"
+          accent={{
+            text: 'text-cyan-400',
+            border: 'hover:border-cyan-500/50',
+            badge: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20',
+            glow: 'hover:shadow-[0_0_30px_rgba(6,182,212,0.15)]',
+          }}
+        />
+        <DepartmentCard
+          index="04"
+          label="Case Coord"
+          value={metrics.caseCoordStaffingPending}
+          description="Clients currently at STAFFING_PENDING"
+          badge={`${metrics.caseCoordOpenActionItems} WORK ITEMS`}
+          evidenceLabel="Coordinator work items"
+          evidenceValue={`${metrics.caseCoordOpenActionItems} unresolved`}
+          evidenceNote="Counts OPEN or IN_PROGRESS items assigned to CASE_COORDINATOR users."
+          href="/portal-case-coord"
+          linkLabel="Open case coordination"
+          accent={{
+            text: 'text-purple-400',
+            border: 'hover:border-purple-500/50',
+            badge: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
+            glow: 'hover:shadow-[0_0_30px_rgba(168,85,247,0.15)]',
+          }}
+        />
       </div>
 
-      {/* Interactive Operations Analytics & Trend Graphs */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2">
-          <AreaChartWidget
-            title="Monthly Client Onboarding & Conversion Velocity"
-            subtitle="Real-time growth curve of clients transitioning from Intake to Active Services"
-            color="#FF7A45"
-            data={[
-              { label: 'Jan', value: 12 },
-              { label: 'Feb', value: 19 },
-              { label: 'Mar', value: 25 },
-              { label: 'Apr', value: 34 },
-              { label: 'May', value: 42 },
-              { label: 'Jun', value: 58 },
-              { label: 'Jul', value: metrics?.totalClients || 65 },
-            ]}
-          />
-        </div>
-
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <MonthlyClientChart data={data.monthlyNewClients} />
         <div className="space-y-6">
-          <DonutChartWidget
-            title="SLA Compliance Rate"
-            percentage={96}
-            label="Departmental SLA Resolution"
-            color="#4FE8CE"
+          <RateCard
+            title="Active Caseload Share"
+            value={metrics.activeClientShare}
+            detail={
+              metrics.totalClients === 0
+                ? 'No client records exist for a denominator.'
+                : `${metrics.activeClients} ACTIVE of ${metrics.totalClients} total client records.`
+            }
+            colorClass="text-emerald-400"
           />
-          <DonutChartWidget
-            title="Prior Auth Approval Rate"
-            percentage={92}
-            label="Insurer PA Approvals"
-            color="#FF7A45"
+          <RateCard
+            title="Recorded PA Approval Share"
+            value={metrics.paApprovalRate}
+            detail={
+              metrics.paAdjudicatedCount === 0
+                ? 'No approved or denied PA outcomes are recorded.'
+                : `APPROVED divided by ${metrics.paAdjudicatedCount} adjudicated PA records; no time window applied.`
+            }
+            colorClass="text-brand-orange-400"
           />
         </div>
       </div>
 
-      <BarChartWidget
-        title="Departmental Throughput Breakdown"
-        subtitle="Real-time volume distribution across Intake, Billing, Clinical, and Case Coordination"
-        data={[
-          { label: '1. Intake Department (Pending Packets)', value: metrics?.intakePendingDocs || 14, color: '#FF7A45' },
-          { label: '2. Billing Department (Pending VOBs)', value: metrics?.billingPendingVob || 8, color: '#10B981' },
-          { label: '3. Clinical Department (Pending Reports)', value: metrics?.clinicalPendingReports || 12, color: '#06B6D4' },
-          { label: '4. Case Coordination (Open Tickets)', value: metrics?.caseCoordActionItems || 5, color: '#A855F7' },
-        ]}
-      />
-
-      {/* Aged Session Notes & Prior Auth Expiration Risk Panels */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* Aged Session Notes Table */}
+      <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-2">
-              <Clock className="w-5 h-5 text-rose-400" />
-              <h2 className="text-base font-bold text-white font-heading tracking-wide">
+              <Clock className="h-5 w-5 text-rose-400" />
+              <h2 className="font-heading text-base font-bold tracking-wide text-white">
                 Aged Unconverted Session Notes
               </h2>
             </div>
-            <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-rose-500/10 text-rose-400 border border-rose-500/20">
-              HIGH PRIORITY
+            <span className="rounded-full border border-rose-500/20 bg-rose-500/10 px-2.5 py-1 font-mono text-[10px] font-bold text-rose-400">
+              {data.agedSessionNotes.length < metrics.agedUnconvertedNotes
+                ? `SHOWING ${data.agedSessionNotes.length} OF ${metrics.agedUnconvertedNotes}`
+                : `${metrics.agedUnconvertedNotes} MATCHES`}
             </span>
           </div>
 
           <div className="space-y-3">
-            {agedSessions?.map((note: any) => {
-              const ageInDays = Math.floor((new Date().getTime() - new Date(note.createdAt).getTime()) / (1000 * 3600 * 24));
-              
+            {data.agedSessionNotes.map((note) => {
+              const ageInDays = Math.floor(
+                (snapshotTime - new Date(note.createdAt).getTime()) / DAY_MS
+              );
+              const missingSignatures = [
+                !note.rbtSigned ? 'Missing RBT signature' : null,
+                !note.parentSigned ? 'Missing parent signature' : null,
+                !note.bcbaSigned ? 'Missing BCBA signature' : null,
+              ].filter((item): item is string => Boolean(item));
+
               return (
-                <div key={note.id} className="p-4 bg-zinc-950/80 backdrop-blur-xl rounded-2xl border border-rose-500/20 hover:border-rose-500/50 transition-all space-y-3 shadow-md">
-                  <div className="flex justify-between items-start">
+                <div
+                  key={note.id}
+                  className="space-y-3 rounded-2xl border border-rose-500/20 bg-zinc-950/80 p-4 shadow-md backdrop-blur-xl transition-all duration-300 hover:border-rose-500/50 hover:shadow-2xl"
+                >
+                  <div className="flex items-start justify-between gap-3">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center font-bold text-rose-400 text-xs">
-                        {note.session.client.firstName[0]}{note.session.client.lastName[0]}
+                      <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-rose-500/20 bg-rose-500/10 text-xs font-bold text-rose-400">
+                        {note.session.client.firstName.charAt(0)}
+                        {note.session.client.lastName.charAt(0)}
                       </div>
                       <div>
-                        <p className="font-semibold text-white text-sm">{note.session.client.firstName} {note.session.client.lastName}</p>
-                        <p className="text-xs text-zinc-400 font-mono">Session Date: {new Date(note.session.scheduledStart).toLocaleDateString()}</p>
+                        <Link
+                          href={`/client/${note.session.client.id}`}
+                          className="cursor-pointer text-sm font-semibold text-white transition-colors hover:text-rose-300"
+                        >
+                          {note.session.client.firstName} {note.session.client.lastName}
+                        </Link>
+                        <p className="font-mono text-xs text-zinc-400">
+                          Session: {CLINIC_DATE.format(new Date(note.session.scheduledStart))}
+                        </p>
                       </div>
                     </div>
 
-                    <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-rose-500/10 text-rose-400 border border-rose-500/20 flex items-center gap-1">
-                      <Clock className="w-3 h-3" /> {ageInDays} Days Old
+                    <span className="flex items-center gap-1 rounded-full border border-rose-500/20 bg-rose-500/10 px-2.5 py-1 font-mono text-[10px] font-bold text-rose-400">
+                      <Clock className="h-3 w-3" /> {ageInDays}d since note creation
                     </span>
                   </div>
-                  
-                  <div className="p-3 bg-zinc-900/90 rounded-xl border border-white/5 text-xs text-zinc-300 space-y-1 font-sans">
-                    <p className="font-semibold text-white text-[11px] uppercase tracking-wider font-mono">Missing Signatures / Flags:</p>
-                    {!note.rbtSigned && <p className="text-rose-400 flex items-center gap-1">• Missing RBT Signature</p>}
-                    {!note.parentSigned && <p className="text-rose-400 flex items-center gap-1">• Missing Parent Signature</p>}
-                    {!note.bcbaSigned && <p className="text-rose-400 flex items-center gap-1">• Missing BCBA Signature</p>}
+
+                  <div className="space-y-1 rounded-xl border border-white/5 bg-zinc-900/90 p-3 text-xs text-zinc-300">
+                    <p className="font-mono text-[11px] font-semibold uppercase tracking-wider text-white">
+                      Current blockers
+                    </p>
+                    {missingSignatures.length > 0 ? (
+                      missingSignatures.map((label) => (
+                        <p key={label} className="text-rose-400">
+                          • {label}
+                        </p>
+                      ))
+                    ) : (
+                      <p className="text-amber-300">• Fully signed; still awaiting conversion</p>
+                    )}
                   </div>
                 </div>
               );
             })}
 
-            {(!agedSessions || agedSessions.length === 0) && (
-              <div className="p-10 text-center text-xs text-zinc-500 border border-dashed border-white/10 rounded-2xl bg-zinc-950/50">
-                <CheckCircle2 className="w-8 h-8 mx-auto text-emerald-400/50 mb-2" />
-                <p className="font-semibold text-white">Pipeline 100% Clean</p>
-                <p className="text-zinc-500 mt-0.5">Zero aged unconverted session notes flagged in system.</p>
+            {data.agedSessionNotes.length === 0 && (
+              <div className="rounded-2xl border border-dashed border-white/10 bg-zinc-950/50 p-10 text-center text-xs text-zinc-500">
+                <CheckCircle2 className="mx-auto mb-2 h-8 w-8 text-emerald-400/50" />
+                <p className="font-semibold text-white">No matching session notes</p>
+                <p className="mt-1 leading-relaxed text-zinc-500">
+                  Query returned zero notes with isConverted=false and createdAt on or before{' '}
+                  {agedCutoffLabel}.
+                </p>
               </div>
             )}
           </div>
         </div>
 
-        {/* Prior Auth Expiration Risk Panel */}
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-2">
-              <ShieldAlert className="w-5 h-5 text-amber-400" />
-              <h2 className="text-base font-bold text-white font-heading tracking-wide">
+              <ShieldAlert className="h-5 w-5 text-amber-400" />
+              <h2 className="font-heading text-base font-bold tracking-wide text-white">
                 Prior Authorization Expiration Risk
               </h2>
             </div>
-            <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
-              RENEWAL MONITOR
+            <span className="rounded-full border border-amber-500/20 bg-amber-500/10 px-2.5 py-1 font-mono text-[10px] font-bold text-amber-400">
+              {data.atRiskAuthorizations.length < metrics.billingExpiringPas
+                ? `SHOWING ${data.atRiskAuthorizations.length} OF ${metrics.billingExpiringPas}`
+                : `${metrics.billingExpiringPas} MATCHES`}
             </span>
           </div>
 
           <div className="space-y-3">
-            {atRiskAuths?.map((auth: any) => (
-              <div key={auth.id} className="p-4 bg-zinc-950/80 backdrop-blur-xl rounded-2xl border border-amber-500/20 hover:border-amber-500/50 transition-all space-y-2 shadow-md">
-                <div className="flex justify-between items-start">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center font-bold text-amber-400 text-xs">
-                      {auth.client?.firstName[0]}{auth.client?.lastName[0]}
+            {data.atRiskAuthorizations.map((authorization) => {
+              const daysRemaining = Math.max(
+                0,
+                Math.ceil(
+                  (new Date(authorization.expirationDate).getTime() - snapshotTime) / DAY_MS
+                )
+              );
+
+              return (
+                <div
+                  key={authorization.id}
+                  className="space-y-2 rounded-2xl border border-amber-500/20 bg-zinc-950/80 p-4 shadow-md backdrop-blur-xl transition-all duration-300 hover:border-amber-500/50 hover:shadow-2xl"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-amber-500/20 bg-amber-500/10 text-xs font-bold text-amber-400">
+                        {authorization.client.firstName.charAt(0)}
+                        {authorization.client.lastName.charAt(0)}
+                      </div>
+                      <div>
+                        <Link
+                          href={`/client/${authorization.client.id}`}
+                          className="cursor-pointer text-sm font-bold text-white transition-colors hover:text-amber-300"
+                        >
+                          {authorization.client.firstName} {authorization.client.lastName}
+                        </Link>
+                        <p className="font-mono text-xs text-zinc-400">
+                          Payer: {authorization.client.insurancePayer ?? 'Not recorded'}
+                        </p>
+                      </div>
                     </div>
-                    <div>
-                      <h4 className="font-bold text-white text-sm">{auth.client?.firstName} {auth.client?.lastName}</h4>
-                      <p className="text-xs text-zinc-400 font-mono">Payer: {auth.payerName || 'Medicaid / Commercial'}</p>
-                    </div>
+
+                    <span className="rounded-full border border-amber-500/20 bg-amber-500/10 px-2.5 py-1 font-mono text-[10px] font-bold text-amber-400">
+                      {daysRemaining}d remaining
+                    </span>
                   </div>
-
-                  <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                    Expiring Soon
-                  </span>
+                  <p className="border-t border-white/5 pt-2 font-mono text-[11px] text-zinc-500">
+                    Expires {CLINIC_DATE.format(new Date(authorization.expirationDate))}
+                  </p>
                 </div>
-              </div>
-            ))}
+              );
+            })}
 
-            {(!atRiskAuths || atRiskAuths.length === 0) && (
-              <div className="p-10 text-center text-xs text-zinc-500 border border-dashed border-white/10 rounded-2xl bg-zinc-950/50">
-                <CheckCircle2 className="w-8 h-8 mx-auto text-emerald-400/50 mb-2" />
-                <p className="font-semibold text-white">All Authorizations Active</p>
-                <p className="text-zinc-500 mt-0.5">Zero prior authorizations currently at risk of expiration.</p>
+            {data.atRiskAuthorizations.length === 0 && (
+              <div className="rounded-2xl border border-dashed border-white/10 bg-zinc-950/50 p-10 text-center text-xs text-zinc-500">
+                <CheckCircle2 className="mx-auto mb-2 h-8 w-8 text-emerald-400/50" />
+                <p className="font-semibold text-white">No matching approved PAs</p>
+                <p className="mt-1 leading-relaxed text-zinc-500">
+                  Query returned zero APPROVED PA requests expiring from this snapshot through{' '}
+                  {paWindowEndLabel}. Already-expired records are excluded.
+                </p>
               </div>
             )}
           </div>
         </div>
       </div>
+
+      <div className="rounded-2xl border border-white/10 bg-zinc-950/60 p-4 shadow-xl">
+        <div className="flex items-start gap-3">
+          <BarChart3 className="mt-0.5 h-4 w-4 shrink-0 text-zinc-500" />
+          <p className="text-[11px] leading-relaxed text-zinc-500">
+            Queue previews are capped at {data.scope.queuePreviewLimit} records and ordered
+            oldest/soonest first. Aggregate badges use separate count queries, so a capped preview
+            never understates the total.
+          </p>
+        </div>
+      </div>
+
+      <OpsAuditReportCompiler key={data.generatedAt} snapshot={data} />
     </div>
   );
 }

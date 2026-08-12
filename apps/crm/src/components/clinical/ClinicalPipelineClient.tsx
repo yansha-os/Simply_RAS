@@ -1,21 +1,22 @@
 'use client';
 
-import React, { useTransition } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
+import React from 'react';
+import Link from 'next/link';
+import { Card, CardContent } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
-import { Button } from '@/components/ui/Button';
-import { submitTreatmentPlan } from '@/app/(dashboard)/clinical/actions';
 import { FileSignature } from 'lucide-react';
 
-export default function ClinicalPipelineClient({ assessmentClients }: any) {
-  const [isPending, startTransition] = useTransition();
+type AssessmentClient = {
+  id: string;
+  firstName: string;
+  lastName: string;
+};
 
-  const handleCompletePlan = (clientId: string) => {
-    startTransition(async () => {
-      await submitTreatmentPlan(clientId);
-    });
-  };
-
+export default function ClinicalPipelineClient({
+  assessmentClients,
+}: {
+  assessmentClients: AssessmentClient[];
+}) {
   return (
     <div className="mt-8 space-y-4 max-w-3xl">
       <div className="flex items-center justify-between">
@@ -24,7 +25,7 @@ export default function ClinicalPipelineClient({ assessmentClients }: any) {
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
-        {assessmentClients.map((client: any) => (
+        {assessmentClients.map((client) => (
           <Card key={client.id} className="border-indigo-200 dark:border-indigo-900 shadow-sm">
             <CardContent className="p-4 space-y-4">
               <div className="flex justify-between items-start">
@@ -41,16 +42,17 @@ export default function ClinicalPipelineClient({ assessmentClients }: any) {
                 <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full border border-indigo-400"/> Write Treatment Plan</div>
               </div>
               
-              <Button 
-                variant="primary" 
-                size="sm" 
-                className="w-full bg-indigo-600 hover:bg-indigo-700" 
-                onClick={() => handleCompletePlan(client.id)}
-                disabled={isPending}
+              <Link
+                href={`/client/${client.id}?mode=bcba&tab=treatment_plan`}
+                className="inline-flex w-full cursor-pointer items-center justify-center rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-indigo-700"
               >
                 <FileSignature className="w-4 h-4 mr-2" />
-                Submit Treatment Plan
-              </Button>
+                Open canonical treatment plan
+              </Link>
+              <p className="text-[11px] text-slate-500">
+                Final submission verifies the assigned BCBA, current plan version, signer
+                identity, and pipeline stage in the client chart.
+              </p>
             </CardContent>
           </Card>
         ))}

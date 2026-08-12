@@ -88,7 +88,7 @@ export function Form02Consent({ formData, handleBlur, client, readOnly, isReject
               currentValue={formData['cpt97153']} onChange={handleBlur} globalInitials={globalInitials} 
             />
             <InitialBlock label="CPT 97155: Adaptive Behavior Treatment with Protocol Modification" 
-              description="I consent to a BCBA supervising the RBT, modifying the treatment plan, and observing my child during therapy sessions."
+              description="I consent to adaptive behavior treatment with protocol modification by a qualified clinician when clinically appropriate."
               fieldId="cpt97155" 
               currentValue={formData['cpt97155']} onChange={handleBlur} globalInitials={globalInitials} 
              required={true} />

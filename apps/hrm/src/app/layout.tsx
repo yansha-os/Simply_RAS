@@ -1,6 +1,8 @@
 import React from 'react';
 import { Inter, Fraunces, IBM_Plex_Mono } from 'next/font/google';
 import './globals.css';
+// Boot-time env-lock: fails the build/render loudly if dev tools are enabled in production.
+import '@/lib/devToolsGate';
 import { ThemeProvider } from '@/components/layout/ThemeContext';
 import { HrmLayoutWrapper } from '@/components/layout/HrmLayoutWrapper';
 import { Toaster } from 'sonner';

@@ -3,7 +3,7 @@
 import React, { useTransition } from 'react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { FileText, ArrowRight, ClipboardCheck, Sparkles, Layers, ShieldAlert, Zap, Stethoscope, Activity, UserPlus, UserCheck } from 'lucide-react';
+import { FileText, ArrowRight, ClipboardCheck, Sparkles, Layers, ShieldAlert, Zap, Stethoscope, Activity, UserPlus, UserCheck, Users } from 'lucide-react';
 import Link from 'next/link';
 import { assignBcba } from '@/app/(dashboard)/portal-clinical/actions';
 import { toast } from 'sonner';
@@ -21,10 +21,19 @@ export default function BcbaDashboard({ clients, bcbas }: { clients: any[], bcba
   const prepQueue = clients.filter(c => ['PA_SUBMITTED', 'PA_APPROVED'].includes(c.status) && !p2pQueue.includes(c) && !needsBcbaQueue.includes(c));
   const txPlanQueue = clients.filter(c => c.status === 'ASSESSMENT_SCHEDULED' && !p2pQueue.includes(c) && !needsBcbaQueue.includes(c));
 
-  const handleAssignBcba = (clientId: string, bcbaId: string) => {
+  const handleAssignBcba = (
+    clientId: string,
+    bcbaId: string,
+    expectedBcbaId: string | null
+  ) => {
     if (!bcbaId) return;
     startTransition(async () => {
-      const res = await assignBcba(clientId, bcbaId);
+      const res = await assignBcba({
+        clientId,
+        bcbaId,
+        expectedBcbaId,
+        reason: 'Clinical dashboard BCBA assignment',
+      });
       if (res.success) {
         toast.success('BCBA successfully assigned to client!');
         router.refresh();
@@ -72,6 +81,33 @@ export default function BcbaDashboard({ clients, bcbas }: { clients: any[], bcba
 
   return (
     <div className="space-y-8 mt-6 pb-12 animate-fade-in-up">
+
+      {/* Discoverability strip — clinical review + unsigned notes + goals */}
+      <div className="flex flex-col sm:flex-row gap-3">
+        <Link
+          href="/portal-clinical/review"
+          className="flex-1 group relative overflow-hidden rounded-2xl border border-teal-500/20 bg-teal-500/5 px-5 py-4 backdrop-blur-xl transition-all duration-300 hover:border-teal-500/40 hover:scale-[1.01] cursor-pointer"
+        >
+          <div className="pointer-events-none absolute -right-8 -top-8 h-24 w-24 rounded-full bg-teal-500/10 blur-2xl" />
+          <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-teal-400">Clinical triage</p>
+          <p className="mt-1 text-sm font-semibold text-white font-heading">Clinical Review</p>
+          <p className="mt-0.5 text-xs text-zinc-400">Packets, deficiencies, and co-sign work</p>
+        </Link>
+        <Link
+          href="/portal-clinical/notes"
+          className="flex-1 group relative overflow-hidden rounded-2xl border border-amber-500/20 bg-amber-500/5 px-5 py-4 backdrop-blur-xl transition-all duration-300 hover:border-amber-500/40 hover:scale-[1.01] cursor-pointer"
+        >
+          <div className="pointer-events-none absolute -right-8 -top-8 h-24 w-24 rounded-full bg-amber-500/10 blur-2xl" />
+          <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-amber-400">BCBA note queue</p>
+          <p className="mt-1 text-sm font-semibold text-white font-heading">Unsigned Notes</p>
+          <p className="mt-0.5 text-xs text-zinc-400">RBT-signed notes awaiting BCBA co-sign</p>
+        </Link>
+        <div className="flex-1 rounded-2xl border border-white/10 bg-zinc-950/60 px-5 py-4 backdrop-blur-xl">
+          <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-cyan-400">Client profile</p>
+          <p className="mt-1 text-sm font-semibold text-white font-heading">Clinical Goals · Session EMR</p>
+          <p className="mt-0.5 text-xs text-zinc-400">Open a caseload client → tabs appear in the profile header</p>
+        </div>
+      </div>
       
       {/* Top Toggle & Controls */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-zinc-950/80 backdrop-blur-xl p-2 rounded-2xl border border-white/10 shadow-lg">
@@ -137,8 +173,14 @@ export default function BcbaDashboard({ clients, bcbas }: { clients: any[], bcba
             ))}
 
             {p2pQueue.length === 0 && (
-              <div className="p-8 text-center text-xs text-zinc-500 border border-dashed border-white/10 rounded-2xl bg-zinc-950/40">
-                Zero clinical P2P authorization alerts active.
+              <div className="p-8 text-center border border-dashed border-white/10 rounded-2xl bg-zinc-950/40">
+                <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-2xl border border-rose-500/20 bg-rose-500/10">
+                  <ShieldAlert className="h-4 w-4 text-rose-400/70" />
+                </div>
+                <p className="text-xs font-semibold text-zinc-300">No P2P alerts</p>
+                <p className="mt-1 text-[11px] text-zinc-500">
+                  Denied clinical PAs needing peer-to-peer review land here.
+                </p>
               </div>
             )}
           </div>
@@ -168,8 +210,14 @@ export default function BcbaDashboard({ clients, bcbas }: { clients: any[], bcba
             ))}
 
             {prepQueue.length === 0 && (
-              <div className="p-8 text-center text-xs text-zinc-500 border border-dashed border-white/10 rounded-2xl bg-zinc-950/40">
-                No clients currently in assessment preparation.
+              <div className="p-8 text-center border border-dashed border-white/10 rounded-2xl bg-zinc-950/40">
+                <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-2xl border border-amber-500/20 bg-amber-500/10">
+                  <ClipboardCheck className="h-4 w-4 text-amber-400/70" />
+                </div>
+                <p className="text-xs font-semibold text-zinc-300">No assessments to prep</p>
+                <p className="mt-1 text-[11px] text-zinc-500">
+                  Clients at PA submitted / approved appear here for evaluation prep.
+                </p>
               </div>
             )}
           </div>
@@ -199,8 +247,14 @@ export default function BcbaDashboard({ clients, bcbas }: { clients: any[], bcba
             ))}
 
             {txPlanQueue.length === 0 && (
-              <div className="p-8 text-center text-xs text-zinc-500 border border-dashed border-white/10 rounded-2xl bg-zinc-950/40">
-                No treatment plans currently undergoing report assembly.
+              <div className="p-8 text-center border border-dashed border-white/10 rounded-2xl bg-zinc-950/40">
+                <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-2xl border border-cyan-500/20 bg-cyan-500/10">
+                  <FileText className="h-4 w-4 text-cyan-400/70" />
+                </div>
+                <p className="text-xs font-semibold text-zinc-300">No plans in assembly</p>
+                <p className="mt-1 text-[11px] text-zinc-500">
+                  Clients with a scheduled assessment queue here for treatment plan build.
+                </p>
               </div>
             )}
           </div>
@@ -241,7 +295,9 @@ export default function BcbaDashboard({ clients, bcbas }: { clients: any[], bcba
                   <select
                     className="w-full bg-zinc-900 border border-white/10 rounded-xl p-2 text-xs text-white outline-none focus:border-purple-500 cursor-pointer font-sans"
                     value={c.bcbaId || ''}
-                    onChange={e => handleAssignBcba(c.id, e.target.value)}
+                    onChange={e =>
+                      handleAssignBcba(c.id, e.target.value, c.bcbaId ?? null)
+                    }
                     disabled={isPending}
                   >
                     <option value="">-- Select BCBA --</option>
@@ -256,8 +312,14 @@ export default function BcbaDashboard({ clients, bcbas }: { clients: any[], bcba
             ))}
 
             {needsBcbaQueue.length === 0 && (
-              <div className="p-8 text-center text-xs text-zinc-500 border border-dashed border-white/10 rounded-2xl bg-zinc-950/40">
-                Zero clients awaiting BCBA assignment.
+              <div className="p-8 text-center border border-dashed border-white/10 rounded-2xl bg-zinc-950/40">
+                <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-2xl border border-purple-500/20 bg-purple-500/10">
+                  <UserPlus className="h-4 w-4 text-purple-400/70" />
+                </div>
+                <p className="text-xs font-semibold text-zinc-300">All clients have a BCBA</p>
+                <p className="mt-1 text-[11px] text-zinc-500">
+                  New intakes without a supervisor land here for assignment.
+                </p>
               </div>
             )}
           </div>
@@ -320,6 +382,24 @@ export default function BcbaDashboard({ clients, bcbas }: { clients: any[], bcba
                                    : 'bg-rose-400';
                   
                   const displayState = isAct ? 'ACTIVE' : isNot ? 'NOT STARTED' : 'INACTIVE';
+                  const authExpiry = client.authorizationExpiry as {
+                    daysRemaining: number;
+                    expiresOn: string;
+                  } | null;
+                  const authPanelClass = !authExpiry
+                    ? 'bg-zinc-900/60 border-white/10'
+                    : authExpiry.daysRemaining <= 14
+                      ? 'bg-rose-500/10 border-rose-500/20'
+                      : authExpiry.daysRemaining <= 30
+                        ? 'bg-amber-500/10 border-amber-500/20'
+                        : 'bg-emerald-500/10 border-emerald-500/20';
+                  const authTextClass = !authExpiry
+                    ? 'text-zinc-400'
+                    : authExpiry.daysRemaining <= 14
+                      ? 'text-rose-400'
+                      : authExpiry.daysRemaining <= 30
+                        ? 'text-amber-400'
+                        : 'text-emerald-400';
 
                   return (
                   <Card key={client.id} className={`bg-zinc-950/80 backdrop-blur-xl border transition-all duration-300 cursor-pointer group shadow-xl rounded-2xl overflow-hidden hover:scale-[1.02] flex flex-col h-full ${borderClass}`}>
@@ -356,33 +436,61 @@ export default function BcbaDashboard({ clients, bcbas }: { clients: any[], bcba
                         </div>
                       </div>
 
-                      {/* Auth Countdown Mock */}
-                      <div className="bg-orange-500/10 border border-orange-500/20 rounded-xl p-3">
-                         <div className="flex justify-between items-center text-xs">
-                            <span className="text-orange-400/80 font-mono font-bold uppercase">Auth Expires In:</span>
-                            <span className="text-orange-400 font-black">42 Days</span>
-                         </div>
-                         <div className="w-full bg-orange-950/50 rounded-full h-1.5 mt-2">
-                           <div className="bg-orange-500 h-1.5 rounded-full shadow-[0_0_8px_rgba(249,115,22,0.6)]" style={{ width: '60%' }}></div>
-                         </div>
+                      {/* Nearest active Authorization / PARequest window */}
+                      <div className={`rounded-xl border p-3 ${authPanelClass}`}>
+                        {authExpiry ? (
+                          <>
+                            <div className="flex items-center justify-between gap-3 text-xs">
+                              <span className={`font-mono font-bold uppercase ${authTextClass}`}>
+                                Auth expires in
+                              </span>
+                              <span className={`font-black ${authTextClass}`}>
+                                {authExpiry.daysRemaining === 0
+                                  ? 'Today'
+                                  : `${authExpiry.daysRemaining} Day${authExpiry.daysRemaining === 1 ? '' : 's'}`}
+                              </span>
+                            </div>
+                            <p className="mt-1.5 text-[10px] font-mono text-zinc-500">
+                              Active through {authExpiry.expiresOn}
+                            </p>
+                          </>
+                        ) : (
+                          <>
+                            <p className="text-xs font-mono font-bold uppercase text-zinc-300">
+                              No active authorization
+                            </p>
+                            <p className="mt-1.5 text-[10px] text-zinc-500">
+                              No approved, currently effective authorization window is on file.
+                            </p>
+                          </>
+                        )}
                       </div>
                     </div>
 
                     {/* Actions */}
-                    <div className="grid grid-cols-2 border-t border-white/5 bg-zinc-900/30 divide-x divide-white/5">
-                      <Link href={`/client/${client.id}?mode=bcba&tab=clinical-documents`} className="py-3 flex items-center justify-center gap-2 text-xs font-bold text-zinc-400 hover:text-white hover:bg-white/5 transition-colors">
-                        <FileText className="w-4 h-4" /> Tx Plan
+                    <div className="grid grid-cols-3 border-t border-white/5 bg-zinc-900/30 divide-x divide-white/5">
+                      <Link href={`/client/${client.id}?mode=bcba&tab=clinical_goals`} className="py-3 flex items-center justify-center gap-1.5 text-[11px] font-bold text-zinc-400 hover:text-cyan-300 hover:bg-cyan-500/10 transition-colors cursor-pointer">
+                        <Sparkles className="w-3.5 h-3.5" /> Goals
                       </Link>
-                      <Link href={`/client/${client.id}?mode=bcba`} className="py-3 flex items-center justify-center gap-2 text-xs font-bold text-zinc-400 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors">
-                        <ClipboardCheck className="w-4 h-4" /> Profile
+                      <Link href={`/client/${client.id}?mode=bcba&tab=clinical-documents`} className="py-3 flex items-center justify-center gap-1.5 text-[11px] font-bold text-zinc-400 hover:text-white hover:bg-white/5 transition-colors cursor-pointer">
+                        <FileText className="w-3.5 h-3.5" /> Tx Plan
+                      </Link>
+                      <Link href={`/client/${client.id}?mode=bcba&tab=session_emr`} className="py-3 flex items-center justify-center gap-1.5 text-[11px] font-bold text-zinc-400 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors cursor-pointer">
+                        <ClipboardCheck className="w-3.5 h-3.5" /> EMR
                       </Link>
                     </div>
                   </Card>
                 )})}
 
                 {clients.filter(c => c.bcbaId === selectedBcbaId).length === 0 && (
-                  <div className="col-span-full p-12 text-center text-sm text-zinc-500 border border-dashed border-white/10 rounded-2xl bg-zinc-950/40">
-                    This BCBA has no clients currently assigned to their caseload.
+                  <div className="col-span-full p-12 text-center border border-dashed border-white/10 rounded-2xl bg-zinc-950/40">
+                    <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-2xl border border-emerald-500/20 bg-emerald-500/10">
+                      <Users className="h-5 w-5 text-emerald-400/70" />
+                    </div>
+                    <p className="text-sm font-heading font-semibold text-white">Empty caseload</p>
+                    <p className="mt-1 text-xs text-zinc-500">
+                      This BCBA has no clients assigned yet — assign one from the pipeline queue.
+                    </p>
                   </div>
                 )}
               </div>

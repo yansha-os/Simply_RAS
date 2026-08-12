@@ -6,24 +6,102 @@ import FlowMap from '@/components/client-profile/FlowMap';
 import ClientActiveCommandCenter from '@/components/client-profile/ClientActiveCommandCenter';
 import BackButton from '@/components/ui/BackButton';
 import { AlertTriangle } from 'lucide-react';
+import { requireClientAccess, requireStaff } from '@/lib/auth-guard';
 
-export default async function ClientProfilePage(props: { params: Promise<{ id: string }>, searchParams: Promise<{ mode?: string }> }) {
+/**
+ * PHI over-fetch guard (audit H9): messages and sessions are capped to the
+ * most recent N and the heavy SessionNote JSON blobs (structuredContent,
+ * checklistSnapshot) never enter the RSC payload — tabs that need them
+ * (Chart Progress, Weekly Units) load their own scoped data via server actions.
+ */
+const RECENT_MESSAGES_LIMIT = 100;
+const RECENT_SESSIONS_LIMIT = 100;
+
+const STAFF_NAME_SELECT = {
+  id: true,
+  firstName: true,
+  lastName: true,
+  email: true,
+  role: true,
+} as const;
+
+export default async function ClientProfilePage(props: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ mode?: string; tab?: string }>;
+}) {
   const params = await props.params;
+  const staff = await requireStaff();
+  if (!staff.ok) notFound();
+
+  const access = await requireClientAccess(params.id);
+  if (!access.ok) notFound();
+
   const searchParams = await props.searchParams;
   const client = await prisma.client.findUnique({
     where: { id: params.id },
     include: {
       intakePacket: true,
       paRequests: true,
-      bcba: true,
-      rbt: true,
-      messages: { orderBy: { createdAt: 'asc' } }
-    }
+      authorizations: {
+        include: { cptCodes: true },
+        orderBy: { createdAt: 'desc' },
+      },
+      bcba: { select: STAFF_NAME_SELECT },
+      rbt: { select: STAFF_NAME_SELECT },
+      // Most recent N, reversed below so tabs still render oldest → newest
+      messages: { orderBy: { createdAt: 'desc' }, take: RECENT_MESSAGES_LIMIT },
+      sessions: {
+        include: {
+          rbt: { select: { id: true, firstName: true, lastName: true } },
+          bcba: { select: { id: true, firstName: true, lastName: true } },
+          // Everything the profile tabs read — minus the multi-KB JSON blobs
+          note: {
+            select: {
+              id: true,
+              sessionId: true,
+              rbtSigned: true,
+              parentSigned: true,
+              bcbaSigned: true,
+              clinicalContent: true,
+              billableUnits: true,
+              rbtSignedAt: true,
+              parentSignedAt: true,
+              bcbaSignedAt: true,
+              rbtSignerName: true,
+              parentSignerName: true,
+              bcbaSignerName: true,
+              plutusClaimRef: true,
+              convertedAt: true,
+              isConverted: true,
+              createdAt: true,
+              updatedAt: true,
+            },
+          },
+        },
+        orderBy: { scheduledStart: 'desc' },
+        take: RECENT_SESSIONS_LIMIT,
+      },
+      caseOpenings: {
+        include: {
+          applications: {
+            include: {
+              rbt: { select: { id: true, firstName: true, lastName: true, email: true } },
+            },
+            orderBy: { createdAt: 'desc' },
+          },
+        },
+        orderBy: { updatedAt: 'desc' },
+      },
+    },
   });
 
   if (!client) {
     notFound();
   }
+
+  // Restore chronological order after the recent-N (desc) fetch
+  client.messages.reverse();
+  client.sessions.reverse();
 
   const allBcbas = await prisma.user.findMany({
     where: { role: 'BCBA', isActive: true },
@@ -85,7 +163,12 @@ export default async function ClientProfilePage(props: { params: Promise<{ id: s
       )}
 
       {/* Sub Tabs: Overview, Documents, Authorization */}
-      <ClientProfileTabs client={client} mode={searchParams?.mode} bcbas={allBcbas} />
+      <ClientProfileTabs
+        client={client}
+        mode={searchParams?.mode}
+        tab={searchParams?.tab}
+        bcbas={allBcbas}
+      />
       
       </div>
     </div>

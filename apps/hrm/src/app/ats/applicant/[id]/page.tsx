@@ -2,9 +2,11 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
+import Image, { type ImageLoaderProps } from 'next/image';
 import { useParams, useRouter } from 'next/navigation';
 import { useHrmRole } from '@/lib/useHrmRole';
 import { AtsApplicantAuditView } from '@/components/hrm/AtsApplicantAuditView';
+import { ExtendOfferTab } from '@/components/hrm/ExtendOfferTab';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { 
@@ -21,36 +23,67 @@ import {
   UserCheck, 
   Check, 
   Copy,
-  Sparkles,
   ClipboardList,
   FileText,
-  MessageSquare,
   StickyNote,
   XCircle,
-  ExternalLink,
   Save,
   CheckSquare,
   Download,
   Eye,
-  File,
-  FileCode,
   Paperclip,
   User,
   AlertTriangle,
   Trash2,
   AlertOctagon,
-  Mic,
-  MicOff,
-  Camera,
-  CameraOff,
   ChevronRight,
-  ChevronDown,
   HelpCircle,
-  X
+  X,
+  Loader2
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { getAtsCandidates, deleteAtsCandidate, AtsCandidateData } from '@/app/actions/atsActions';
-import { saveRecordingToIDB, getRecordingsFromIDB, deleteRecordingFromIDB } from '@/lib/recordingsDb';
+import {
+  getAtsCandidates,
+  deleteAtsCandidate,
+  inviteCandidate,
+  updateCandidateProgress,
+  getOnboardingProgress,
+  getHiredCandidateSummary,
+  type HiredCandidateSummary,
+} from '@/app/actions/atsActions';
+import { getCandidateDocuments } from '@/app/actions/candidateDocumentActions';
+import {
+  getAtsInterview,
+  saveInterviewNotes,
+  saveInterviewScorecard,
+  saveInterviewScriptProgress,
+  markHrJoinedInterview,
+  completeAtsInterview,
+} from '@/app/actions/hrInterviewActions';
+import type { AtsCandidateData } from '@/lib/atsStage';
+import { saveRecordingBlob, getRecordingsFromIDB, deleteRecordingFromIDB } from '@/lib/recordingsDb';
+
+type ApplicantProfileTab =
+  | 'OVERVIEW'
+  | 'PROGRESS'
+  | 'INTERVIEW'
+  | 'EXTEND_OFFER'
+  | 'AUDIT';
+
+type ApplicantProfileNavigationTab = {
+  id: ApplicantProfileTab;
+  label: string;
+  icon: typeof User;
+  badge?: string;
+};
+
+type WebKitAudioWindow = typeof window & {
+  webkitAudioContext?: typeof AudioContext;
+};
+
+function uploadedDocumentImageLoader({ src }: ImageLoaderProps): string {
+  return src;
+}
 
 export default function ApplicantProfilePage() {
   const { role } = useHrmRole();
@@ -61,7 +94,7 @@ export default function ApplicantProfilePage() {
   const [applicant, setApplicant] = useState<AtsCandidateData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [copied, setCopied] = useState(false);
-  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'PROGRESS' | 'INTERVIEW' | 'AUDIT'>('OVERVIEW');
+  const [activeTab, setActiveTab] = useState<ApplicantProfileTab>('OVERVIEW');
   // Candidate Notes & Script Dossier State
   const [interviewerNotes, setInterviewerNotes] = useState('');
   const [isSavingNotes, setIsSavingNotes] = useState(false);
@@ -84,18 +117,15 @@ export default function ApplicantProfilePage() {
   const [showDecisionModal, setShowDecisionModal] = useState(false);
   const [recommendationChoice, setRecommendationChoice] = useState<'RECOMMEND_HIRE' | 'REJECT' | 'NO_OPINION'>('RECOMMEND_HIRE');
   const [recommendationExplanation, setRecommendationExplanation] = useState('');
-  const [isUpcomingOpen, setIsUpcomingOpen] = useState(true);
-  const [isWaitingOpen, setIsWaitingOpen] = useState(true);
-  const [isPastOpen, setIsPastOpen] = useState(false);
-  const [isClaimedByMe, setIsClaimedByMe] = useState(true);
+  const [, setIsClaimedByMe] = useState(true);
   const [completedScriptSteps, setCompletedScriptSteps] = useState<number[]>([]);
 
   // In-Browser Video Recording State
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [recordedVideos, setRecordedVideos] = useState<{ id: string; title: string; url: string; duration: number; timestamp: string }[]>([]);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [activeVideoUrl, setActiveVideoUrl] = useState<string | null>(null);
-  const [recordedVideoUrl, setRecordedVideoUrl] = useState<string | null>(null);
   const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);
   const recordedChunksRef = React.useRef<Blob[]>([]);
   const timerRef = React.useRef<NodeJS.Timeout | null>(null);
@@ -109,11 +139,17 @@ export default function ApplicantProfilePage() {
     gender?: string;
     rbtStatus?: string;
     cprStatus?: string;
+    yearsExperience?: string;
+    languages?: string;
     boroughs?: string;
+    weeklyHours?: string;
+    availableToStart?: string;
     workAuth?: string;
     backgroundCheck?: string;
     transportation?: string;
     availability?: string;
+    additionalNotes?: string;
+    fortyHourCertFileName?: string;
     resumeFileName?: string;
     resumeFileDataUrl?: string;
     govtIdFileName?: string;
@@ -124,10 +160,6 @@ export default function ApplicantProfilePage() {
   // Document Preview Modal State
   const [previewDoc, setPreviewDoc] = useState<{ name: string; type: 'RESUME' | 'GOVT_ID' } | null>(null);
 
-  // Google Meet Green Room Lobby State
-  const [showMeetLobby, setShowMeetLobby] = useState(false);
-  const [isMicOn, setIsMicOn] = useState(true);
-  const [isCamOn, setIsCamOn] = useState(true);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteConfirmationText, setDeleteConfirmationText] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
@@ -159,7 +191,7 @@ export default function ApplicantProfilePage() {
 
       // 3. Dispatch storage event for re-render sync
       window.dispatchEvent(new Event('storage'));
-    } catch (e) {}
+    } catch {}
 
     toast.success(`Applicant ${applicant?.name || ''} has been permanently deleted.`);
     setShowDeleteModal(false);
@@ -179,10 +211,12 @@ export default function ApplicantProfilePage() {
     meetingCode?: string;
     meetingLink?: string;
     status?: string;
+    bookedAt?: string;
   } | null>(null);
 
   // Requirements checklist state (real-time from RBT candidate portal)
   const [requirements, setRequirements] = useState({
+    tasksDone: false,
     certUploaded: false,
     simulationPassed: false,
     availabilitySet: false,
@@ -191,13 +225,17 @@ export default function ApplicantProfilePage() {
     backgroundCleared: false,
   });
 
+  // HIRED linkage: real RBT user account + case-opening claim state
+  const [hiredSummary, setHiredSummary] = useState<HiredCandidateSummary | null>(null);
+
+  // The five OFFER-gating requirements — must mirror deriveAtsStage (lib/atsStage.ts)
+  // and the pipeline board's x/5 progress: tasks, availability, sim, interviewPassed, cert.
   const completedReqsCount = [
-    requirements.certUploaded,
-    requirements.simulationPassed,
+    requirements.tasksDone,
     requirements.availabilitySet,
-    requirements.interviewBooked,  // Req 4: Interview slot booked (counts once interview is scheduled)
-    requirements.interviewPassed,  // Req 5: HR evaluation clearance (counts only after HR submits evaluation)
-    requirements.backgroundCleared
+    requirements.simulationPassed,
+    requirements.interviewPassed,
+    requirements.certUploaded,
   ].filter(Boolean).length;
 
   useEffect(() => {
@@ -213,250 +251,223 @@ export default function ApplicantProfilePage() {
         }
       }
 
-      // Check for submitted application payload (from public application form submission)
-      // CRITICAL: Only load ras_latest_submitted_app if it belongs to this specific applicantId
-      let submittedForm: any = null;
-      try {
-        // First: try exact match by applicantId key
-        const exactStoredApp = localStorage.getItem(`ras_submitted_app_${applicantId}`);
-        let storedApp = exactStoredApp;
+      // Application dossier + documents from Supabase (Phase 5); localStorage is metadata fallback only
+      let submittedForm: {
+        fullName?: string;
+        email?: string;
+        phoneNumber?: string;
+        address?: string;
+        gender?: string;
+        rbtStatus?: string;
+        cprStatus?: string;
+        yearsExperience?: string;
+        languages?: string;
+        boroughs?: string;
+        weeklyHours?: string;
+        availableToStart?: string;
+        workAuth?: string;
+        backgroundCheck?: string;
+        transportation?: string;
+        availability?: string;
+        additionalNotes?: string;
+        fortyHourCertFileName?: string;
+        resumeFileName?: string;
+        resumeFileDataUrl?: string;
+        govtIdFileName?: string;
+        govtIdFileDataUrl?: string;
+        submittedAt?: string;
+      } | null = null;
 
-        // Only fall back to ras_latest_submitted_app if the applicantId matches
-        if (!storedApp) {
-          const latestRaw = localStorage.getItem('ras_latest_submitted_app');
-          if (latestRaw) {
-            try {
-              const latestParsed = JSON.parse(latestRaw);
-              // Only use it if its applicantId matches the current route param
-              if (latestParsed.applicantId === applicantId) {
-                storedApp = latestRaw;
-              }
-            } catch (e) {}
+      const docsRes = await getCandidateDocuments(applicantId);
+      if (docsRes.success && docsRes.data) {
+        const d = docsRes.data;
+        const dossier = d.dossier || {};
+        const addrParts = [
+          dossier.addressLine1,
+          dossier.addressLine2,
+          [dossier.city, dossier.state, dossier.zipCode].filter(Boolean).join(' '),
+        ].filter(Boolean);
+        submittedForm = {
+          fullName: candidateData?.name,
+          email: candidateData?.email,
+          phoneNumber:
+            (typeof dossier.phoneNumber === 'string' && dossier.phoneNumber) ||
+            candidateData?.phone,
+          address: addrParts.length ? addrParts.join(', ') : undefined,
+          gender: typeof dossier.gender === 'string' ? dossier.gender : undefined,
+          rbtStatus: typeof dossier.rbtStatus === 'string' ? dossier.rbtStatus : undefined,
+          cprStatus: typeof dossier.cprStatus === 'string' ? dossier.cprStatus : undefined,
+          yearsExperience:
+            typeof dossier.yearsExperience === 'string' ? dossier.yearsExperience : undefined,
+          languages: Array.isArray(dossier.languages)
+            ? (dossier.languages as string[]).join(', ')
+            : undefined,
+          boroughs: Array.isArray(dossier.preferredBoroughs)
+            ? (dossier.preferredBoroughs as string[]).join(', ')
+            : undefined,
+          weeklyHours: typeof dossier.weeklyHours === 'string' ? dossier.weeklyHours : undefined,
+          availableToStart:
+            typeof dossier.availableToStart === 'string' ? dossier.availableToStart : undefined,
+          workAuth: typeof dossier.workAuth === 'string' ? dossier.workAuth : undefined,
+          backgroundCheck: dossier.backgroundCheckConsent ? 'Yes' : undefined,
+          transportation:
+            typeof dossier.transportation === 'string'
+              ? dossier.transportation
+              : dossier.hasTransportation
+                ? 'Yes'
+                : undefined,
+          availability: Array.isArray(dossier.availabilityHours)
+            ? (dossier.availabilityHours as string[]).join(', ')
+            : undefined,
+          additionalNotes:
+            typeof dossier.additionalNotes === 'string' ? dossier.additionalNotes : undefined,
+          fortyHourCertFileName:
+            typeof dossier.fortyHourCertFileName === 'string'
+              ? dossier.fortyHourCertFileName
+              : undefined,
+          resumeFileName: d.resumeFileName || undefined,
+          resumeFileDataUrl: d.resumeUrl || undefined,
+          govtIdFileName: d.govtIdFileName || undefined,
+          govtIdFileDataUrl: d.govtIdUrl || undefined,
+          submittedAt:
+            typeof dossier.submittedAt === 'string' ? dossier.submittedAt : undefined,
+        };
+        setSubmittedApp(submittedForm);
+      } else {
+        try {
+          const exactStoredApp = localStorage.getItem(`ras_submitted_app_${applicantId}`);
+          let storedApp = exactStoredApp;
+          if (!storedApp) {
+            const latestRaw = localStorage.getItem('ras_latest_submitted_app');
+            if (latestRaw) {
+              try {
+                const latestParsed = JSON.parse(latestRaw);
+                if (latestParsed.applicantId === applicantId) storedApp = latestRaw;
+              } catch {}
+            }
           }
-        }
-
-        const fileUrlsStr = localStorage.getItem('ras_file_data_urls');
-        let fileUrls: any = {};
-        if (fileUrlsStr) {
-          try { fileUrls = JSON.parse(fileUrlsStr); } catch (e) {}
-        }
-
-        if (storedApp) {
-          submittedForm = JSON.parse(storedApp);
-          if (!submittedForm.resumeFileDataUrl && fileUrls.resumeFileDataUrl) {
-            submittedForm.resumeFileDataUrl = fileUrls.resumeFileDataUrl;
+          if (storedApp) {
+            submittedForm = JSON.parse(storedApp);
+            setSubmittedApp(submittedForm);
           }
-          if (!submittedForm.govtIdFileDataUrl && fileUrls.govtIdFileDataUrl) {
-            submittedForm.govtIdFileDataUrl = fileUrls.govtIdFileDataUrl;
-          }
-          setSubmittedApp(submittedForm);
-        } else if (fileUrls.resumeFileDataUrl || fileUrls.govtIdFileDataUrl) {
-          submittedForm = {
-            resumeFileDataUrl: fileUrls.resumeFileDataUrl,
-            govtIdFileDataUrl: fileUrls.govtIdFileDataUrl,
-          };
-          setSubmittedApp(submittedForm);
-        }
-      } catch (e) {}
+        } catch {}
+      }
 
       if (submittedForm) {
         candidateData = {
           id: applicantId,
-          name: submittedForm.fullName || candidateData?.name || 'azm karim',
-          email: submittedForm.email || candidateData?.email || 'adawdzkarim05@gmail.com',
-          phone: submittedForm.phoneNumber || candidateData?.phone || '(929) 501-1117',
-          roleApplied: 'RBT',
+          name: submittedForm.fullName || candidateData?.name || 'Applicant',
+          email: submittedForm.email || candidateData?.email || '',
+          phone: submittedForm.phoneNumber || candidateData?.phone || '',
+          roleApplied: candidateData?.roleApplied || 'RBT',
           stage: candidateData?.stage || 'APPLIED',
-          experienceYears: candidateData?.experienceYears || 2,
-          appliedDate: submittedForm.submittedAt ? submittedForm.submittedAt.split('T')[0] : (candidateData?.appliedDate || '2026-08-06'),
+          experienceYears: candidateData?.experienceYears || 0,
+          appliedDate: submittedForm.submittedAt
+            ? submittedForm.submittedAt.split('T')[0]
+            : candidateData?.appliedDate || new Date().toISOString().split('T')[0],
           activationStatus: candidateData?.activationStatus || 'PENDING_HR_REVIEW',
+          userId: candidateData?.userId,
+          magicLinkToken: candidateData?.magicLinkToken,
         };
-      } else if (candidateData) {
-        // If DB candidate exists without localStorage submission, check latest submitted app fallback
-        try {
-          const latestStr = localStorage.getItem('ras_latest_submitted_app');
-          if (latestStr) {
-            const latest = JSON.parse(latestStr);
-            setSubmittedApp(latest);
-            if (latest.phoneNumber) {
-              candidateData.phone = latest.phoneNumber;
-            }
-            if (latest.email && candidateData.email === 'jane.doe@gmail.com') {
-              candidateData.email = latest.email;
-              candidateData.name = latest.fullName;
-            }
-          }
-        } catch (e) {}
-      } else {
-        // Full fallback
-        let fallbackPhone = '(555) 019-2831';
-        let fallbackName = 'Jane Doe';
-        let fallbackEmail = 'jane.doe@gmail.com';
-
-        try {
-          const latestStr = localStorage.getItem('ras_latest_submitted_app');
-          if (latestStr) {
-            const latest = JSON.parse(latestStr);
-            setSubmittedApp(latest);
-            if (latest.phoneNumber) fallbackPhone = latest.phoneNumber;
-            if (latest.fullName) fallbackName = latest.fullName;
-            if (latest.email) fallbackEmail = latest.email;
-          }
-        } catch (e) {}
-
+      } else if (!candidateData) {
         candidateData = {
           id: applicantId,
-          name: fallbackName,
-          email: fallbackEmail,
-          phone: fallbackPhone,
+          name: 'Applicant',
+          email: '',
+          phone: '',
           roleApplied: 'RBT',
           stage: 'APPLIED',
-          experienceYears: 2,
-          appliedDate: '2026-08-04',
+          experienceYears: 0,
+          appliedDate: new Date().toISOString().split('T')[0],
           activationStatus: 'PENDING_HR_REVIEW',
         };
       }
 
-      // Load interview payload — scoped strictly to this specific candidate
-      const payloadStr = localStorage.getItem('ras_rbt_interview_payload');
-      const interviewDone = localStorage.getItem(`ras_rbt_interview_done_${applicantId}`) === 'true';
-
-      // Only count an interview as booked for THIS candidate if payload matches their email or ID
-      let hasInterviewSlot = interviewDone;
-      if (!hasInterviewSlot && payloadStr) {
-        try {
-          const payload = JSON.parse(payloadStr);
-          const pEmail = (payload.candidateEmail || '').toLowerCase().trim();
-          const pId = payload.candidateId;
-          const candDataEmail = (candidateData?.email || '').toLowerCase().trim();
-          const isDemoC1 = applicantId === 'c1' || applicantId === 'cand-1' || applicantId === 'usr-applicant-1' || candDataEmail === 'jane.doe@gmail.com';
-          if (
-            (pEmail && candDataEmail && pEmail === candDataEmail) ||
-            (pId && pId === applicantId) ||
-            (isDemoC1 && (!pEmail || pEmail === 'jane.doe@gmail.com'))
-          ) {
-            hasInterviewSlot = true;
-          }
-        } catch (e) {}
-      }
-
-      // Check local storage override — ONLY for this candidate's ID, no cross-candidate fallbacks
-      try {
-        const customStages = JSON.parse(localStorage.getItem('ras_ats_custom_stages') || '{}');
-        const candidateStageOverride = customStages[candidateData.id];
-        if (candidateStageOverride) {
-          if (candidateStageOverride.activationStatus) {
-            candidateData.activationStatus = candidateStageOverride.activationStatus;
-          }
-          if (candidateStageOverride.stage) {
-            candidateData.stage = candidateStageOverride.stage;
-          }
+      // Load interview from AtsInterview (Phase 2 SoT)
+      const interviewRes = await getAtsInterview(applicantId);
+      const interviewRow = interviewRes.data;
+      if (interviewRow) {
+        setInterviewPayload({
+          candidateName: candidateData?.name,
+          candidateEmail: candidateData?.email,
+          candidateId: applicantId,
+          hrInterviewer: interviewRow.interviewerName || undefined,
+          date: interviewRow.scheduledDate || undefined,
+          time: interviewRow.scheduledTime || undefined,
+          meetingCode: interviewRow.meetingCode || undefined,
+          meetingLink: interviewRow.meetingLink || undefined,
+          status: interviewRow.status,
+          bookedAt: interviewRow.scheduledAt || undefined,
+        });
+        if (interviewRow.interviewerNotes) setInterviewerNotes(interviewRow.interviewerNotes);
+        if (interviewRow.completedScriptSteps.length > 0) {
+          setCompletedScriptSteps(interviewRow.completedScriptSteps);
         }
-        // Only move to INTERVIEW stage if THIS candidate has an interview booked
-        if (hasInterviewSlot && candidateData.stage !== 'HIRED' && candidateData.stage !== 'OFFER' && candidateData.stage !== 'REJECTED') {
-          candidateData.stage = 'INTERVIEW';
+        if (interviewRow.scorecard && Object.keys(interviewRow.scorecard).length > 0) {
+          setScorecardCategories((prev) => ({
+            ...prev,
+            ...(interviewRow.scorecard as typeof prev),
+          }));
         }
-      } catch (e) {}
-
-      if (payloadStr) {
-        try {
-          const parsed = JSON.parse(payloadStr);
-          setInterviewPayload(parsed);
-        } catch (e) {}
+        if (interviewRow.claimedByUserId) setIsClaimedByMe(true);
+        if (interviewRow.recommendation === 'ADVANCE' || interviewRow.recommendation === 'RECOMMEND_HIRE') {
+          setRecommendationDecision('RECOMMEND_HIRE');
+        } else if (interviewRow.recommendation === 'REJECT') {
+          setRecommendationDecision('REJECT');
+        } else if (interviewRow.recommendation === 'HOLD' || interviewRow.recommendation === 'NO_OPINION') {
+          setRecommendationDecision('NO_OPINION');
+        }
       }
 
-      // Load saved interviewer notes, script progress, scorecard ratings & video playlist
-      const savedNotes = localStorage.getItem(`ras_applicant_notes_${applicantId}`);
-      if (savedNotes) {
-        setInterviewerNotes(savedNotes);
-      }
-
-      const savedScriptSteps = localStorage.getItem(`ras_completed_script_steps_${applicantId}`);
-      if (savedScriptSteps) {
-        try {
-          const parsedSteps = JSON.parse(savedScriptSteps);
-          if (Array.isArray(parsedSteps)) setCompletedScriptSteps(parsedSteps);
-        } catch (e) {}
-      }
-
-      const savedScorecard = localStorage.getItem(`ras_scorecard_ratings_${applicantId}`);
-      if (savedScorecard) {
-        try {
-          const parsedScorecard = JSON.parse(savedScorecard);
-          setScorecardCategories(parsedScorecard);
-        } catch (e) {}
-      }
-
-      // Load recorded videos from IndexedDB (persists across page refresh!)
-      getRecordingsFromIDB(applicantId).then((idbVideos) => {
-        if (idbVideos && idbVideos.length > 0) {
-          setRecordedVideos(idbVideos);
-          setActiveVideoUrl(idbVideos[0].url);
-        } else {
-          try {
-            const savedVideosStr = localStorage.getItem(`ras_recorded_interviews_${applicantId}`);
-            if (savedVideosStr) {
-              const parsedVideos = JSON.parse(savedVideosStr);
-              if (Array.isArray(parsedVideos) && parsedVideos.length > 0) {
-                setRecordedVideos(parsedVideos);
-                setActiveVideoUrl(parsedVideos[0].url);
-              }
-            }
-          } catch (e) {}
+      // Load recorded videos from Supabase Storage (Phase 4)
+      getRecordingsFromIDB(applicantId).then((videos) => {
+        if (videos && videos.length > 0) {
+          setRecordedVideos(videos);
+          setActiveVideoUrl(videos[0].url);
         }
       });
 
-      // Check real-time requirements (scoped specifically to candidate ID)
-      const interviewPassed = localStorage.getItem(`ras_rbt_interview_passed_${applicantId}`) === 'true';
-      const isInterviewBooked = localStorage.getItem('ras_rbt_interview_booked') === 'true' ||
-                                localStorage.getItem(`ras_rbt_interview_booked_${applicantId}`) === 'true' ||
-                                localStorage.getItem('ras_rbt_interview_done') === 'true' ||
-                                localStorage.getItem(`ras_rbt_interview_done_${applicantId}`) === 'true' ||
-                                candidateData?.stage === 'INTERVIEW' ||
-                                !!interviewPayload ||
-                                interviewPassed;
-      const candEmail = (candidateData?.email || '').toLowerCase().trim();
-      const isDemoC1 = applicantId === 'c1' || applicantId === 'cand-1' || applicantId === 'usr-applicant-1' || candEmail === 'jane.doe@gmail.com';
-
-      const simDone = localStorage.getItem(`ras_rbt_sim_completed_${applicantId}`) === 'true' ||
-                      localStorage.getItem(`ras_rbt_sim_completed_${candEmail}`) === 'true' ||
-                      (isDemoC1 && (localStorage.getItem('ras_rbt_sim_completed') === 'true' || localStorage.getItem('ras_rbt_simulation_completed') === 'true'));
-
-      const availDone = localStorage.getItem(`ras_rbt_availability_set_${applicantId}`) === 'true' ||
-                        localStorage.getItem(`ras_rbt_availability_set_${candEmail}`) === 'true' ||
-                        (isDemoC1 && localStorage.getItem('ras_rbt_availability_set') === 'true');
-
-      const certDone = localStorage.getItem(`ras_rbt_cert_uploaded_${applicantId}`) === 'true' ||
-                       localStorage.getItem(`ras_rbt_cert_uploaded_${candEmail}`) === 'true' ||
-                       (isDemoC1 && (localStorage.getItem('ras_rbt_cert_uploaded') === 'true' || localStorage.getItem('ras_rbt_tasks_done') === 'true'));
-
-      const bgCleared = localStorage.getItem(`ras_rbt_background_cleared_${applicantId}`) === 'true' ||
-                        localStorage.getItem(`ras_rbt_background_cleared_${candEmail}`) === 'true' ||
-                        (isDemoC1 && localStorage.getItem('ras_rbt_background_cleared') === 'true');
+      // Requirements from CandidateOnboardingPacket (Phase 1 SoT)
+      const progressRes = await getOnboardingProgress(applicantId);
+      const snap = progressRes.data;
+      const isInterviewBooked =
+        !!snap?.interviewBooked ||
+        !!interviewRow ||
+        candidateData?.stage === 'INTERVIEW' ||
+        !!snap?.interviewPassed;
 
       setRequirements({
-        certUploaded: certDone,
-        simulationPassed: simDone,
-        availabilitySet: availDone,
+        tasksDone: !!snap?.tasksDone,
+        certUploaded: !!snap?.certUploaded,
+        simulationPassed: !!snap?.simulationDone,
+        availabilitySet: !!snap?.availabilityDone,
         interviewBooked: isInterviewBooked,
-        interviewPassed: interviewPassed,
-        backgroundCleared: bgCleared,
+        interviewPassed: !!snap?.interviewPassed || interviewRow?.status === 'COMPLETED',
+        backgroundCleared: !!snap?.backgroundCleared,
       });
+
+      // HIRED flow end: surface the linked RBT user + case-opening claim state honestly
+      if (candidateData?.stage === 'HIRED') {
+        const hiredRes = await getHiredCandidateSummary(applicantId);
+        setHiredSummary(hiredRes.success && hiredRes.data ? hiredRes.data : null);
+      } else {
+        setHiredSummary(null);
+      }
 
       setApplicant(candidateData);
       setIsLoading(false);
     }
 
     loadApplicant();
-    window.addEventListener('storage', loadApplicant);
     window.addEventListener('rbt_interview_changed', loadApplicant);
     window.addEventListener('rbt_availability_changed', loadApplicant);
     window.addEventListener('rbt_sim_changed', loadApplicant);
+    window.addEventListener('rbt_progress_synced', loadApplicant);
     return () => {
-      window.removeEventListener('storage', loadApplicant);
       window.removeEventListener('rbt_interview_changed', loadApplicant);
       window.removeEventListener('rbt_availability_changed', loadApplicant);
       window.removeEventListener('rbt_sim_changed', loadApplicant);
+      window.removeEventListener('rbt_progress_synced', loadApplicant);
     };
   }, [applicantId]);
 
@@ -478,7 +489,13 @@ export default function ApplicantProfilePage() {
       }
 
       // 3. Mix both audio streams using Web Audio API AudioContext
-      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const audioWindow = window as WebKitAudioWindow;
+      const AudioContextConstructor =
+        audioWindow.AudioContext || audioWindow.webkitAudioContext;
+      if (!AudioContextConstructor) {
+        throw new Error('Web Audio API is not available.');
+      }
+      const audioCtx = new AudioContextConstructor();
       const destination = audioCtx.createMediaStreamDestination();
 
       if (displayStream.getAudioTracks().length > 0) {
@@ -509,25 +526,34 @@ export default function ApplicantProfilePage() {
 
       mediaRecorder.onstop = () => {
         const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          const dataUrl = reader.result as string;
-          const newTake = {
-            id: `take-${Date.now()}`,
-            applicantId,
-            title: `Interview Take ${recordedVideos.length + 1}`,
-            url: dataUrl,
-            duration: recordingDuration,
-            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-          };
+        const title = `Interview Take ${recordedVideos.length + 1}`;
+        const localPreview = URL.createObjectURL(blob);
+        setActiveVideoUrl(localPreview);
+        setUploadProgress(0);
+        toast.message('Uploading interview take…');
 
-          saveRecordingToIDB(newTake).then(() => {
-            setRecordedVideos(prev => [newTake, ...prev]);
-            setActiveVideoUrl(dataUrl);
-            toast.success(`🎉 Interview Take ${recordedVideos.length + 1} saved permanently to IndexedDB!`);
+        void saveRecordingBlob({
+          applicantId,
+          title,
+          blob,
+          duration: recordingDuration,
+          onProgress: (percent) => setUploadProgress(percent),
+        })
+          .then((res) => {
+            setUploadProgress(null);
+            if (!res.success || !res.item) {
+              toast.error(res.error || 'Failed to upload recording to Storage');
+              return;
+            }
+            setRecordedVideos((prev) => [res.item!, ...prev]);
+            setActiveVideoUrl(res.item!.url);
+            URL.revokeObjectURL(localPreview);
+            toast.success(`${title} saved to secure storage.`);
+          })
+          .catch(() => {
+            setUploadProgress(null);
+            toast.error('Upload failed — check your connection and try again.');
           });
-        };
-        reader.readAsDataURL(blob);
       };
 
       // Stop recording automatically if user stops screen sharing from browser bar
@@ -545,7 +571,7 @@ export default function ApplicantProfilePage() {
       }, 1000);
 
       toast.success('🔴 Live recording started! Conducting interview screen...');
-    } catch (err) {
+    } catch {
       toast.error('Recording cancelled or screen permission denied.');
     }
   };
@@ -563,7 +589,11 @@ export default function ApplicantProfilePage() {
 
   const handleDeleteTake = async (takeId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    await deleteRecordingFromIDB(takeId);
+    const ok = await deleteRecordingFromIDB(takeId);
+    if (!ok) {
+      toast.error('Failed to delete recording');
+      return;
+    }
     setRecordedVideos(prev => {
       const updated = prev.filter(v => v.id !== takeId);
       if (activeVideoUrl === prev.find(v => v.id === takeId)?.url) {
@@ -574,83 +604,53 @@ export default function ApplicantProfilePage() {
     toast.success('Interview take deleted.');
   };
 
-  const handleSaveNotes = () => {
+  const handleSaveNotes = async () => {
     setIsSavingNotes(true);
-    localStorage.setItem(`ras_applicant_notes_${applicantId}`, interviewerNotes);
-    setTimeout(() => {
-      setIsSavingNotes(false);
-      toast.success('🎉 Interviewer notes saved & attached to candidate dossier!');
-    }, 400);
+    const res = await saveInterviewNotes(applicantId, interviewerNotes);
+    setIsSavingNotes(false);
+    if (!res.success) {
+      toast.error(res.error || 'Failed to save notes');
+      return;
+    }
+    toast.success('Interviewer notes saved to candidate dossier.');
   };
 
-  const handleApproveInterview = () => {
+  const handleApproveAndInvite = async () => {
     if (!applicant) return;
 
-    localStorage.setItem('ras_rbt_interview_passed', 'true');
-    localStorage.setItem(`ras_rbt_interview_passed_${applicantId}`, 'true');
-    localStorage.setItem(`ras_rbt_interview_passed_${applicant.id}`, 'true');
-    const payloadStr = localStorage.getItem('ras_rbt_interview_payload');
-    if (payloadStr) {
-      try {
-        const payload = JSON.parse(payloadStr);
-        payload.status = 'COMPLETED';
-        localStorage.setItem('ras_rbt_interview_payload', JSON.stringify(payload));
-      } catch (e) {}
+    const res = await inviteCandidate(applicant.id);
+    if (!res.success) {
+      toast.error(res.error || 'Invite failed');
+      return;
     }
 
-    try {
-      const customStages = JSON.parse(localStorage.getItem('ras_ats_custom_stages') || '{}');
-      const payload = { stage: 'PHONE_SCREEN', activationStatus: 'INVITATION_SENT' };
-      customStages[applicant.id] = payload;
-      customStages['c1'] = payload;
-      customStages['cand-1'] = payload;
-      customStages['usr-applicant-1'] = payload;
-      localStorage.setItem('ras_ats_custom_stages', JSON.stringify(customStages));
-    } catch (e) {}
+    setApplicant((prev) =>
+      prev
+        ? {
+            ...prev,
+            stage: res.candidate?.stage || 'PHONE_SCREEN',
+            activationStatus: res.candidate?.activationStatus || 'INVITATION_SENT',
+            magicLinkToken: res.candidate?.magicLinkToken ?? prev.magicLinkToken,
+          }
+        : null
+    );
 
-    setApplicant(prev => prev ? { ...prev, stage: 'PHONE_SCREEN', activationStatus: 'INVITATION_SENT' } : null);
-    setRequirements(prev => ({ ...prev, interviewPassed: true }));
-    window.dispatchEvent(new Event('rbt_interview_changed'));
-    window.dispatchEvent(new Event('storage'));
-
-    toast.success(`🎉 Interview recommendation for ${applicant.name} submitted to Head of HR!`);
-  };
-
-  const handleRejectInterview = () => {
-    if (!applicant) return;
-
-    try {
-      const customStages = JSON.parse(localStorage.getItem('ras_ats_custom_stages') || '{}');
-      customStages[applicant.id] = { stage: 'REJECTED', activationStatus: 'REJECTED' };
-      localStorage.setItem('ras_ats_custom_stages', JSON.stringify(customStages));
-    } catch (e) {}
-
-    setApplicant(prev => prev ? { ...prev, stage: 'REJECTED', activationStatus: 'REJECTED' } : null);
-    window.dispatchEvent(new Event('storage'));
-    toast.error(`HR Interview for ${applicant.name} marked as Rejected.`);
-  };
-
-  const handleApproveAndInvite = () => {
-    if (!applicant) return;
-
-    try {
-      const customStages = JSON.parse(localStorage.getItem('ras_ats_custom_stages') || '{}');
-      const payload = { stage: 'PHONE_SCREEN', activationStatus: 'INVITATION_SENT' };
-      customStages[applicant.id] = payload;
-      customStages['c1'] = payload;
-      customStages['cand-1'] = payload;
-      customStages['usr-applicant-1'] = payload;
-      localStorage.setItem('ras_ats_custom_stages', JSON.stringify(customStages));
-    } catch (e) {}
-
-    setApplicant(prev => prev ? { ...prev, stage: 'PHONE_SCREEN', activationStatus: 'INVITATION_SENT' } : null);
-    window.dispatchEvent(new Event('storage'));
-    toast.success(`Approved ${applicant.name}! Moved to "2. In Progress" stage & issued portal access link.`);
+    if (res.magicLinkUrl) {
+      try {
+        await navigator.clipboard.writeText(res.magicLinkUrl);
+        toast.success(`Approved ${applicant.name} — moved to In Progress. Magic link copied.`);
+      } catch {
+        toast.success(`Approved ${applicant.name} — moved to In Progress.`);
+      }
+    } else {
+      toast.success(`Approved ${applicant.name}! Moved to "2. In Progress".`);
+    }
   };
 
   const copyMagicLink = () => {
     if (!applicant) return;
-    const link = `http://localhost:3001/magic-link/${applicant.id}`;
+    const token = applicant.magicLinkToken || applicant.id;
+    const link = `${window.location.origin}/magic-link/${token}`;
     navigator.clipboard.writeText(link);
     setCopied(true);
     toast.success('Magic link copied to clipboard!');
@@ -714,7 +714,7 @@ export default function ApplicantProfilePage() {
 
         {/* HR Action Header Status & Delete Button */}
         <div className="relative z-10 flex flex-col sm:flex-row items-center gap-3">
-          {applicant.activationStatus === 'INVITATION_SENT' || applicant.activationStatus === 'ACCOUNT_ACTIVE' || applicant.stage === 'PHONE_SCREEN' || applicant.stage === 'INTERVIEW' || applicant.stage === 'OFFER' || applicant.stage === 'HIRED' ? (
+          {applicant.activationStatus === 'INVITATION_SENT' || applicant.activationStatus === 'ACTIVE' || applicant.stage === 'PHONE_SCREEN' || applicant.stage === 'INTERVIEW' || applicant.stage === 'OFFER' || applicant.stage === 'HIRED' ? (
             <div className="bg-emerald-500/10 border border-emerald-500/30 p-3 rounded-2xl flex items-center gap-3">
               <ShieldCheck className="w-5 h-5 text-emerald-400" />
               <div>
@@ -764,6 +764,101 @@ export default function ApplicantProfilePage() {
         </div>
       </div>
 
+      {/* HIRED FLOW END: LINKED RBT ACCOUNT & CASE-OPENING CLAIM STATE */}
+      {applicant.stage === 'HIRED' && (
+        <div className="bg-zinc-950/80 backdrop-blur-xl border border-emerald-500/30 rounded-3xl p-6 shadow-2xl space-y-5 relative overflow-hidden">
+          <div className="absolute -top-16 right-10 w-56 h-56 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+          <div className="relative flex items-center justify-between border-b border-white/10 pb-3">
+            <h3 className="text-sm font-black text-white font-heading flex items-center gap-2">
+              <UserCheck className="w-5 h-5 text-emerald-400" />
+              Hired — RBT Account &amp; Case Placement
+            </h3>
+            <span className="text-[10px] font-mono font-extrabold uppercase tracking-wider px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1.5 animate-pulse" />
+              Hire Complete
+            </span>
+          </div>
+
+          <div className="relative grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Linked staff account */}
+            <div className="p-4 rounded-2xl bg-zinc-900/80 border border-white/10 space-y-2">
+              <span className="text-[10px] font-mono uppercase font-bold text-zinc-500 block">Linked Staff Account</span>
+              {hiredSummary?.linkedUser ? (
+                <div className="space-y-1.5">
+                  <p className="text-sm font-extrabold text-white flex items-center gap-2">
+                    {hiredSummary.linkedUser.name}
+                    <span className={`text-[9px] font-mono font-extrabold px-2 py-0.5 rounded-full border ${
+                      hiredSummary.linkedUser.isActive
+                        ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                        : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                    }`}>
+                      {hiredSummary.linkedUser.isActive ? 'ACTIVE' : 'INACTIVE'}
+                    </span>
+                  </p>
+                  <p className="text-xs text-zinc-400 font-mono flex items-center gap-1.5">
+                    <Mail className="w-3 h-3 text-zinc-500" /> {hiredSummary.linkedUser.email}
+                  </p>
+                  <p className="text-xs text-zinc-400 font-mono">
+                    Role: <span className="text-white font-bold">{hiredSummary.linkedUser.role}</span>
+                    <span className="mx-2 text-zinc-600">•</span>
+                    Caseload: <span className={`font-bold ${hiredSummary.linkedUser.caseloadCount > 0 ? 'text-emerald-400' : 'text-zinc-400'}`}>
+                      {hiredSummary.linkedUser.caseloadCount} client{hiredSummary.linkedUser.caseloadCount === 1 ? '' : 's'}
+                    </span>
+                  </p>
+                </div>
+              ) : (
+                <div className="flex items-start gap-2 p-3 rounded-xl bg-rose-500/10 border border-rose-500/30">
+                  <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  <p className="text-xs text-rose-300 font-medium">
+                    No staff account is linked to this hired candidate — the hire did not complete user creation. Re-run the hire from the Offer stage or contact an admin.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Case-opening claims */}
+            <div className="p-4 rounded-2xl bg-zinc-900/80 border border-white/10 space-y-2">
+              <span className="text-[10px] font-mono uppercase font-bold text-zinc-500 block">
+                Case-Opening Claims ({hiredSummary?.caseApplications.length ?? 0})
+              </span>
+              {hiredSummary && hiredSummary.caseApplications.length > 0 ? (
+                <div className="space-y-2 max-h-44 overflow-y-auto pr-1">
+                  {hiredSummary.caseApplications.map((app) => (
+                    <div
+                      key={app.id}
+                      className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-zinc-950/80 border border-white/5"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-xs font-extrabold text-white font-mono truncate">{app.caseCode}</p>
+                        <p className="text-[10px] text-zinc-400 font-mono mt-0.5 flex items-center gap-1.5">
+                          <MapPin className="w-3 h-3 text-zinc-500 shrink-0" />
+                          {app.borough || 'Borough —'} · {app.weeklyHours != null ? `${app.weeklyHours} hrs/wk` : 'hrs —'} · Opening {app.openingStatus}
+                        </p>
+                      </div>
+                      <span className={`shrink-0 text-[9px] font-mono font-extrabold px-2 py-0.5 rounded-full border ${
+                        app.status === 'APPROVED'
+                          ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                          : app.status === 'REJECTED' || app.status === 'WITHDRAWN'
+                            ? 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                            : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                      }`}>
+                        {app.status.replace(/_/g, ' ')}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-zinc-500 font-mono p-3 rounded-xl bg-zinc-950/60 border border-dashed border-white/10 text-center">
+                  {hiredSummary?.linkedUser
+                    ? 'No case-opening claims yet — not assigned via the job board.'
+                    : 'Claim state unavailable without a linked staff account.'}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* DOCUMENT PREVIEW MODAL */}
       {previewDoc && (
         <div className="fixed inset-0 z-[999999] bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in">
@@ -793,8 +888,17 @@ export default function ApplicantProfilePage() {
             <div className="flex-1 overflow-hidden p-0 bg-zinc-950 flex items-center justify-center min-h-[450px]">
               {previewDoc.type === 'RESUME' ? (
                 submittedApp?.resumeFileDataUrl ? (
-                  submittedApp.resumeFileDataUrl.startsWith('data:image/') || !submittedApp.resumeFileDataUrl.startsWith('data:application/pdf') ? (
-                    <img src={submittedApp.resumeFileDataUrl} alt="Uploaded Resume Document" className="max-w-full max-h-[75vh] object-contain rounded-2xl shadow-2xl border border-white/10" />
+                  /\.(jpe?g|png|webp)(\?|$)/i.test(submittedApp.resumeFileDataUrl) ||
+                  submittedApp.resumeFileDataUrl.startsWith('data:image/') ? (
+                    <Image
+                      loader={uploadedDocumentImageLoader}
+                      unoptimized
+                      src={submittedApp.resumeFileDataUrl}
+                      alt="Uploaded Resume Document"
+                      width={1600}
+                      height={1200}
+                      className="w-auto h-auto max-w-full max-h-[75vh] object-contain rounded-2xl shadow-2xl border border-white/10"
+                    />
                   ) : (
                     <iframe src={`${submittedApp.resumeFileDataUrl}#toolbar=0&navpanes=0`} className="w-full h-[75vh] rounded-2xl border-0" title="Uploaded Resume PDF" />
                   )
@@ -806,15 +910,24 @@ export default function ApplicantProfilePage() {
                     <div className="space-y-1">
                       <h3 className="text-base font-extrabold text-white">{submittedApp?.resumeFileName || 'Resume Document'}</h3>
                       <p className="text-xs text-zinc-400 max-w-sm font-mono mx-auto">
-                        File attached by applicant ({submittedApp?.resumeFileName || 'Uploaded_Resume.pdf'}). Base64 data stream not cached in current session.
+                        No resume on file in secure storage for this candidate yet.
                       </p>
                     </div>
                   </div>
                 )
               ) : (
                 submittedApp?.govtIdFileDataUrl ? (
-                  submittedApp.govtIdFileDataUrl.startsWith('data:image/') || !submittedApp.govtIdFileDataUrl.startsWith('data:application/pdf') ? (
-                    <img src={submittedApp.govtIdFileDataUrl} alt="Uploaded Government Photo ID" className="max-w-full max-h-[75vh] object-contain rounded-2xl shadow-2xl border border-white/10" />
+                  /\.(jpe?g|png|webp)(\?|$)/i.test(submittedApp.govtIdFileDataUrl) ||
+                  submittedApp.govtIdFileDataUrl.startsWith('data:image/') ? (
+                    <Image
+                      loader={uploadedDocumentImageLoader}
+                      unoptimized
+                      src={submittedApp.govtIdFileDataUrl}
+                      alt="Uploaded Government Photo ID"
+                      width={1600}
+                      height={1200}
+                      className="w-auto h-auto max-w-full max-h-[75vh] object-contain rounded-2xl shadow-2xl border border-white/10"
+                    />
                   ) : (
                     <iframe src={`${submittedApp.govtIdFileDataUrl}#toolbar=0&navpanes=0`} className="w-full h-[75vh] rounded-2xl border-0" title="Uploaded Government ID PDF" />
                   )
@@ -826,7 +939,7 @@ export default function ApplicantProfilePage() {
                     <div className="space-y-1">
                       <h3 className="text-base font-extrabold text-white">{submittedApp?.govtIdFileName || 'Government Photo ID'}</h3>
                       <p className="text-xs text-zinc-400 max-w-sm font-mono mx-auto">
-                        Document attached by applicant ({submittedApp?.govtIdFileName || 'Government_Photo_ID.pdf'}). Base64 data stream not cached in current session.
+                        No government ID on file in secure storage for this candidate yet.
                       </p>
                     </div>
                   </div>
@@ -914,28 +1027,50 @@ export default function ApplicantProfilePage() {
 
       {/* CORE NAVIGATION TABS */}
       {(() => {
-        const isInterviewSubmitted = requirements.interviewPassed || localStorage.getItem(`ras_rbt_interview_passed_${applicantId}`) === 'true';
+        const isInterviewSubmitted = requirements.interviewPassed;
         const hasInterviewAccess = requirements.interviewBooked || requirements.interviewPassed || applicant.stage === 'INTERVIEW' || isInterviewSubmitted;
+        const navigationTabs: ApplicantProfileNavigationTab[] = [
+          { id: 'OVERVIEW', label: 'Overview & Application Form', icon: User },
+          ...(applicant.stage !== 'APPLIED'
+            ? [{ id: 'PROGRESS' as const, label: 'Task Requirements & Progress', icon: ClipboardList }]
+            : []),
+          ...(hasInterviewAccess
+            ? [{
+                id: 'INTERVIEW' as const,
+                label: isInterviewSubmitted
+                  ? '✓ HR Interview (Submitted & Sealed)'
+                  : '🎥 1-on-1 HR Video Interview & Notes',
+                icon: Video,
+                badge: isInterviewSubmitted ? 'LOCKED' : 'LIVE INTERVIEW',
+              }]
+            : []),
+          ...(role === 'HEAD_HR'
+            ? [{
+                id: 'EXTEND_OFFER' as const,
+                label: 'Extend Offer (LS-54)',
+                icon: FileText,
+                badge: 'HEAD HR',
+              }]
+            : []),
+          ...(role === 'HEAD_HR'
+            ? [{
+                id: 'AUDIT' as const,
+                label: 'Onboarding Audit Trail',
+                icon: ShieldCheck,
+                badge: 'HEAD HR ONLY',
+              }]
+            : []),
+        ];
 
         return (
           <div className="flex items-center gap-2 border-b border-white/10 pb-3 flex-wrap">
-            {[
-              { id: 'OVERVIEW', label: 'Overview & Application Form', icon: User },
-              ...(applicant.stage !== 'APPLIED' ? [{ id: 'PROGRESS', label: 'Task Requirements & Progress', icon: ClipboardList }] : []),
-              ...(hasInterviewAccess ? [{ 
-                id: 'INTERVIEW', 
-                label: isInterviewSubmitted ? '✓ HR Interview (Submitted & Sealed)' : '🎥 1-on-1 HR Video Interview & Notes', 
-                icon: Video, 
-                badge: isInterviewSubmitted ? 'LOCKED' : 'LIVE INTERVIEW' 
-              }] : []),
-              ...(role === 'HEAD_HR' ? [{ id: 'AUDIT', label: '🛡️ Legal & Compliance Audit', icon: ShieldCheck, badge: 'HEAD HR ONLY' }] : []),
-            ].map(tab => {
+            {navigationTabs.map(tab => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
               return (
                 <button
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id as any)}
+                  onClick={() => setActiveTab(tab.id)}
                   className={`px-5 py-3 rounded-2xl font-black text-xs flex items-center gap-2.5 transition-all cursor-pointer border ${
                     isActive 
                       ? 'bg-[#F97316] text-white border-orange-500 shadow-lg shadow-orange-500/20' 
@@ -961,6 +1096,15 @@ export default function ApplicantProfilePage() {
           </div>
         );
       })()}
+
+      {activeTab === 'EXTEND_OFFER' && role === 'HEAD_HR' && (
+        <ExtendOfferTab
+          key={applicantId}
+          candidateId={applicantId}
+          candidateName={applicant.name}
+          preparerName="Head of HR"
+        />
+      )}
 
       {/* TAB: LEGAL E-SIGNATURE AUDIT TRAIL (HEAD HR ONLY) */}
       {activeTab === 'AUDIT' && role === 'HEAD_HR' && (
@@ -1042,10 +1186,17 @@ export default function ApplicantProfilePage() {
                         <Eye className="w-4 h-4" />
                       </button>
                       <a
-                        href="#"
-                        onClick={(e) => { e.preventDefault(); toast.success(`Downloading ${submittedApp?.resumeFileName || 'Uploaded_Resume.pdf'}`); }}
+                        href={submittedApp?.resumeFileDataUrl || '#'}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={(e) => {
+                          if (!submittedApp?.resumeFileDataUrl) {
+                            e.preventDefault();
+                            toast.error('No resume file in storage');
+                          }
+                        }}
                         className="p-2 rounded-lg bg-brand-orange-500/20 hover:bg-brand-orange-500/30 text-brand-orange-400 transition-colors cursor-pointer"
-                        title="Download Resume PDF"
+                        title="Download Resume"
                       >
                         <Download className="w-4 h-4" />
                       </a>
@@ -1080,10 +1231,17 @@ export default function ApplicantProfilePage() {
                         <Eye className="w-4 h-4" />
                       </button>
                       <a
-                        href="#"
-                        onClick={(e) => { e.preventDefault(); toast.success(`Downloading ${submittedApp?.govtIdFileName || 'Government_Photo_ID.pdf'}`); }}
+                        href={submittedApp?.govtIdFileDataUrl || '#'}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={(e) => {
+                          if (!submittedApp?.govtIdFileDataUrl) {
+                            e.preventDefault();
+                            toast.error('No government ID file in storage');
+                          }
+                        }}
                         className="p-2 rounded-lg bg-brand-orange-500/20 hover:bg-brand-orange-500/30 text-brand-orange-400 transition-colors cursor-pointer"
-                        title="Download Photo ID PDF"
+                        title="Download Photo ID"
                       >
                         <Download className="w-4 h-4" />
                       </a>
@@ -1105,27 +1263,51 @@ export default function ApplicantProfilePage() {
                     <p className="font-semibold text-white">{submittedApp?.address || 'Not Provided'}</p>
                   </div>
                   <div className="p-3.5 rounded-xl bg-zinc-950 border border-white/5 space-y-1">
-                    <span className="text-[10px] font-mono text-zinc-500 block">BACB / RBT Status</span>
+                    <span className="text-[10px] font-mono text-zinc-500 block">40-Hour Course Status</span>
                     <p className="font-semibold text-white">{submittedApp?.rbtStatus || 'Not Specified'}</p>
+                    {submittedApp?.fortyHourCertFileName && (
+                      <p className="text-[10px] font-mono text-emerald-400 mt-1">
+                        Cert on file: {submittedApp.fortyHourCertFileName}
+                      </p>
+                    )}
                   </div>
                   <div className="p-3.5 rounded-xl bg-zinc-950 border border-white/5 space-y-1">
                     <span className="text-[10px] font-mono text-zinc-500 block">Preferred Boroughs</span>
                     <p className="font-semibold text-white">{submittedApp?.boroughs || 'Not Specified'}</p>
                   </div>
                   <div className="p-3.5 rounded-xl bg-zinc-950 border border-white/5 space-y-1">
-                    <span className="text-[10px] font-mono text-zinc-500 block">Transportation Method</span>
+                    <span className="text-[10px] font-mono text-zinc-500 block">Start / Weekly Hours</span>
+                    <p className="font-semibold text-white">
+                      {submittedApp?.availableToStart || '—'} · {submittedApp?.weeklyHours || '—'}
+                    </p>
+                  </div>
+                  <div className="p-3.5 rounded-xl bg-zinc-950 border border-white/5 space-y-1">
+                    <span className="text-[10px] font-mono text-zinc-500 block">Transportation</span>
                     <p className="font-semibold text-white">{submittedApp?.transportation || 'Not Specified'}</p>
+                  </div>
+                  <div className="p-3.5 rounded-xl bg-zinc-950 border border-white/5 space-y-1">
+                    <span className="text-[10px] font-mono text-zinc-500 block">Experience / Languages</span>
+                    <p className="font-semibold text-white">
+                      {submittedApp?.yearsExperience || '—'} · {submittedApp?.languages || '—'}
+                    </p>
                   </div>
                   <div className="p-3.5 rounded-xl bg-zinc-950 border border-white/5 space-y-1">
                     <span className="text-[10px] font-mono text-zinc-500 block">Working Availability</span>
                     <p className="font-semibold text-white">{submittedApp?.availability || 'Not Specified'}</p>
                   </div>
                   <div className="p-3.5 rounded-xl bg-zinc-950 border border-white/5 space-y-1">
-                    <span className="text-[10px] font-mono text-zinc-500 block">Work Auth &amp; Background Consent</span>
+                    <span className="text-[10px] font-mono text-zinc-500 block">Work Auth &amp; Background</span>
                     <p className="font-semibold text-emerald-400">
-                      Work Auth: {submittedApp?.workAuth || 'Yes'} • Background Check: {submittedApp?.backgroundCheck || 'Yes'}
+                      Auth: {submittedApp?.workAuth || '—'} · BG: {submittedApp?.backgroundCheck || '—'} · CPR:{' '}
+                      {submittedApp?.cprStatus || '—'}
                     </p>
                   </div>
+                  {submittedApp?.additionalNotes && (
+                    <div className="p-3.5 rounded-xl bg-zinc-950 border border-white/5 space-y-1 md:col-span-2">
+                      <span className="text-[10px] font-mono text-zinc-500 block">Additional Notes</span>
+                      <p className="font-semibold text-white whitespace-pre-wrap">{submittedApp.additionalNotes}</p>
+                    </div>
+                  )}
                 </div>
               </div>
             </CardContent>
@@ -1148,37 +1330,51 @@ export default function ApplicantProfilePage() {
             </div>
 
             <div className="flex items-center gap-2 bg-zinc-900 px-3 py-1.5 rounded-xl border border-white/10">
-              <span className="text-xs font-semibold text-zinc-400">Completion:</span>
-              <span className="text-xs font-mono font-black text-brand-orange-400">{completedReqsCount}/6 ({Math.round((completedReqsCount/6)*100)}%)</span>
+              <span className="text-xs font-semibold text-zinc-400">Offer Requirements:</span>
+              <span className="text-xs font-mono font-black text-brand-orange-400">{completedReqsCount}/5 ({completedReqsCount * 20}%)</span>
             </div>
           </CardHeader>
           <CardContent className="pt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {/* 1. BACB 40-Hour Certificate (OPTIONAL FOR BT CLEARANCE) */}
+            {/* 1. Onboarding Forms & E-Signatures (tasksDone — OFFER gate) */}
             <div className={`p-4 rounded-2xl border transition-all flex items-start gap-3 ${
-              requirements.certUploaded ? 'bg-emerald-500/10 border-emerald-500/30 text-white' : 'bg-amber-500/10 border-amber-500/20 text-white'
+              requirements.tasksDone ? 'bg-emerald-500/10 border-emerald-500/30 text-white' : 'bg-amber-500/10 border-amber-500/20 text-white'
             }`}>
-              <Award className={`w-5 h-5 shrink-0 mt-0.5 ${requirements.certUploaded ? 'text-emerald-400' : 'text-amber-500'}`} />
+              <CheckSquare className={`w-5 h-5 shrink-0 mt-0.5 ${requirements.tasksDone ? 'text-emerald-400' : 'text-amber-500'}`} />
               <div>
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <h4 className="text-xs font-bold text-white">1. 40-Hour BACB Training</h4>
-                  <span className="text-[9px] font-mono font-extrabold bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded border border-amber-500/40">
-                    Optional for BT
-                  </span>
-                </div>
-                <p className="text-[11px] text-zinc-400 mt-1">Uploaded to upgrade to RBT Tier Pay.</p>
-                <span className={`text-[10px] font-mono block mt-2 font-bold ${requirements.certUploaded ? 'text-emerald-400' : 'text-amber-400'}`}>
-                  {requirements.certUploaded ? '✓ Complete (RBT Tier Upgrade)' : '⏳ Awaiting Upload (Optional)'}
+                <h4 className="text-xs font-bold text-white">1. Onboarding Forms &amp; E-Signatures</h4>
+                <p className="text-[11px] text-zinc-400 mt-1">All required onboarding tasks &amp; signature forms.</p>
+                <span className={`text-[10px] font-mono block mt-2 font-bold ${requirements.tasksDone ? 'text-emerald-400' : 'text-amber-400'}`}>
+                  {requirements.tasksDone ? '✓ All Forms Signed' : '⏳ Forms Outstanding'}
                 </span>
               </div>
             </div>
 
-            {/* 2. EMR Data Simulation */}
+            {/* 2. BACB 40-Hour Certificate (MANDATORY) */}
+            <div className={`p-4 rounded-2xl border transition-all flex items-start gap-3 ${
+              requirements.certUploaded ? 'bg-emerald-500/10 border-emerald-500/30 text-white' : 'bg-rose-500/10 border-rose-500/20 text-white'
+            }`}>
+              <Award className={`w-5 h-5 shrink-0 mt-0.5 ${requirements.certUploaded ? 'text-emerald-400' : 'text-rose-400'}`} />
+              <div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <h4 className="text-xs font-bold text-white">2. 40-Hour BACB Training</h4>
+                  <span className="text-[9px] font-mono font-extrabold bg-rose-500/20 text-rose-300 px-1.5 py-0.5 rounded border border-rose-500/40">
+                    Mandatory
+                  </span>
+                </div>
+                <p className="text-[11px] text-zinc-400 mt-1">Required before wage offer / hire.</p>
+                <span className={`text-[10px] font-mono block mt-2 font-bold ${requirements.certUploaded ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {requirements.certUploaded ? '✓ Complete' : '⏳ Awaiting Upload'}
+                </span>
+              </div>
+            </div>
+
+            {/* 3. EMR Data Simulation */}
             <div className={`p-4 rounded-2xl border transition-all flex items-start gap-3 ${
               requirements.simulationPassed ? 'bg-emerald-500/10 border-emerald-500/30 text-white' : 'bg-amber-500/10 border-amber-500/20 text-white'
             }`}>
               <Award className={`w-5 h-5 shrink-0 mt-0.5 ${requirements.simulationPassed ? 'text-emerald-400' : 'text-amber-500'}`} />
               <div>
-                <h4 className="text-xs font-bold text-white">2. EMR Data Simulation</h4>
+                <h4 className="text-xs font-bold text-white">3. EMR Data Simulation</h4>
                 <p className="text-[11px] text-zinc-400 mt-1">Completed trial logging &amp; BRP test.</p>
                 <span className={`text-[10px] font-mono block mt-2 font-bold ${requirements.simulationPassed ? 'text-emerald-400' : 'text-amber-400'}`}>
                   {requirements.simulationPassed ? '✓ Passed (100% Accuracy)' : '⏳ Pending Simulation'}
@@ -1192,15 +1388,15 @@ export default function ApplicantProfilePage() {
             }`}>
               <Clock className={`w-5 h-5 shrink-0 mt-0.5 ${requirements.availabilitySet ? 'text-emerald-400' : 'text-amber-500'}`} />
               <div>
-                <h4 className="text-xs font-bold text-white">3. Availability Grid</h4>
-                <p className="text-[11px] text-zinc-400 mt-1">Afternoon availability submitted.</p>
+                <h4 className="text-xs font-bold text-white">4. Availability Grid</h4>
+                <p className="text-[11px] text-zinc-400 mt-1">Weekly work availability submitted.</p>
                 <span className={`text-[10px] font-mono block mt-2 font-bold ${requirements.availabilitySet ? 'text-emerald-400' : 'text-amber-400'}`}>
                   {requirements.availabilitySet ? '✓ Grid Submitted' : '⏳ Awaiting Submission'}
                 </span>
               </div>
             </div>
 
-            {/* 4. Video Interview Scheduled */}
+            {/* 5. HR Interview & Evaluation (interviewPassed is the OFFER gate; booked is intermediate) */}
             <div className={`p-4 rounded-2xl border transition-all flex items-start gap-3 ${
               requirements.interviewPassed
                 ? 'bg-emerald-500/10 border-emerald-500/30 text-white'
@@ -1212,8 +1408,8 @@ export default function ApplicantProfilePage() {
                 requirements.interviewPassed ? 'text-emerald-400' : requirements.interviewBooked ? 'text-blue-400' : 'text-amber-500'
               }`} />
               <div>
-                <h4 className="text-xs font-bold text-white">4. 1-on-1 Video Interview</h4>
-                <p className="text-[11px] text-zinc-400 mt-1">Scheduled with Marcus Vance. Pending HR evaluation submission.</p>
+                <h4 className="text-xs font-bold text-white">5. 1-on-1 HR Interview &amp; Evaluation</h4>
+                <p className="text-[11px] text-zinc-400 mt-1">Booked slot counts toward the Interview column; only a submitted HR evaluation clears this requirement.</p>
                 <span className={`text-[10px] font-mono block mt-2 font-bold ${
                   requirements.interviewPassed ? 'text-emerald-400' : requirements.interviewBooked ? 'text-blue-400' : 'text-amber-400'
                 }`}>
@@ -1226,29 +1422,20 @@ export default function ApplicantProfilePage() {
               </div>
             </div>
 
-            {/* 5. HR Interview Evaluation Passed */}
-            <div className={`p-4 rounded-2xl border transition-all flex items-start gap-3 ${
-              requirements.interviewPassed ? 'bg-emerald-500/10 border-emerald-500/30 text-white' : 'bg-amber-500/10 border-amber-500/20 text-white'
-            }`}>
-              <UserCheck className={`w-5 h-5 shrink-0 mt-0.5 ${requirements.interviewPassed ? 'text-emerald-400' : 'text-amber-500'}`} />
-              <div>
-                <h4 className="text-xs font-bold text-white">5. HR Evaluation Clearance</h4>
-                <p className="text-[11px] text-zinc-400 mt-1">HR interviewer evaluation.</p>
-                <span className={`text-[10px] font-mono block mt-2 font-bold ${requirements.interviewPassed ? 'text-emerald-400' : 'text-amber-400'}`}>
-                  {requirements.interviewPassed ? '✓ Passed (Approved)' : '⏳ Pending HR Evaluation'}
-                </span>
-              </div>
-            </div>
-
-            {/* 6. Background Check Clearance */}
+            {/* Background Check Clearance (pre-hire clearance — does not gate the Offer stage) */}
             <div className={`p-4 rounded-2xl border transition-all flex items-start justify-between gap-3 ${
               requirements.backgroundCleared ? 'bg-emerald-500/10 border-emerald-500/30 text-white' : 'bg-amber-500/10 border-amber-500/20 text-white'
             }`}>
               <div className="flex items-start gap-3">
                 <ShieldCheck className={`w-5 h-5 shrink-0 mt-0.5 ${requirements.backgroundCleared ? 'text-emerald-400' : 'text-amber-500'}`} />
                 <div>
-                  <h4 className="text-xs font-bold text-white">6. Background Check</h4>
-                  <p className="text-[11px] text-zinc-400 mt-1">NYS Executive Law §296(16) &amp; SCR clearance.</p>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <h4 className="text-xs font-bold text-white">Background Check</h4>
+                    <span className="text-[9px] font-mono font-extrabold bg-zinc-500/20 text-zinc-300 px-1.5 py-0.5 rounded border border-zinc-500/40">
+                      Clearance — not an Offer gate
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-zinc-400 mt-1">NYS Executive Law §296(16) &amp; SCR clearance. Tracked separately from the 5 offer requirements.</p>
                   <span className={`text-[10px] font-mono block mt-2 font-bold ${requirements.backgroundCleared ? 'text-emerald-400' : 'text-amber-400'}`}>
                     {requirements.backgroundCleared ? '✓ Cleared' : '⏳ Pending NYS Background'}
                   </span>
@@ -1260,10 +1447,14 @@ export default function ApplicantProfilePage() {
                 type="button"
                 onClick={() => {
                   const nextVal = !requirements.backgroundCleared;
-                  localStorage.setItem(`ras_rbt_background_cleared_${applicantId}`, String(nextVal));
-                  setRequirements(prev => ({ ...prev, backgroundCleared: nextVal }));
-                  window.dispatchEvent(new Event('storage'));
-                  toast.success(nextVal ? '✓ Background check marked as Cleared!' : 'Background check marked as Pending.');
+                  void updateCandidateProgress(applicantId, { backgroundCleared: nextVal }).then((res) => {
+                    if (!res.success) {
+                      toast.error(res.error || 'Failed to update background clearance');
+                      return;
+                    }
+                    setRequirements((prev) => ({ ...prev, backgroundCleared: nextVal }));
+                    toast.success(nextVal ? '✓ Background check marked as Cleared!' : 'Background check marked as Pending.');
+                  });
                 }}
                 className={`text-[10px] font-mono font-bold px-2.5 py-1 rounded-lg border transition-all cursor-pointer shrink-0 mt-1 ${
                   requirements.backgroundCleared
@@ -1282,7 +1473,7 @@ export default function ApplicantProfilePage() {
       {activeTab === 'INTERVIEW' && (
         <div className="space-y-6 animate-fade-in">
           {/* SUBMITTED & SEALED AUDIT BANNER */}
-          {(requirements.interviewPassed || localStorage.getItem(`ras_rbt_interview_passed_${applicantId}`) === 'true') && (
+          {(requirements.interviewPassed) && (
             <div className="bg-emerald-500/10 border border-emerald-500/30 p-4 rounded-2xl flex items-center justify-between text-emerald-400 font-mono text-xs shadow-xl">
               <div className="flex items-center gap-3">
                 <ShieldCheck className="w-6 h-6 text-emerald-400 shrink-0" />
@@ -1321,8 +1512,14 @@ export default function ApplicantProfilePage() {
                 rel="noopener noreferrer"
                 onClick={() => {
                   setHasJoinedMeeting(true);
-                  localStorage.setItem('ras_hr_joined_meeting', 'true');
-                  window.dispatchEvent(new Event('storage'));
+                  void markHrJoinedInterview(applicantId).then((res) => {
+                    if (!res.success) {
+                      toast.error(res.error || 'Failed to sync HR join');
+                      return;
+                    }
+                    window.dispatchEvent(new Event('rbt_interview_changed'));
+                    toast.success('Joined meeting — recruiter presence synced for applicant.');
+                  });
                 }}
                 className="bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs px-5 py-2.5 rounded-xl shadow-lg flex items-center gap-2 cursor-pointer transition-all hover:scale-[1.02]"
               >
@@ -1360,6 +1557,21 @@ export default function ApplicantProfilePage() {
                   <span className={`w-2.5 h-2.5 rounded-full ${hasJoinedMeeting ? 'bg-rose-500 animate-pulse' : 'bg-zinc-600'}`} />
                   <span>⏺️ Record Interview</span>
                 </button>
+              )}
+
+              {uploadProgress !== null && (
+                <div className="flex items-center gap-2.5 px-4 py-2.5 rounded-xl bg-zinc-900/80 backdrop-blur-xl border border-brand-orange-500/40 shadow-lg">
+                  <Loader2 className="w-3.5 h-3.5 text-brand-orange-400 animate-spin" />
+                  <span className="text-xs font-black text-white font-mono whitespace-nowrap">
+                    Uploading {uploadProgress}%
+                  </span>
+                  <div className="w-24 h-1.5 rounded-full bg-zinc-800 overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-brand-orange-500 transition-all duration-300"
+                      style={{ width: `${uploadProgress}%` }}
+                    />
+                  </div>
+                </div>
               )}
             </div>
           </div>
@@ -1492,18 +1704,14 @@ export default function ApplicantProfilePage() {
                             type="button"
                             onClick={() => {
                               if (isDone) {
-                                setCompletedScriptSteps(prev => {
-                                  const updated = prev.filter(i => i !== idx);
-                                  localStorage.setItem(`ras_completed_script_steps_${applicantId}`, JSON.stringify(updated));
-                                  return updated;
-                                });
+                                const updated = completedScriptSteps.filter((i) => i !== idx);
+                                setCompletedScriptSteps(updated);
+                                void saveInterviewScriptProgress(applicantId, updated);
                                 toast.info(`Marked "${step.title}" as incomplete`);
                               } else {
-                                setCompletedScriptSteps(prev => {
-                                  const updated = [...prev, idx];
-                                  localStorage.setItem(`ras_completed_script_steps_${applicantId}`, JSON.stringify(updated));
-                                  return updated;
-                                });
+                                const updated = [...completedScriptSteps, idx];
+                                setCompletedScriptSteps(updated);
+                                void saveInterviewScriptProgress(applicantId, updated);
                                 toast.success(`✓ Completed "${step.title}"!`);
                               }
                             }}
@@ -1733,7 +1941,7 @@ export default function ApplicantProfilePage() {
                                           [cat.key]: { ...current, score: val }
                                         };
                                         setScorecardCategories(updated);
-                                        localStorage.setItem(`ras_scorecard_ratings_${applicantId}`, JSON.stringify(updated));
+                                        void saveInterviewScorecard(applicantId, updated);
                                       }}
                                       className={`w-7 h-7 rounded-full text-xs font-mono font-extrabold flex items-center justify-center transition-all cursor-pointer ${
                                         current.score === val
@@ -1757,7 +1965,7 @@ export default function ApplicantProfilePage() {
                                       [cat.key]: { ...current, comment: e.target.value }
                                     };
                                     setScorecardCategories(updated);
-                                    localStorage.setItem(`ras_scorecard_ratings_${applicantId}`, JSON.stringify(updated));
+                                    void saveInterviewScorecard(applicantId, updated);
                                   }}
                                   className="bg-zinc-950 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white placeholder-zinc-500 font-mono focus:border-brand-orange-500 focus:outline-none max-w-[220px] w-full"
                                 />
@@ -1862,7 +2070,7 @@ export default function ApplicantProfilePage() {
                         <div>
                           <h4 className="text-xs font-bold text-white">No Interview Recordings Available</h4>
                           <p className="text-[11px] text-zinc-400 font-mono mt-1">
-                            Click "Join Meeting" first, then click "⏺️ Record Interview" in the top bar to record session takes.
+                            Click &quot;Join Meeting&quot; first, then click &quot;⏺️ Record Interview&quot; in the top bar to record session takes.
                           </p>
                         </div>
                       </div>
@@ -2036,17 +2244,28 @@ export default function ApplicantProfilePage() {
                 type="button"
                 onClick={() => {
                   setRecommendationDecision(recommendationChoice);
-                  localStorage.setItem(`ras_recommendation_decision_${applicantId}`, JSON.stringify({
-                    choice: recommendationChoice,
-                    explanation: recommendationExplanation,
-                    submittedAt: new Date().toISOString()
-                  }));
-                  setShowDecisionModal(false);
-                  handleApproveInterview();
-                  toast.success(`🎉 Interview decision (${recommendationChoice.replace('_', ' ')}) submitted to Head of HR! Closing dossier...`);
-                  setTimeout(() => {
-                    router.push('/ats');
-                  }, 600);
+                  const mapped =
+                    recommendationChoice === 'RECOMMEND_HIRE'
+                      ? 'ADVANCE'
+                      : recommendationChoice === 'REJECT'
+                        ? 'REJECT'
+                        : 'HOLD';
+                  void completeAtsInterview(applicantId, {
+                    recommendation: mapped,
+                    interviewPassed: recommendationChoice !== 'REJECT',
+                  }).then((res) => {
+                    if (!res.success) {
+                      toast.error(res.error || 'Failed to submit decision');
+                      return;
+                    }
+                    setShowDecisionModal(false);
+                    toast.success(
+                      `Interview decision (${recommendationChoice.replace('_', ' ')}) submitted to Head of HR!`
+                    );
+                    setTimeout(() => {
+                      router.push('/ats');
+                    }, 600);
+                  });
                 }}
                 className="bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs px-6 h-11 rounded-xl shadow-lg shadow-emerald-600/30 flex items-center gap-2 cursor-pointer"
               >

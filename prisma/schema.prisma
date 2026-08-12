@@ -1,11 +1,12 @@
+// Canonical schema — edit models here, then mirror into
+// packages/db/prisma/schema.prisma and run: npm run db:generate
+// (Client is generated from packages/db; do not output into root src/.)
+
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
@@ -94,6 +95,7 @@ enum AuthStatus {
 
 enum SessionStatus {
   SCHEDULED
+  IN_PROGRESS
   COMPLETED
   CANCELLED
   NO_SHOW
@@ -150,6 +152,15 @@ model User {
   notifications          Notification[]
   credentials            StaffCredential[]
   evvLogs                EVVLog[]
+  atsCandidatesAsStaff   AtsCandidate[]   @relation("AtsCandidateUser")
+  atsCandidatesAssigned  AtsCandidate[]   @relation("AtsAssignedHrAgent")
+  atsInterviewsAsInterviewer AtsInterview[] @relation("AtsInterviewInterviewer")
+  atsInterviewsClaimed       AtsInterview[] @relation("AtsInterviewClaimedBy")
+  atsHelpTicketsClaimed      AtsHelpTicket[] @relation("AtsHelpTicketClaimedBy")
+  atsHelpMessagesSent        AtsHelpMessage[] @relation("AtsHelpMessageSender")
+  atsInterviewRecordings     AtsInterviewRecording[] @relation("AtsInterviewRecordingCreator")
+  caseOpeningsCreated        CaseOpening[]           @relation("CaseOpeningCreator")
+  caseApplications           CaseApplication[]       @relation("CaseApplicationRbt")
 }
 
 model Client {
@@ -204,6 +215,7 @@ model Client {
   behaviorTargets BehaviorTarget[]
   appointments    ScheduleAppointment[]
   reAuthPackets   ReAuthPacket[]
+  caseOpenings    CaseOpening[]
 }
 
 model Document {
@@ -258,8 +270,9 @@ model Session {
   actualStart     DateTime?
   actualEnd       DateTime?
   
-  cptCode         String?       // e.g. 97153
-  location        String?
+  cptCode             String?       // e.g. 97153
+  location            String?
+  placeOfServiceCode  String?       // CMS POS code e.g. "12"
 
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
@@ -270,24 +283,48 @@ model Session {
   note            SessionNote?
   trialLogs       SessionTrialData[]
   behaviorLogs    BehaviorLog[]
+  evvLogs         EVVLog[]
+
+  // Hot paths: client-scoped lists/ranges ordered by scheduledStart (chart,
+  // notes pipeline, auth units, weekly grids, parent portal, activation gate)
+  // and RBT schedule/payroll windows. Equality-only filters (e.g. rbtId+status)
+  // are served by the leading column of each index.
+  @@index([clientId, scheduledStart])
+  @@index([rbtId, scheduledStart])
 }
 
 model SessionNote {
   id              String    @id @default(uuid()) @db.Uuid
   sessionId       String    @unique @db.Uuid
-  
+
   rbtSigned       Boolean   @default(false)
   parentSigned    Boolean   @default(false)
   bcbaSigned      Boolean   @default(false)
-  
-  clinicalContent String?   @db.Text
-  isConverted     Boolean   @default(false) // Billable status
+
+  clinicalContent    String?   @db.Text
+  structuredContent  Json?     // SoT header + sections + modality snapshot
+  checklistSnapshot  Json?     // billing checklist freeze at RBT submit
+  billableUnits      Int?
+
+  rbtSignedAt        DateTime?
+  parentSignedAt     DateTime?
+  bcbaSignedAt       DateTime?
+  rbtSignerName      String?
+  parentSignerName   String?
+  bcbaSignerName     String?
+
+  plutusClaimRef     String?   // manual Plutus tracker claim / batch id
+  convertedAt        DateTime?
+  isConverted        Boolean   @default(false) // Billable status — CRM /notes only
 
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
   session         Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   deficiencies    NoteDeficiency[]
+
+  @@index([bcbaSigned, isConverted])
+  @@index([rbtSigned, bcbaSigned])
 }
 
 model ActionItem {
@@ -332,6 +369,8 @@ model RbtOnboarding {
   bacbVerified        Boolean  @default(false)
   backgroundCleared   Boolean  @default(false)
   trainingsComplete   Boolean  @default(false)
+  // Legacy column name (pre-cutover). UI copy reads "EMR account setup" — keep the
+  // column name to avoid destructive DDL; rename only at a future major migration.
   artemisAccountSetup Boolean  @default(false)
   payrollComplete     Boolean  @default(false)
   payerCredentialed   Boolean  @default(false)
@@ -365,6 +404,8 @@ model IntakePacket {
   id              String             @id @default(uuid()) @db.Uuid
   clientId        String             @unique @db.Uuid
   magicLinkToken  String?            @unique
+  magicLinkExpiresAt DateTime?
+  magicLinkRevokedAt DateTime?
   deviceFingerprint String?
   status          IntakePacketStatus @default(PENDING_CLIENT_SUBMISSION)
   
@@ -635,37 +676,291 @@ model AuditLogVault {
 // ------------------------------------------------------
 
 model AtsCandidate {
-  id           String   @id @default(uuid()) @db.Uuid
-  firstName    String
-  lastName     String
-  email        String   @unique
-  phone        String?
-  appliedRole  String   @default("RBT") // RBT, BCBA, CLINICAL_DIRECTOR
-  stage        String   @default("APPLIED") // APPLIED, INTERVIEW_SCHEDULED, OFFER_EXTENDED, BACKGROUND_CLEARANCE, ONBOARDING, ACTIVE_STAFF
-  bacbNumber   String?
-  bacbVerified Boolean  @default(false)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id               String   @id @default(uuid()) @db.Uuid
+  firstName        String
+  lastName         String
+  email            String   @unique
+  phone            String?
+  appliedRole      String   @default("RBT") // RBT, BCBA, CLINICAL_DIRECTOR
+  stage            String   @default("APPLIED") // APPLIED, PHONE_SCREEN, INTERVIEW, OFFER, HIRED, HELP_DESK, REJECTED
+  activationStatus String   @default("PENDING_HR_REVIEW") // PENDING_HR_REVIEW, INVITATION_SENT, ACTIVE, REJECTED
+  bacbNumber       String?
+  bacbVerified     Boolean  @default(false)
+  dossier          Json?    @default("{}")
+  userId           String?  @db.Uuid
+  assignedHrAgentId String? @db.Uuid
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
-  onboardingPacket CandidateOnboardingPacket?
+  user               User?                       @relation("AtsCandidateUser", fields: [userId], references: [id], onDelete: SetNull)
+  assignedHrAgent    User?                       @relation("AtsAssignedHrAgent", fields: [assignedHrAgentId], references: [id], onDelete: SetNull)
+  onboardingPacket   CandidateOnboardingPacket?
+  interview          AtsInterview?
+  helpTickets        AtsHelpTicket[]
+  interviewRecordings AtsInterviewRecording[]
+  deviceSessions     ApplicantDeviceSession[]
+  signatureEvents    OnboardingSignatureEvent[]
 }
 
 model CandidateOnboardingPacket {
   id                    String   @id @default(uuid()) @db.Uuid
   candidateId           String   @unique @db.Uuid
   magicLinkToken        String?  @unique
+  magicLinkExpiresAt    DateTime?
+  magicLinkRevokedAt    DateTime?
   w4Complete            Boolean  @default(false)
   i9Complete            Boolean  @default(false)
   directDepositComplete Boolean  @default(false)
   cprUploaded           Boolean  @default(false)
   formData              Json?    @default("{}")
+
+  // Phase 1: durable requirement progress (replaces ras_rbt_* localStorage)
+  tasksDone             Boolean  @default(false)
+  tasksCompletedSteps   Json     @default("[]")
+  availabilityDone      Boolean  @default(false)
+  availabilityGrid      Json     @default("[]")
+  preferredBoroughs     Json     @default("[]")
+  transportation        String?
+  homeZipCode           String?
+  maxTravelMiles        Int?     @default(15)
+  simulationDone        Boolean  @default(false)
+  interviewBooked       Boolean  @default(false)
+  interviewPassed       Boolean  @default(false)
+  certUploaded          Boolean  @default(false)
+  backgroundCleared     Boolean  @default(false)
+  clearedForHire        Boolean  @default(false)
+
+  // Phase 5: application documents in Storage (paths, not blobs)
+  resumeFileName        String?
+  resumeStoragePath     String?
+  govtIdFileName        String?
+  govtIdStoragePath     String?
+
+  // Phase 6: device-bound magic-link login
+  deviceFingerprint     String?
+  deviceBoundAt         DateTime?
+  inviteSentAt          DateTime?
+  inviteAcceptedAt      DateTime?
+
+  ls54PreparedAt        DateTime?
+  ls54PreparedByUserId  String?  @db.Uuid
+  ls54StoragePath       String?
+  ls54Payload           Json?
+  ls54Status            String   @default("NONE") // NONE | DRAFT | SENT | IN_DISCUSSION | SIGNED | DECLINED
+  ls54Version           Int      @default(0)
+  ls54SentAt            DateTime?
+  ls54SignedAt          DateTime?
+  ls54DeclinedAt        DateTime?
+
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 
   candidate             AtsCandidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
 }
 
+model AtsInterview {
+  id                 String    @id @default(uuid()) @db.Uuid
+  candidateId        String    @unique @db.Uuid
+  interviewerUserId  String?   @db.Uuid
+  claimedByUserId    String?   @db.Uuid
+  scheduledDate      String?
+  scheduledTime      String?
+  scheduledAt        DateTime?
+  meetingCode        String?
+  meetingLink        String?
+  status             String    @default("SCHEDULED") // SCHEDULED | IN_PROGRESS | COMPLETED | CANCELLED | NO_SHOW
+  hrJoinedAt         DateTime?
+  scorecard          Json      @default("{}")
+  interviewerNotes   String?
+  scriptProgress     Json      @default("{}")
+  recommendation     String?   // ADVANCE | REJECT | HOLD
+  completedAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
+  candidate          AtsCandidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  interviewer        User?        @relation("AtsInterviewInterviewer", fields: [interviewerUserId], references: [id], onDelete: SetNull)
+  claimedBy          User?        @relation("AtsInterviewClaimedBy", fields: [claimedByUserId], references: [id], onDelete: SetNull)
+  recordings         AtsInterviewRecording[]
 
+  @@index([status])
+  @@index([interviewerUserId])
+  @@index([claimedByUserId])
+  @@index([scheduledAt])
+}
 
+model AtsHelpTicket {
+  id              String    @id @default(uuid()) @db.Uuid
+  candidateId     String    @db.Uuid
+  claimedByUserId String?   @db.Uuid
+  subject         String    @default("Candidate Help Request")
+  status          String    @default("OPEN") // OPEN | CLAIMED | RESOLVED | CLOSED
+  priority        String    @default("NORMAL")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  resolvedAt      DateTime?
 
+  candidate       AtsCandidate    @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  claimedBy       User?           @relation("AtsHelpTicketClaimedBy", fields: [claimedByUserId], references: [id], onDelete: SetNull)
+  messages        AtsHelpMessage[]
+
+  @@index([candidateId])
+  @@index([status])
+  @@index([claimedByUserId])
+}
+
+model AtsHelpMessage {
+  id           String   @id @default(uuid()) @db.Uuid
+  ticketId     String   @db.Uuid
+  senderType   String   // CANDIDATE | HR_AGENT | HEAD_HR | SYSTEM
+  senderUserId String?  @db.Uuid
+  body         String
+  createdAt    DateTime @default(now())
+
+  ticket       AtsHelpTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  senderUser   User?         @relation("AtsHelpMessageSender", fields: [senderUserId], references: [id], onDelete: SetNull)
+
+  @@index([ticketId])
+  @@index([createdAt])
+}
+
+model AtsInterviewRecording {
+  id               String   @id @default(uuid()) @db.Uuid
+  interviewId      String   @db.Uuid
+  candidateId      String   @db.Uuid
+  title            String   @default("Interview Take")
+  storageBucket    String   @default("ats-interview-recordings")
+  storagePath      String
+  mimeType         String   @default("video/webm")
+  durationSeconds  Int      @default(0)
+  byteSize         BigInt?
+  createdByUserId  String?  @db.Uuid
+  createdAt        DateTime @default(now())
+
+  interview        AtsInterview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  candidate        AtsCandidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  createdBy        User?        @relation("AtsInterviewRecordingCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([interviewId])
+  @@index([candidateId])
+}
+
+model ApplicantDeviceSession {
+  id                String    @id @default(uuid()) @db.Uuid
+  candidateId       String    @db.Uuid
+  deviceFingerprint String
+  magicLinkToken    String
+  userAgent         String?
+  ipAddress         String?
+  boundAt           DateTime  @default(now())
+  lastSeenAt        DateTime  @default(now())
+  revokedAt         DateTime?
+
+  candidate         AtsCandidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@unique([candidateId, deviceFingerprint])
+  @@index([magicLinkToken])
+  @@index([candidateId])
+}
+
+model OnboardingSignatureEvent {
+  id                 String   @id @default(uuid()) @db.Uuid
+  candidateId        String   @db.Uuid
+  stepNumber         Int
+  documentKey        String
+  documentTitle      String
+  documentVersion    String
+  actionType         String
+  signerName         String?
+  consents           Json     @default("{}")
+  auditHash          String
+  storagePath        String?
+  fileName           String?
+  quizScore          Int?
+  quizAttempt        Int?
+  quizAnswers        Json?
+  ipAddress          String?
+  userAgent          String?
+  deviceFingerprint  String?
+  createdAt          DateTime @default(now())
+
+  candidate          AtsCandidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@index([candidateId, createdAt])
+  @@index([candidateId, stepNumber])
+  @@index([documentKey])
+}
+
+enum CaseOpeningStatus {
+  OPEN
+  FILLED
+  CLOSED
+}
+
+enum CaseApplicationStatus {
+  APPLIED
+  MESSAGING
+  MEET_SCHEDULED
+  PARENT_PENDING
+  APPROVED
+  REJECTED
+  WITHDRAWN
+}
+
+/// Case Coord posts openings; RBTs apply via HRM job board (de-identified fields for HRM).
+model CaseOpening {
+  id                   String            @id @default(uuid()) @db.Uuid
+  clientId             String            @db.Uuid
+  createdById          String            @db.Uuid
+  caseCode             String            @unique
+  status               CaseOpeningStatus @default(OPEN)
+  weeklyHours          Int?
+  borough              String?
+  neighborhood         String?
+  zipCode              String?
+  childAge             Int?
+  ageBand              String?
+  clientInitials       String?
+  scheduleText         String?
+  locationNotes        String?
+  transportationNotes  String?
+  languagePref         String?
+  genderPref           String?
+  serviceSetting       String?           @default("In-home ABA (97153)")
+  sessionLengthMinutes Int?
+  daysOfWeek           String?
+  listingHighlights    String?
+  scheduleJson         Json?
+  bcbaDisplayName      String?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+
+  client               Client            @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  createdBy            User              @relation("CaseOpeningCreator", fields: [createdById], references: [id])
+  applications         CaseApplication[]
+
+  @@index([status])
+  @@index([clientId])
+  @@index([createdById])
+}
+
+model CaseApplication {
+  id                String                @id @default(uuid()) @db.Uuid
+  openingId         String                @db.Uuid
+  rbtUserId         String                @db.Uuid
+  status            CaseApplicationStatus @default(APPLIED)
+  message           String?
+  meetAt            DateTime?
+  meetLink          String?
+  parentDecisionAt  DateTime?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  opening           CaseOpening           @relation(fields: [openingId], references: [id], onDelete: Cascade)
+  rbt               User                  @relation("CaseApplicationRbt", fields: [rbtUserId], references: [id])
+
+  @@unique([openingId, rbtUserId])
+  @@index([rbtUserId])
+  @@index([status])
+  @@index([openingId])
+}

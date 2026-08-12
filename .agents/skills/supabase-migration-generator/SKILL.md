@@ -83,14 +83,19 @@ ALTER TABLE "ModelName" RENAME COLUMN "oldName" TO "newName";
 
 ---
 
-## Step 3: Present the SQL to the User
+## Step 3: Write the SQL file and present it to the User
 
-Always display the SQL in a clearly labeled code block:
+1. **Timestamp it** from the real current UTC time at file generation. Future filenames use exactly `YYYY-MM-DD-HHmmssZ-slug.sql`, where `Z` means UTC; do not copy a stale timestamp or use a placeholder.
+2. **Write** one logical change to that one file under `docs/sql/` (canonical paste-ready location; see `docs/sql/README.md`). The timestamp provides chronology and collision resistance, not dependency order. Existing date-only SQL is grandfathered and must not be renamed. Do **not** add new files under `prisma/migrations/`.
+3. **Index and order it** in `docs/sql/README.md`: add a row to the Index table and a row to the ordered "Run these for connected product" table. Declare any dependency on earlier scripts, or "no order dependency" when standalone. README dependency order controls execution.
+4. **Track state conservatively:** mark it **pending apply** until the user explicitly confirms execution. Catalog objects observed in a database may be documented as observed state, but do not convert that into an unrecorded claim that the file was manually applied.
+5. **Display** the same SQL in a clearly labeled code block:
 
 ```
 ## Database Migration Required
 
-Run this SQL in the **Supabase SQL Editor** (Project Settings → SQL Editor):
+Run this SQL in the **Supabase SQL Editor** (Project Settings → SQL Editor).
+Also saved at: `docs/sql/YYYY-MM-DD-HHmmssZ-slug.sql`
 
 \`\`\`sql
 -- Migration: [brief description]

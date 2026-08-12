@@ -1,13 +1,30 @@
 {
-  "name": "@simple-ras/db",
+  "name": "@repo/db",
   "version": "1.0.0",
   "private": true,
   "main": "./src/index.ts",
   "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./session-note-attestation": {
+      "types": "./src/session-note-attestation.ts",
+      "default": "./src/session-note-attestation.ts"
+    }
+  },
   "scripts": {
+    "generate": "prisma generate --schema=./prisma/schema.prisma",
     "build": "tsc"
   },
   "dependencies": {
-    "@prisma/client": "^5.0.0"
+    "@prisma/adapter-pg": "^7.8.0",
+    "@prisma/client": "^7.8.0",
+    "pg": "^8.22.0"
+  },
+  "devDependencies": {
+    "prisma": "^7.8.0",
+    "typescript": "^5"
   }
 }

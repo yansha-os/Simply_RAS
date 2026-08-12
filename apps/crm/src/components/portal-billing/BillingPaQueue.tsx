@@ -1,252 +1,219 @@
 'use client';
 
+/**
+ * Assessment PA / VOB manual Plutus tracker queue.
+ * Status mutations: `@/app/(dashboard)/portal-case/actions/billing.ts` (canonical),
+ * surfaced inline via `portal-billing/actions.ts` wrappers (see PaQueueShared).
+ * No EDI / payer API — VOB, submitted / approved / denied + auth numbers only.
+ */
+
 import React from 'react';
-import { Card } from '@/components/ui/Card';
-import { ShieldCheck, Clock, FileCheck, ArrowRight, Sparkles, Layers, ShieldAlert, Zap, CreditCard, Activity } from 'lucide-react';
-import Link from 'next/link';
-import { AreaChartWidget, BarChartWidget } from '@/components/ui/AnalyticsCharts';
+import { Clock, FileCheck, ShieldAlert, ShieldCheck } from 'lucide-react';
+import {
+  EmptyColumn,
+  PaQueueCard,
+  QueueSearchInput,
+  daysUntil,
+  filterClientsByQuery,
+  getPa,
+} from './PaQueueShared';
+
+function assessmentPa(client: any) {
+  return getPa(client, 'ASSESSMENT');
+}
 
 export default function BillingPaQueue({ clients }: { clients: any[] }) {
-  const [mounted, setMounted] = React.useState(false);
-  React.useEffect(() => setMounted(true), []);
-  
-  const pendingVobQueue = clients.filter(c => {
-    const pa = c.paRequests?.[0];
+  const [query, setQuery] = React.useState('');
+  const visible = filterClientsByQuery(clients, query);
+
+  const pendingVobQueue = visible.filter((c) => {
+    const pa = assessmentPa(c);
+    if (pa?.status === 'APPROVED') return false;
     if (pa) return !pa.vobCompleted || !pa.providerCredentialed;
     return c.status === 'CLINICAL_REVIEW_APPROVED';
   });
 
-  const submittedQueue = clients.filter(c => {
-    const pa = c.paRequests?.find((p: any) => p.type === 'ASSESSMENT') || c.paRequests?.[0];
-    if (pa) return pa.vobCompleted && pa.providerCredentialed && pa.status !== 'APPROVED';
+  const submittedQueue = visible.filter((c) => {
+    if (pendingVobQueue.some((p) => p.id === c.id)) return false;
+    const pa = assessmentPa(c);
+    if (pa) {
+      if (!pa.vobCompleted || !pa.providerCredentialed) return false;
+      return ['NOT_STARTED', 'SUBMITTED', 'DENIED_CLERICAL', 'DENIED_CLINICAL'].includes(
+        pa.status
+      );
+    }
     return c.status === 'VOB_COMPLETED' || c.status === 'PA_SUBMITTED';
   });
 
-  const expiringQueue = clients.filter(c => {
-    const pa = c.paRequests?.find((p: any) => p.type === 'ASSESSMENT') || c.paRequests?.[0];
+  const expiringQueue = visible.filter((c) => {
+    const pa = assessmentPa(c);
     if (!pa || pa.status !== 'APPROVED' || !pa.expirationDate) return false;
-    
-    const daysUntilExp = (new Date(pa.expirationDate).getTime() - new Date().getTime()) / (1000 * 3600 * 24);
-    return daysUntilExp <= 45;
+    const days = daysUntil(pa.expirationDate);
+    return days !== null && days <= 45;
   });
 
-  const QueueCard = ({ client, title, icon: Icon, desc, mode }: { client: any, title: string, icon: any, desc: string, mode?: string }) => {
-    const unreadCount = client.messages?.filter((m: any) => m.isFromClient && !m.readAt).length || 0;
-
-    return (
-      <Card className="bg-zinc-950/80 backdrop-blur-xl border border-white/10 hover:border-emerald-500/50 transition-all duration-300 cursor-pointer group mb-3 shadow-xl rounded-2xl overflow-hidden hover:scale-[1.01]">
-        <Link href={`/client/${client.id}${mode ? `?mode=${mode}` : ''}`} className="block p-4">
-          <div className="flex justify-between items-start">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <h4 className="font-bold text-white group-hover:text-emerald-400 transition-colors flex items-center gap-2 text-sm">
-                  {client.firstName} {client.lastName}
-                  {unreadCount > 0 && (
-                    <span className="bg-rose-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full text-center leading-none shadow-md animate-pulse">
-                      {unreadCount} new
-                    </span>
-                  )}
-                </h4>
-              </div>
-              <p className="text-xs text-zinc-400 font-sans">{desc}</p>
-              
-              {(() => {
-                const pa = client.paRequests?.find((p: any) => p.type === 'ASSESSMENT') || client.paRequests?.[0];
-                if (pa?.status === 'DENIED_CLINICAL') {
-                  return (
-                    <div className="mt-3 inline-block bg-rose-500/10 border border-rose-500/20 text-rose-400 text-[10px] font-mono font-bold uppercase px-2.5 py-1 rounded-full shadow-sm">
-                      🔴 Clinical Denial - P2P Required
-                    </div>
-                  );
-                }
-                if (pa?.expirationDate) {
-                  const days = Math.round((new Date(pa.expirationDate).getTime() - new Date().getTime()) / (1000 * 3600 * 24));
-                  return (
-                    <div className={`mt-3 inline-block text-[10px] font-mono font-bold uppercase px-2.5 py-1 rounded-full border shadow-sm ${
-                      days <= 15 ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
-                    }`}>
-                      ⏳ Expires in {days} Days ({new Date(pa.expirationDate).toLocaleDateString()})
-                    </div>
-                  );
-                }
-                return null;
-              })()}
-            </div>
-            <div className="w-8 h-8 rounded-xl bg-zinc-900 border border-white/10 flex items-center justify-center text-zinc-400 group-hover:text-emerald-400 group-hover:border-emerald-500/30 transition-all shrink-0 ml-2 shadow-sm">
-              <Icon className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="mt-4 flex items-center justify-between border-t border-white/5 pt-3">
-            <div className="text-[10px] text-zinc-500 font-mono uppercase font-bold tracking-wider">
-              Updated {mounted ? new Date(client.updatedAt).toLocaleDateString() : ''}
-            </div>
-            <ArrowRight className="w-4 h-4 text-zinc-500 group-hover:text-emerald-400 group-hover:translate-x-1 transition-all" />
-          </div>
-        </Link>
-      </Card>
-    );
-  };
+  const noResults =
+    query.trim() !== '' &&
+    pendingVobQueue.length + submittedQueue.length + expiringQueue.length === 0;
 
   return (
-    <div className="space-y-8 mt-6 pb-12 animate-fade-in-up">
-      {/* Hero Master Billing Command Banner */}
-      <div className="relative overflow-hidden p-8 rounded-3xl bg-gradient-to-r from-zinc-950 via-zinc-900 to-zinc-950 border border-white/10 shadow-2xl backdrop-blur-2xl group">
-        <div className="absolute top-0 right-1/4 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute bottom-0 left-10 w-96 h-96 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
+    <div className="space-y-8 mt-2 pb-8 animate-fade-in-up">
+      <div className="relative overflow-hidden p-7 rounded-3xl bg-zinc-950/80 border border-white/10 shadow-2xl backdrop-blur-2xl">
+        <div className="absolute top-0 right-1/4 w-80 h-80 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-8 w-72 h-72 bg-teal-500/8 rounded-full blur-3xl pointer-events-none" />
 
         <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
           <div className="space-y-3">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-mono text-[11px] font-bold">
-              <span className="dot-live"></span>
-              <span>BILLING &amp; CLAIMS COMMAND CENTER • CPT CODE ENGINE</span>
+              <span className="dot-live" />
+              ASSESSMENT PA · MANUAL PLUTUS TRACKER
             </div>
-            
-            <h1 className="text-3xl lg:text-4xl font-extrabold text-white font-heading tracking-tight leading-tight">
-              Medical Billing <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 via-teal-300 to-amber-300">&amp; VOB Queue</span>
+            <h1 className="text-2xl lg:text-3xl font-extrabold text-white font-heading tracking-tight">
+              VOB &amp; Assessment PA{' '}
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 via-teal-300 to-amber-300">
+                Queue
+              </span>
             </h1>
-            
             <p className="text-sm text-zinc-400 max-w-2xl font-sans leading-relaxed">
-              Perform Verification of Benefits (VOB), check copays/deductibles, track Initial Assessment (97151) and Treatment (97153/97155) Prior Authorizations, and resolve P2P denials.
+              Real clients from the database — verify benefits, credentialing, and record 97151 Prior
+              Authorization decisions inline (approve, deny with reason, P2P). Manual tracker only; no EDI.
             </p>
           </div>
 
-          {/* CPT Code Badge Snapshot */}
           <div className="grid grid-cols-3 gap-2.5 flex-shrink-0">
-            <div className="p-3 bg-zinc-900/90 rounded-2xl border border-white/10 text-center font-mono">
-              <span className="text-[10px] text-emerald-400 font-bold block">CPT 97151</span>
-              <span className="text-xs text-zinc-300 font-bold mt-1 block">Assessment</span>
-            </div>
-            <div className="p-3 bg-zinc-900/90 rounded-2xl border border-white/10 text-center font-mono">
-              <span className="text-[10px] text-teal-400 font-bold block">CPT 97153</span>
-              <span className="text-xs text-zinc-300 font-bold mt-1 block">Direct RBT</span>
-            </div>
-            <div className="p-3 bg-zinc-900/90 rounded-2xl border border-white/10 text-center font-mono">
-              <span className="text-[10px] text-purple-400 font-bold block">CPT 97155</span>
-              <span className="text-xs text-zinc-300 font-bold mt-1 block">BCBA Supervision</span>
-            </div>
+            {[
+              { code: '97151', label: 'Assessment', tone: 'text-emerald-400' },
+              { code: '97153', label: 'Direct RBT', tone: 'text-teal-400' },
+              { code: '97155', label: 'Protocol mod · qualified clinician', tone: 'text-violet-400' },
+            ].map((cpt) => (
+              <div
+                key={cpt.code}
+                className="p-3 bg-zinc-900/90 rounded-2xl border border-white/10 text-center font-mono backdrop-blur-xl"
+              >
+                <span className={`text-[10px] ${cpt.tone} font-bold block`}>CPT {cpt.code}</span>
+                <span className="text-xs text-zinc-300 font-bold mt-1 block">{cpt.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="relative z-10 mt-5 flex flex-col lg:flex-row lg:items-center gap-3">
+          <QueueSearchInput
+            value={query}
+            onChange={setQuery}
+            placeholder="Search clients by name…"
+          />
+          <div className="flex flex-wrap gap-3">
+            {[
+              { label: 'Pending VOB', count: pendingVobQueue.length, cls: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
+              { label: 'In flight', count: submittedQueue.length, cls: 'bg-teal-500/10 text-teal-400 border-teal-500/20' },
+              { label: 'Expiring', count: expiringQueue.length, cls: 'bg-amber-500/10 text-amber-400 border-amber-500/20' },
+            ].map((stat) => (
+              <div
+                key={stat.label}
+                className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-mono font-bold ${stat.cls}`}
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                {stat.label}
+                <span className="opacity-80">{stat.count}</span>
+              </div>
+            ))}
           </div>
         </div>
       </div>
 
-      {/* Interactive Billing CPT Units Analytics Chart */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2">
-          <AreaChartWidget
-            title="Monthly Authorized ABA Units & Revenue Velocity"
-            subtitle="Real-time volume curve of approved CPT 97151, 97153, and 97155 therapy units"
-            color="#10B981"
-            data={[
-              { label: 'Jan', value: 240 },
-              { label: 'Feb', value: 480 },
-              { label: 'Mar', value: 720 },
-              { label: 'Apr', value: 960 },
-              { label: 'May', value: 1240 },
-              { label: 'Jun', value: 1680 },
-              { label: 'Jul', value: 2150 },
-            ]}
-          />
-        </div>
+      {noResults && (
+        <EmptyColumn message={`No assessment-phase clients match “${query.trim()}”.`} />
+      )}
 
-        <div>
-          <BarChartWidget
-            title="CPT Code Volume Breakdown"
-            subtitle="Unit distribution across ABA service codes"
-            data={[
-              { label: 'CPT 97151 (Initial Assessment)', value: 180, color: '#10B981' },
-              { label: 'CPT 97153 (Direct RBT Therapy)', value: 1420, color: '#4FE8CE' },
-              { label: 'CPT 97155 (BCBA Supervision)', value: 550, color: '#A855F7' },
-            ]}
-          />
-        </div>
-      </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-        {/* Column 1: Pending VOB / Credentialing */}
         <div className="space-y-4">
-          <div className="flex justify-between items-center px-1">
+          <div className="flex justify-between items-center px-1 border-b border-emerald-500/20 pb-3">
             <h3 className="font-bold text-white text-sm flex items-center gap-2 font-heading">
-              <Clock className="w-4 h-4 text-emerald-400" /> Pending VOB / Credentialing
+              <Clock className="w-4 h-4 text-emerald-400" />
+              1. Pending VOB / Credentialing
             </h3>
             <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
               {pendingVobQueue.length}
             </span>
           </div>
-
           <div>
-            {pendingVobQueue.map(c => (
-              <QueueCard
+            {pendingVobQueue.length === 0 && !noResults && (
+              <EmptyColumn message="No clients awaiting VOB or credentialing." />
+            )}
+            {pendingVobQueue.map((c) => (
+              <PaQueueCard
                 key={c.id}
                 client={c}
-                title="Perform VOB"
+                kind="ASSESSMENT"
                 icon={Clock}
+                accent="emerald"
                 desc="Verify benefits, copay, deductible, and provider credentialing."
               />
             ))}
-
-            {pendingVobQueue.length === 0 && (
-              <div className="p-8 text-center text-xs text-zinc-500 border border-dashed border-white/10 rounded-2xl bg-zinc-950/40">
-                No clients currently awaiting VOB verification.
-              </div>
-            )}
           </div>
         </div>
 
-        {/* Column 2: Submitted / Pending PAs */}
         <div className="space-y-4">
-          <div className="flex justify-between items-center px-1">
+          <div className="flex justify-between items-center px-1 border-b border-teal-500/20 pb-3">
             <h3 className="font-bold text-white text-sm flex items-center gap-2 font-heading">
-              <FileCheck className="w-4 h-4 text-teal-400" /> Submitted / Pending PAs
+              <FileCheck className="w-4 h-4 text-teal-400" />
+              2. Submit / Track Assessment PA
             </h3>
             <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-teal-500/10 text-teal-400 border border-teal-500/20">
               {submittedQueue.length}
             </span>
           </div>
-
           <div>
-            {submittedQueue.map(c => (
-              <QueueCard
-                key={c.id}
-                client={c}
-                title="Check PA Status"
-                icon={FileCheck}
-                desc="PA request submitted to insurer. Awaiting authorization decision."
-              />
-            ))}
-
-            {submittedQueue.length === 0 && (
-              <div className="p-8 text-center text-xs text-zinc-500 border border-dashed border-white/10 rounded-2xl bg-zinc-950/40">
-                No pending Prior Authorizations awaiting insurer response.
-              </div>
+            {submittedQueue.length === 0 && !noResults && (
+              <EmptyColumn message="No Assessment PAs ready to submit or awaiting payer decision." />
             )}
+            {submittedQueue.map((c) => {
+              const pa = assessmentPa(c);
+              const desc =
+                pa?.status === 'NOT_STARTED'
+                  ? 'VOB complete — submit 97151 PA in Plutus, then mark submitted.'
+                  : pa?.status?.startsWith('DENIED')
+                    ? 'Denial logged — resolve clerical fix or P2P, then re-decision.'
+                    : 'PA submitted to insurer — awaiting authorization decision.';
+              return (
+                <PaQueueCard
+                  key={c.id}
+                  client={c}
+                  kind="ASSESSMENT"
+                  icon={FileCheck}
+                  accent="teal"
+                  desc={desc}
+                />
+              );
+            })}
           </div>
         </div>
 
-        {/* Column 3: Expiring PAs (<45 Days) */}
         <div className="space-y-4">
-          <div className="flex justify-between items-center px-1">
+          <div className="flex justify-between items-center px-1 border-b border-amber-500/20 pb-3">
             <h3 className="font-bold text-white text-sm flex items-center gap-2 font-heading">
-              <ShieldAlert className="w-4 h-4 text-amber-400" /> Expiring PAs (&lt;45 Days)
+              <ShieldAlert className="w-4 h-4 text-amber-400" />
+              3. Expiring Assessment Auth (&lt;45d)
             </h3>
             <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
               {expiringQueue.length}
             </span>
           </div>
-
           <div>
-            {expiringQueue.map(c => (
-              <QueueCard
+            {expiringQueue.length === 0 && !noResults && (
+              <EmptyColumn message="No approved Assessment auths expiring within 45 days." />
+            )}
+            {expiringQueue.map((c) => (
+              <PaQueueCard
                 key={c.id}
                 client={c}
-                title="Renew PA Authorization"
+                kind="ASSESSMENT"
                 icon={ShieldAlert}
-                desc="Authorization expiring soon. Re-assess units and renew PA."
+                accent="amber"
+                desc="Authorization window closing — plan re-auth or handoff to treatment PA."
               />
             ))}
-
-            {expiringQueue.length === 0 && (
-              <div className="p-8 text-center text-xs text-zinc-500 border border-dashed border-white/10 rounded-2xl bg-zinc-950/40">
-                Zero authorizations currently expiring within 45 days.
-              </div>
-            )}
           </div>
         </div>
       </div>

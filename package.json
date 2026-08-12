@@ -1,42 +1,40 @@
 {
-  "name": "temp-app",
+  "name": "simple-ras-crm",
   "version": "0.1.0",
   "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "dev": "npx concurrently -n CRM,HRM -c blue,orange \"npm run dev:crm\" \"npm run dev:hrm\"",
-    "dev:crm": "npx next dev apps/crm -p 3000",
-    "dev:hrm": "npx next dev apps/hrm -p 3001",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
-  },
-  "dependencies": {
-    "@prisma/adapter-pg": "^7.8.0",
-    "@prisma/client": "^7.8.0",
-    "@react-pdf/renderer": "^4.5.1",
-    "@supabase/ssr": "^0.12.3",
-    "@supabase/supabase-js": "^2.110.5",
-    "@types/pg": "^8.20.0",
-    "clsx": "^2.1.1",
-    "framer-motion": "^12.42.2",
-    "lucide-react": "^1.24.0",
-    "next": "16.2.10",
-    "pg": "^8.22.0",
-    "react": "19.2.4",
-    "react-dom": "19.2.4",
-    "sonner": "^2.0.7",
-    "tailwind-merge": "^3.6.0"
+    "dev:crm": "npm run dev -w crm-app",
+    "dev:hrm": "npm run dev -w hrm-app",
+    "build": "npm run build:crm && npm run build:hrm",
+    "build:crm": "npm run build -w crm-app",
+    "build:hrm": "npm run build -w hrm-app",
+    "db:generate": "npx prisma generate --schema=packages/db/prisma/schema.prisma",
+    "start": "npm run start:crm",
+    "start:crm": "npm run start -w crm-app",
+    "start:hrm": "npm run start -w hrm-app",
+    "lint": "npm run lint -w crm-app && npm run lint -w hrm-app",
+    "typecheck": "tsc --noEmit -p apps/crm && tsc --noEmit -p apps/hrm",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test --config=e2e/playwright.config.ts"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "concurrently": "^9.1.2",
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
     "prisma": "^7.8.0",
     "tailwindcss": "^4",
-    "turbo": "^2.4.0",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.10"
   }
 }

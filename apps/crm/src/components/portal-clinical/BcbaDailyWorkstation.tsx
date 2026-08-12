@@ -1,61 +1,255 @@
 'use client';
 
 import React, { useState, useTransition } from 'react';
+import { extractSubmissionFingerprint } from '@repo/db/session-note-attestation';
+
+import Link from 'next/link';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
-import { 
-  CheckCircle2, 
-  PenTool, 
-  ShieldCheck, 
-  Activity, 
-  AlertTriangle, 
-  Calendar, 
-  UserCheck, 
-  Clock, 
-  FileText,
+import {
+  PenTool,
+  ShieldCheck,
+  Activity,
+  AlertTriangle,
+  Calendar,
   Search,
-  Filter,
-  CheckSquare
+  LineChart,
+  ArrowRight,
+  Send,
+  ExternalLink,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useRouter } from 'next/navigation';
+import {
+  signSessionNotesAsBcba,
+  signSingleSessionNoteAsBcba,
+  type BcbaSignExpectation,
+} from '@/app/actions/sessionNoteSignActions';
+import {
+  summarizeSessionNoteForQueue,
+  type NoteModalityCounts,
+} from '@/lib/sessionNoteSummary';
+import {
+  summarizeSupervisionServiceRecords,
+  type SupervisionServiceRecord,
+} from './supervisionServiceSummary';
+
+type DateValue = Date | string | number;
+type PersonRef = {
+  firstName: string;
+  lastName: string;
+};
+type ClientRef = PersonRef & {
+  id: string;
+};
+type WorkstationSession = {
+  client?: ClientRef | null;
+  rbt?: PersonRef | null;
+  cptCode?: string | null;
+  scheduledStart?: DateValue | null;
+  location?: string | null;
+};
+type WorkstationSessionNote = {
+  id: string;
+  bcbaSigned: boolean;
+  rbtSigned: boolean;
+  createdAt: DateValue;
+  updatedAt: DateValue;
+  structuredContent?: unknown;
+  clinicalContent?: string | null;
+  session?: WorkstationSession | null;
+};
+type WorkstationDeficiency = {
+  id: string;
+  description: string;
+  note?: {
+    session?: WorkstationSession | null;
+  } | null;
+};
+type WorkstationClient = ClientRef & {
+  insurancePayer?: string | null;
+  sessions?: readonly SupervisionServiceRecord[];
+};
 
 interface BcbaDailyWorkstationProps {
-  sessionNotes: any[];
-  deficiencies: any[];
-  clients: any[];
+  sessionNotes: WorkstationSessionNote[];
+  deficiencies: WorkstationDeficiency[];
+  clients: WorkstationClient[];
 }
 
-export default function BcbaDailyWorkstation({ sessionNotes, deficiencies, clients }: BcbaDailyWorkstationProps) {
+type SignedClientRef = { id: string; name: string };
+const supervisionAvailability = summarizeSupervisionServiceRecords([], null);
+
+function clientChartProgressHref(clientId: string) {
+  return `/client/${clientId}?mode=bcba&tab=chart_progress`;
+}
+
+function clientEmrHref(clientId: string) {
+  return `/client/${clientId}?mode=bcba&tab=session_emr`;
+}
+
+function formatRecordDate(value: DateValue) {
+  if (value instanceof Date) return value.toLocaleDateString();
+  if (typeof value === 'number') return new Date(value).toLocaleDateString();
+  return new Date(value).toLocaleDateString();
+}
+
+function formatServiceTime(minutes: number) {
+  if (!Number.isFinite(minutes) || minutes <= 0) return '—';
+
+  const roundedMinutes = Math.round(minutes);
+  const hours = Math.floor(roundedMinutes / 60);
+  const remainder = roundedMinutes % 60;
+  if (hours === 0) return `${remainder}m`;
+  return remainder === 0 ? `${hours}h` : `${hours}h ${remainder}m`;
+}
+
+function ModalityChips({ modality }: { modality: NoteModalityCounts | null }) {
+  if (
+    !modality ||
+    !(
+      modality.trials > 0 ||
+      modality.frequency > 0 ||
+      modality.duration > 0 ||
+      modality.probes > 0 ||
+      modality.abc > 0 ||
+      modality.taskAnalysis > 0
+    )
+  ) {
+    return null;
+  }
+
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {modality.trials > 0 && (
+        <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md bg-orange-500/10 text-orange-300 border border-orange-500/20">
+          {modality.trials} trials
+        </span>
+      )}
+      {modality.frequency > 0 && (
+        <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md bg-violet-500/10 text-violet-300 border border-violet-500/20">
+          {modality.frequency} freq
+        </span>
+      )}
+      {modality.duration > 0 && (
+        <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md bg-sky-500/10 text-sky-300 border border-sky-500/20">
+          {modality.duration} duration
+        </span>
+      )}
+      {modality.probes > 0 && (
+        <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md bg-cyan-500/10 text-cyan-300 border border-cyan-500/20">
+          {modality.probes} probes
+        </span>
+      )}
+      {modality.abc > 0 && (
+        <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md bg-rose-500/10 text-rose-300 border border-rose-500/20">
+          {modality.abc} ABC
+        </span>
+      )}
+      {modality.taskAnalysis > 0 && (
+        <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
+          {modality.taskAnalysis} TA
+        </span>
+      )}
+    </div>
+  );
+}
+
+export default function BcbaDailyWorkstation({
+  sessionNotes,
+  deficiencies,
+  clients,
+}: BcbaDailyWorkstationProps) {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<'esign' | 'supervision' | 'deficiencies'>('esign');
   const [isPending, startTransition] = useTransition();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedNotes, setSelectedNotes] = useState<string[]>([]);
-  const [signedNoteIds, setSignedNoteIds] = useState<string[]>([]);
+  const [lastSignedCount, setLastSignedCount] = useState<number | null>(null);
+  const [lastSignedClients, setLastSignedClients] = useState<SignedClientRef[]>([]);
 
-  // Filter notes awaiting BCBA signature
-  const unsignedNotes = sessionNotes.filter(n => !n.bcbaSigned && !signedNoteIds.includes(n.id));
+  // Durable filter — no local-only signedNoteIds (Bridge F)
+  const unsignedNotes = sessionNotes.filter((n) => !n.bcbaSigned && n.rbtSigned);
+  const signedTodayCount = sessionNotes.filter((n) => n.bcbaSigned).length;
 
-  const filteredNotes = unsignedNotes.filter(n => {
+  const filteredNotes = unsignedNotes.filter((n) => {
     const clientName = `${n.session?.client?.firstName || ''} ${n.session?.client?.lastName || ''}`.toLowerCase();
-    const rbtName = n.session?.rbt ? `${n.session.rbt.firstName} ${n.session.rbt.lastName}`.toLowerCase() : '';
-    return clientName.includes(searchQuery.toLowerCase()) || rbtName.includes(searchQuery.toLowerCase());
+    const rbtName = n.session?.rbt
+      ? `${n.session.rbt.firstName} ${n.session.rbt.lastName}`.toLowerCase()
+      : '';
+    return (
+      clientName.includes(searchQuery.toLowerCase()) ||
+      rbtName.includes(searchQuery.toLowerCase())
+    );
   });
+
+  const clientsFromNoteIds = (ids: string[]): SignedClientRef[] => {
+    const map = new Map<string, SignedClientRef>();
+    for (const id of ids) {
+      const note = sessionNotes.find((n) => n.id === id);
+      const c = note?.session?.client;
+      if (!c?.id) continue;
+      map.set(c.id, {
+        id: c.id,
+        name: `${c.firstName || ''} ${c.lastName || ''}`.trim() || 'Client',
+      });
+    }
+    return [...map.values()];
+  };
+
+  const expectationsFromNoteIds = (ids: string[]): BcbaSignExpectation[] =>
+    ids.flatMap((id) => {
+      const note = sessionNotes.find((candidate) => candidate.id === id);
+      const fingerprint = extractSubmissionFingerprint(note?.structuredContent);
+      if (!note?.updatedAt || !fingerprint) return [];
+      const updatedAt = new Date(note.updatedAt);
+      if (!Number.isFinite(updatedAt.getTime())) return [];
+      return [
+        {
+          noteId: note.id,
+          expectedNoteUpdatedAt: updatedAt.toISOString(),
+          expectedSubmissionFingerprint: fingerprint,
+        },
+      ];
+    });
 
   const handleSelectAll = () => {
     if (selectedNotes.length === filteredNotes.length) {
       setSelectedNotes([]);
     } else {
-      setSelectedNotes(filteredNotes.map(n => n.id));
+      setSelectedNotes(filteredNotes.map((n) => n.id));
     }
   };
 
   const handleToggleSelect = (id: string) => {
     if (selectedNotes.includes(id)) {
-      setSelectedNotes(selectedNotes.filter(n => n !== id));
+      setSelectedNotes(selectedNotes.filter((n) => n !== id));
     } else {
       setSelectedNotes([...selectedNotes, id]);
     }
+  };
+
+  const showPlutusReadyToast = (count: number, signedClients: SignedClientRef[]) => {
+    setLastSignedCount(count);
+    setLastSignedClients(signedClients);
+    const primary = signedClients[0];
+    toast.success('Ready for Plutus tracker', {
+      description:
+        count === 1
+          ? 'Note is BCBA-signed and in the Ready for Plutus queue. Open Chart Progress for clinical follow-up.'
+          : `${count} notes are BCBA-signed and in the Ready for Plutus queue.`,
+      action: primary
+        ? {
+            label: 'Chart Progress',
+            onClick: () => router.push(clientChartProgressHref(primary.id)),
+          }
+        : {
+            label: 'Open /notes',
+            onClick: () => router.push('/notes?queue=ready'),
+          },
+      duration: 9000,
+    });
   };
 
   const handleBatchSign = () => {
@@ -64,17 +258,40 @@ export default function BcbaDailyWorkstation({ sessionNotes, deficiencies, clien
       return;
     }
 
-    startTransition(() => {
-      setSignedNoteIds([...signedNoteIds, ...selectedNotes]);
-      setSelectedNotes([]);
-      toast.success(`Successfully e-signed ${selectedNotes.length} session notes!`);
+    const ids = [...selectedNotes];
+    const expectations = expectationsFromNoteIds(ids);
+    if (expectations.length !== ids.length) {
+      toast.error('One or more note revisions are incomplete. Reload before signing.');
+      return;
+    }
+    const signedClients = clientsFromNoteIds(ids);
+    startTransition(async () => {
+      const res = await signSessionNotesAsBcba(expectations);
+      if (res.success) {
+        setSelectedNotes([]);
+        showPlutusReadyToast(res.signedCount, signedClients);
+        router.refresh();
+      } else {
+        toast.error(res.error || 'Failed to e-sign notes');
+      }
     });
   };
 
   const handleSignSingle = (id: string) => {
-    startTransition(() => {
-      setSignedNoteIds([...signedNoteIds, id]);
-      toast.success('Session note e-signed!');
+    const expectation = expectationsFromNoteIds([id])[0];
+    if (!expectation) {
+      toast.error('This note revision is incomplete. Reload before signing.');
+      return;
+    }
+    const signedClients = clientsFromNoteIds([id]);
+    startTransition(async () => {
+      const res = await signSingleSessionNoteAsBcba(expectation);
+      if (res.success) {
+        showPlutusReadyToast(res.signedCount, signedClients);
+        router.refresh();
+      } else {
+        toast.error(res.error || 'Failed to e-sign note');
+      }
     });
   };
 
@@ -91,14 +308,34 @@ export default function BcbaDailyWorkstation({ sessionNotes, deficiencies, clien
               <span className="dot-live"></span>
               <span>BCBA DAILY WORKSTATION &bull; BATCH E-SIGN HUB ACTIVE</span>
             </div>
-            
+
             <h1 className="text-3xl lg:text-4xl font-extrabold text-white font-heading tracking-tight leading-tight">
-              Daily Workstation <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-teal-300 to-brand-orange-300">&amp; E-Sign Hub</span>
+              Daily Workstation{' '}
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-teal-300 to-brand-orange-300">
+                &amp; E-Sign Hub
+              </span>
             </h1>
-            
+
             <p className="text-sm text-zinc-400 max-w-2xl font-sans leading-relaxed">
-              Review RBT session logs across your active caseload, perform batch supervisory e-signatures, monitor Medicaid 10-20% supervision rules, and dispatch note deficiencies.
+              Review RBT session logs, batch e-sign for Plutus eligibility, then jump to client Chart
+              Progress for day-to-day clinical follow-up.
             </p>
+
+            <div className="flex flex-wrap gap-2 pt-1">
+              <Link
+                href="/portal-clinical/notes"
+                className="inline-flex items-center gap-1.5 h-8 px-3 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 font-bold text-[11px] border border-amber-500/25 transition-all cursor-pointer"
+              >
+                Unsigned notes queue
+                <ArrowRight className="w-3.5 h-3.5" />
+              </Link>
+              <Link
+                href="/notes?queue=ready"
+                className="inline-flex items-center gap-1.5 h-8 px-3 rounded-xl bg-brand-orange-500/10 hover:bg-brand-orange-500/20 text-brand-orange-300 font-bold text-[11px] border border-brand-orange-500/25 transition-all cursor-pointer"
+              >
+                <Send className="w-3.5 h-3.5" /> Plutus Ready
+              </Link>
+            </div>
           </div>
 
           <div className="grid grid-cols-3 gap-2.5 flex-shrink-0 font-mono">
@@ -107,8 +344,8 @@ export default function BcbaDailyWorkstation({ sessionNotes, deficiencies, clien
               <span className="text-xl font-black text-white mt-0.5 block">{unsignedNotes.length}</span>
             </div>
             <div className="p-3 bg-zinc-900/90 rounded-2xl border border-white/10 text-center">
-              <span className="text-[10px] text-emerald-400 font-bold block">SIGNED TODAY</span>
-              <span className="text-xl font-black text-white mt-0.5 block">{signedNoteIds.length}</span>
+              <span className="text-[10px] text-emerald-400 font-bold block">BCBA SIGNED</span>
+              <span className="text-xl font-black text-white mt-0.5 block">{signedTodayCount}</span>
             </div>
             <div className="p-3 bg-zinc-900/90 rounded-2xl border border-white/10 text-center">
               <span className="text-[10px] text-rose-400 font-bold block">DEFICIENCIES</span>
@@ -118,21 +355,62 @@ export default function BcbaDailyWorkstation({ sessionNotes, deficiencies, clien
         </div>
       </div>
 
+      {lastSignedCount != null && lastSignedCount > 0 && (
+        <div className="relative overflow-hidden rounded-2xl border border-emerald-500/25 bg-emerald-500/10 px-4 py-4 backdrop-blur-xl">
+          <div className="absolute -right-8 -top-8 w-32 h-32 bg-cyan-500/10 rounded-full blur-2xl pointer-events-none" />
+          <div className="relative z-10 flex flex-col gap-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <p className="text-xs text-emerald-100/90">
+                <span className="font-bold text-emerald-300">Signed · Ready for Plutus</span>
+                {' — '}
+                {lastSignedCount} note{lastSignedCount === 1 ? '' : 's'} co-signed. Open Chart
+                Progress for clinical follow-up, or the Ready queue for claims handoff.
+              </p>
+              <Link
+                href="/notes?queue=ready"
+                className="inline-flex shrink-0 items-center gap-1.5 h-8 px-3 rounded-xl bg-brand-orange-500/20 hover:bg-brand-orange-500/30 text-brand-orange-300 font-bold text-xs border border-brand-orange-500/30 transition-all cursor-pointer"
+              >
+                <Send className="w-3.5 h-3.5" /> Open Ready for Plutus
+                <ArrowRight className="w-3.5 h-3.5" />
+              </Link>
+            </div>
+            {lastSignedClients.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {lastSignedClients.map((c) => (
+                  <Link
+                    key={c.id}
+                    href={clientChartProgressHref(c.id)}
+                    className="inline-flex items-center gap-1.5 h-8 px-3 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 font-bold text-xs border border-cyan-500/30 transition-all cursor-pointer hover:scale-[1.02]"
+                  >
+                    <LineChart className="w-3.5 h-3.5" />
+                    Chart Progress · {c.name}
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Main Tabs Navigation */}
       <div className="flex gap-4 border-b border-white/10 pb-3 text-xs font-mono">
         <button
+          type="button"
           onClick={() => setActiveTab('esign')}
           className={`px-5 py-2.5 rounded-xl transition-all flex items-center gap-2 cursor-pointer ${activeTab === 'esign' ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 font-bold shadow-lg' : 'text-zinc-400 hover:text-white'}`}
         >
           <PenTool className="w-4 h-4" /> Batch E-Sign Hub ({unsignedNotes.length})
         </button>
         <button
+          type="button"
           onClick={() => setActiveTab('supervision')}
           className={`px-5 py-2.5 rounded-xl transition-all flex items-center gap-2 cursor-pointer ${activeTab === 'supervision' ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 font-bold shadow-lg' : 'text-zinc-400 hover:text-white'}`}
         >
-          <Activity className="w-4 h-4" /> Supervision Ledger (10-20% Rule)
+          <Activity className="w-4 h-4" /> Supervision Evidence
         </button>
         <button
+          type="button"
           onClick={() => setActiveTab('deficiencies')}
           className={`px-5 py-2.5 rounded-xl transition-all flex items-center gap-2 cursor-pointer ${activeTab === 'deficiencies' ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 font-bold shadow-lg' : 'text-zinc-400 hover:text-white'}`}
         >
@@ -152,7 +430,7 @@ export default function BcbaDailyWorkstation({ sessionNotes, deficiencies, clien
                   type="text"
                   placeholder="Search client or RBT name..."
                   value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
+                  onChange={(e) => setSearchQuery(e.target.value)}
                   className="w-full bg-zinc-900 border border-white/10 rounded-xl pl-9 pr-4 py-2 text-xs text-white outline-none focus:border-cyan-500 font-sans"
                 />
               </div>
@@ -160,16 +438,19 @@ export default function BcbaDailyWorkstation({ sessionNotes, deficiencies, clien
 
             <div className="flex items-center gap-3">
               <button
+                type="button"
                 onClick={handleSelectAll}
                 className="bg-zinc-900 hover:bg-zinc-800 text-zinc-300 font-bold text-xs px-4 h-9 rounded-xl border border-white/10 transition-all cursor-pointer"
               >
-                {selectedNotes.length === filteredNotes.length && filteredNotes.length > 0 ? 'Deselect All' : 'Select All'}
+                {selectedNotes.length === filteredNotes.length && filteredNotes.length > 0
+                  ? 'Deselect All'
+                  : 'Select All'}
               </button>
 
               <Button
                 onClick={handleBatchSign}
                 disabled={selectedNotes.length === 0 || isPending}
-                className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 text-white font-bold text-xs px-5 h-9 rounded-xl shadow-lg transition-all cursor-pointer flex items-center gap-2"
+                className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 text-white font-bold text-xs px-5 h-9 rounded-xl shadow-lg transition-all cursor-pointer flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <ShieldCheck className="w-4 h-4" /> Batch E-Sign ({selectedNotes.length})
               </Button>
@@ -178,120 +459,333 @@ export default function BcbaDailyWorkstation({ sessionNotes, deficiencies, clien
 
           {/* Notes List */}
           <div className="space-y-3">
-            {filteredNotes.map(note => (
-              <Card key={note.id} className="p-5 bg-zinc-950/80 border border-white/10 hover:border-cyan-500/40 rounded-2xl transition-all space-y-3">
-                <div className="flex items-start gap-4">
-                  <input
-                    type="checkbox"
-                    checked={selectedNotes.includes(note.id)}
-                    onChange={() => handleToggleSelect(note.id)}
-                    className="mt-1 w-4 h-4 rounded border-white/20 bg-zinc-900 text-cyan-500 focus:ring-cyan-500 cursor-pointer"
-                  />
+            {filteredNotes.map((note) => {
+              const summary = summarizeSessionNoteForQueue(
+                note.structuredContent,
+                note.clinicalContent
+              );
+              const clientId = note.session?.client?.id as string | undefined;
+              const preview = summary.preview || note.clinicalContent;
 
-                  <div className="flex-1 space-y-2">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                      <div className="flex items-center gap-3">
-                        <h4 className="font-bold text-white text-base">
-                          {note.session?.client?.firstName} {note.session?.client?.lastName}
-                        </h4>
-                        <span className="text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
-                          CPT {note.session?.cptCode || '97153'}
-                        </span>
+              return (
+                <Card
+                  key={note.id}
+                  className="p-5 bg-zinc-950/80 border border-white/10 hover:border-cyan-500/40 hover:scale-[1.01] hover:shadow-2xl rounded-2xl transition-all duration-300 space-y-3"
+                >
+                  <div className="flex items-start gap-4">
+                    <input
+                      type="checkbox"
+                      checked={selectedNotes.includes(note.id)}
+                      onChange={() => handleToggleSelect(note.id)}
+                      className="mt-1 w-4 h-4 rounded border-white/20 bg-zinc-900 text-cyan-500 focus:ring-cyan-500 cursor-pointer"
+                    />
+
+                    <div className="flex-1 space-y-2 min-w-0">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div className="flex flex-wrap items-center gap-3">
+                          <h4 className="font-bold text-white text-base font-heading">
+                            {note.session?.client?.firstName} {note.session?.client?.lastName}
+                          </h4>
+                          <span className="text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+                            CPT {note.session?.cptCode || '97153'}
+                          </span>
+                        </div>
+
+                        <div className="text-xs font-mono text-zinc-400 flex items-center gap-2">
+                          <Calendar className="w-3.5 h-3.5 text-zinc-500" />
+                          <span>
+                            {formatRecordDate(note.session?.scheduledStart ?? note.createdAt)}
+                          </span>
+                        </div>
                       </div>
 
-                      <div className="text-xs font-mono text-zinc-400 flex items-center gap-2">
-                        <Calendar className="w-3.5 h-3.5 text-zinc-500" />
-                        <span>{new Date(note.session?.scheduledStart || note.createdAt).toLocaleDateString()}</span>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-zinc-400 font-sans">
-                      <p>RBT: <span className="text-white font-medium">{note.session?.rbt ? `${note.session.rbt.firstName} ${note.session.rbt.lastName}` : 'Assigned RBT'}</span></p>
-                      <p>Location: <span className="text-white font-medium">{note.session?.location || 'Home / Clinic'}</span></p>
-                    </div>
-
-                    {note.clinicalContent && (
-                      <div className="p-3 bg-zinc-900/60 rounded-xl border border-white/5 text-xs text-zinc-300 font-sans leading-relaxed">
-                        <span className="font-bold text-zinc-400 block mb-1">RBT Clinical Summary:</span>
-                        {note.clinicalContent}
-                      </div>
-                    )}
-
-                    <div className="flex items-center justify-between pt-2 border-t border-white/5">
-                      <div className="flex items-center gap-2 text-[11px] font-mono">
-                        <span className="text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-md">
-                          RBT Signed ✅
-                        </span>
-                        <span className="text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-md">
-                          BCBA Signature Pending ✍️
-                        </span>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-zinc-400 font-sans">
+                        <p>
+                          RBT:{' '}
+                          <span className="text-white font-medium">
+                            {note.session?.rbt
+                              ? `${note.session.rbt.firstName} ${note.session.rbt.lastName}`
+                              : 'Assigned RBT'}
+                          </span>
+                        </p>
+                        <p>
+                          Location:{' '}
+                          <span className="text-white font-medium">
+                            {note.session?.location || 'Home / Clinic'}
+                          </span>
+                        </p>
                       </div>
 
-                      <Button
-                        onClick={() => handleSignSingle(note.id)}
-                        className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs h-8 px-4 rounded-xl cursor-pointer"
-                      >
-                        <ShieldCheck className="w-3.5 h-3.5 mr-1" /> E-Sign Note
-                      </Button>
+                      {(summary.goalsAddressed || summary.objectiveData) && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {summary.goalsAddressed && (
+                            <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md bg-teal-500/10 text-teal-300 border border-teal-500/20 max-w-full truncate">
+                              Goals · {summary.goalsAddressed}
+                            </span>
+                          )}
+                          {summary.objectiveData && (
+                            <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 max-w-full truncate">
+                              Obj · {summary.objectiveData.slice(0, 80)}
+                              {summary.objectiveData.length > 80 ? '…' : ''}
+                            </span>
+                          )}
+                        </div>
+                      )}
+
+                      <ModalityChips modality={summary.modalityCounts} />
+
+                      {preview && (
+                        <div className="p-3 bg-zinc-900/60 rounded-xl border border-white/5 text-xs text-zinc-300 font-sans leading-relaxed">
+                          <span className="font-bold text-zinc-400 block mb-1">
+                            Clinical summary
+                          </span>
+                          {preview}
+                        </div>
+                      )}
+
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-white/5">
+                        <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono">
+                          <span className="text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-md">
+                            RBT Signed ✅
+                          </span>
+                          <span className="text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-md">
+                            BCBA Signature Pending ✍️
+                          </span>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          {clientId && (
+                            <>
+                              <Link
+                                href={clientChartProgressHref(clientId)}
+                                className="inline-flex items-center gap-1.5 h-8 px-3 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 font-bold text-xs border border-cyan-500/25 hover:border-cyan-500/50 transition-all cursor-pointer"
+                              >
+                                <LineChart className="w-3.5 h-3.5" /> Chart Progress
+                                <ArrowRight className="w-3.5 h-3.5" />
+                              </Link>
+                              <Link
+                                href={clientEmrHref(clientId)}
+                                className="inline-flex items-center gap-1.5 h-8 px-3 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 font-bold text-xs border border-white/10 transition-all cursor-pointer"
+                              >
+                                <ExternalLink className="w-3.5 h-3.5" /> Session EMR
+                              </Link>
+                            </>
+                          )}
+                          <Button
+                            onClick={() => handleSignSingle(note.id)}
+                            disabled={isPending}
+                            className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs h-8 px-4 rounded-xl cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <ShieldCheck className="w-3.5 h-3.5 mr-1" /> E-Sign Note
+                          </Button>
+                        </div>
+                      </div>
                     </div>
                   </div>
-                </div>
-              </Card>
-            ))}
+                </Card>
+              );
+            })}
 
             {filteredNotes.length === 0 && (
-              <div className="p-12 text-center text-xs text-zinc-500 border border-dashed border-white/10 rounded-3xl bg-zinc-950/40">
-                Zero session notes currently awaiting BCBA supervisory sign-off!
+              <div className="p-12 text-center border border-dashed border-white/10 rounded-3xl bg-zinc-950/40">
+                <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl border border-emerald-500/20 bg-emerald-500/10">
+                  {unsignedNotes.length === 0 ? (
+                    <ShieldCheck className="h-6 w-6 text-emerald-400" />
+                  ) : (
+                    <Search className="h-6 w-6 text-zinc-500" />
+                  )}
+                </div>
+                <p className="text-sm font-heading font-semibold text-white">
+                  {unsignedNotes.length === 0 ? 'E-sign queue clear' : 'No notes match your search'}
+                </p>
+                <p className="mt-1 text-xs text-zinc-500 max-w-md mx-auto">
+                  {unsignedNotes.length === 0
+                    ? 'No RBT-signed session notes are awaiting BCBA sign-off. New submits land here after RBT Studio sign.'
+                    : `Nothing matches “${searchQuery}” — ${unsignedNotes.length} note${
+                        unsignedNotes.length === 1 ? ' is' : 's are'
+                      } still awaiting sign.`}
+                </p>
+                {unsignedNotes.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    className="mt-4 inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs font-bold text-cyan-300 transition-all hover:bg-cyan-500/20"
+                  >
+                    Clear search
+                  </button>
+                )}
               </div>
             )}
           </div>
         </div>
       )}
 
-      {/* TAB 2: SUPERVISION LEDGER */}
+      {/* TAB 2: SUPERVISION EVIDENCE */}
       {activeTab === 'supervision' && (
         <div className="space-y-6">
           <Card className="p-6 bg-zinc-950/80 border border-white/10 rounded-3xl space-y-4">
-            <h3 className="text-lg font-bold text-white font-heading">Caseload Supervision Compliance Ledger</h3>
-            <p className="text-xs text-zinc-400">
-              Real-time audit tracking for the mandatory Medicaid &amp; Commercial 10-20% supervision ratio (CPT 97155 Supervision vs CPT 97153 Direct 1:1).
+            <h3 className="text-lg font-bold text-white font-heading">
+              Supervision Evidence Readiness
+            </h3>
+            <p className="max-w-3xl text-xs leading-relaxed text-zinc-400">
+              Operational service-record context only. A compliance determination requires a
+              resolved, versioned policy and direct supervisor-presence evidence; neither is
+              available in the current data model.
             </p>
 
+            <div
+              role="status"
+              aria-live="polite"
+              className="relative overflow-hidden rounded-2xl border border-amber-500/20 bg-amber-500/[0.06] p-4"
+            >
+              <div className="absolute -right-12 -top-12 h-32 w-32 rounded-full bg-amber-500/10 blur-3xl pointer-events-none" />
+              <div className="relative z-10 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-amber-500/25 bg-amber-500/10">
+                    <AlertTriangle className="h-4 w-4 text-amber-300" aria-hidden="true" />
+                  </div>
+                  <div>
+                    <p className="font-heading text-sm font-bold text-white">
+                      Assessment unavailable
+                    </p>
+                    <p className="mt-1 text-xs leading-relaxed text-zinc-400">
+                      CPT codes, BCBA assignment, note signatures, and planned hours are not proof
+                      of supervisor attendance. CPT 97155 is a protocol-modification service code.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2 font-mono text-[10px] font-bold">
+                  <span className="rounded-full border border-zinc-500/20 bg-zinc-500/10 px-3 py-1 text-zinc-300">
+                    {supervisionAvailability.assessmentLabel}
+                  </span>
+                  <span className="rounded-full border border-amber-500/20 bg-amber-500/10 px-3 py-1 text-amber-300">
+                    {supervisionAvailability.policyLabel}
+                  </span>
+                  <span className="rounded-full border border-violet-500/20 bg-violet-500/10 px-3 py-1 text-violet-300">
+                    {supervisionAvailability.evidenceLabel}
+                  </span>
+                </div>
+              </div>
+            </div>
+
             <div className="space-y-3">
-              {clients.map(client => {
-                const sessions = client.sessions || [];
-                const directHrs = sessions.reduce((acc: number, s: any) => acc + (s.cptCode === '97153' ? 2 : 0), 0) || 20;
-                const supervHrs = sessions.reduce((acc: number, s: any) => acc + (s.cptCode === '97155' ? 2 : 0), 0) || 3;
-                const ratio = ((supervHrs / directHrs) * 100).toFixed(1);
-                const isCompliant = parseFloat(ratio) >= 10;
+              {clients.map((client) => {
+                const summary = summarizeSupervisionServiceRecords(
+                  client.sessions,
+                  client.insurancePayer
+                );
 
                 return (
-                  <div key={client.id} className="p-4 bg-zinc-900/50 border border-white/5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                    <div>
-                      <h4 className="font-bold text-white text-sm">{client.firstName} {client.lastName}</h4>
-                      <p className="text-xs text-zinc-400 font-sans">Payer: {client.insurancePayer || 'Medicaid / Commercial'}</p>
-                    </div>
+                  <div
+                    key={client.id}
+                    className="group relative overflow-hidden rounded-2xl border border-white/5 bg-zinc-900/50 p-4 transition-all duration-300 hover:scale-[1.01] hover:border-cyan-500/30 hover:shadow-2xl"
+                  >
+                    <div className="absolute -right-16 -top-16 h-36 w-36 rounded-full bg-cyan-500/[0.04] blur-3xl pointer-events-none" />
+                    <div className="relative z-10 space-y-4">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <h4 className="font-heading text-sm font-bold text-white">
+                            {client.firstName} {client.lastName}
+                          </h4>
+                          <p className="mt-1 text-xs text-zinc-400">
+                            Payer: <span className="text-zinc-300">{summary.payerLabel}</span>
+                          </p>
+                        </div>
+                        <span
+                          aria-label="Supervision assessment not available"
+                          className="w-fit rounded-full border border-zinc-500/20 bg-zinc-500/10 px-3 py-1 font-mono text-[10px] font-bold text-zinc-300"
+                        >
+                          ASSESSMENT {summary.assessmentLabel}
+                        </span>
+                      </div>
 
-                    <div className="flex items-center gap-6 font-mono text-xs">
-                      <div>
-                        <span className="text-[10px] text-zinc-500 block">DIRECT (97153)</span>
-                        <span className="font-bold text-white">{directHrs} hrs</span>
+                      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+                        <div className="rounded-xl border border-white/5 bg-zinc-950/60 p-3">
+                          <span className="block font-mono text-[9px] font-bold uppercase tracking-wide text-zinc-500">
+                            Potential records
+                          </span>
+                          <span className="mt-1 block font-heading text-lg font-black text-white">
+                            {summary.potentialServiceRecordCount}
+                          </span>
+                          <span className="mt-0.5 block text-[10px] text-zinc-600">
+                            97153 / 97155 coded
+                          </span>
+                        </div>
+                        <div className="rounded-xl border border-cyan-500/15 bg-cyan-500/[0.05] p-3">
+                          <span className="block font-mono text-[9px] font-bold uppercase tracking-wide text-cyan-300/70">
+                            97153 service time
+                          </span>
+                          <span className="mt-1 block font-heading text-lg font-black text-cyan-300">
+                            {formatServiceTime(summary.service97153.actualServiceMinutes)}
+                          </span>
+                          <span className="mt-0.5 block text-[10px] text-zinc-600">
+                            Completed + actual time
+                          </span>
+                        </div>
+                        <div className="rounded-xl border border-violet-500/15 bg-violet-500/[0.05] p-3">
+                          <span className="block font-mono text-[9px] font-bold uppercase tracking-wide text-violet-300/70">
+                            97155 service-code time
+                          </span>
+                          <span className="mt-1 block font-heading text-lg font-black text-violet-300">
+                            {formatServiceTime(summary.service97155.actualServiceMinutes)}
+                          </span>
+                          <span className="mt-0.5 block text-[10px] text-zinc-600">
+                            Not attendance proof
+                          </span>
+                        </div>
+                        <div className="rounded-xl border border-white/5 bg-zinc-950/60 p-3">
+                          <span className="block font-mono text-[9px] font-bold uppercase tracking-wide text-zinc-500">
+                            Actual-time coverage
+                          </span>
+                          <span className="mt-1 block font-heading text-lg font-black text-white">
+                            {summary.completedRecordsWithActualTime}/
+                            {summary.completedServiceRecordCount}
+                          </span>
+                          <span className="mt-0.5 block text-[10px] text-zinc-600">
+                            Completed coded records
+                          </span>
+                        </div>
                       </div>
-                      <div>
-                        <span className="text-[10px] text-zinc-500 block">SUPERVISION (97155)</span>
-                        <span className="font-bold text-cyan-400">{supervHrs} hrs</span>
+
+                      <div className="flex flex-col gap-3 border-t border-white/5 pt-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="space-y-1">
+                          <p className="text-[11px] text-violet-300">
+                            {summary.evidenceLabel}
+                          </p>
+                          {summary.completedRecordsMissingActualTime > 0 && (
+                            <p className="text-[11px] text-amber-300">
+                              {summary.completedRecordsMissingActualTime} completed service record
+                              {summary.completedRecordsMissingActualTime === 1 ? '' : 's'} omitted
+                              from time totals: valid actual timestamps unavailable.
+                            </p>
+                          )}
+                        </div>
+                        <Link
+                          href={clientChartProgressHref(client.id)}
+                          className="inline-flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-3 font-mono text-[10px] font-bold text-cyan-300 transition-all hover:border-cyan-500/40 hover:bg-cyan-500/20"
+                        >
+                          <LineChart className="h-3.5 w-3.5" aria-hidden="true" /> Chart Progress
+                        </Link>
                       </div>
-                      <div>
-                        <span className="text-[10px] text-zinc-500 block">RATIO</span>
-                        <span className={`font-bold ${isCompliant ? 'text-emerald-400' : 'text-rose-400'}`}>{ratio}%</span>
-                      </div>
-                      <span className={`px-3 py-1 rounded-full text-[10px] font-bold ${isCompliant ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'}`}>
-                        {isCompliant ? 'COMPLIANT ✅' : 'NON-COMPLIANT ⚠️'}
-                      </span>
                     </div>
                   </div>
                 );
               })}
+
+              {clients.length === 0 && (
+                <div className="p-10 text-center border border-dashed border-white/10 rounded-2xl bg-zinc-950/40">
+                  <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-2xl border border-cyan-500/20 bg-cyan-500/10">
+                    <Activity className="h-5 w-5 text-cyan-400/70" />
+                  </div>
+                  <p className="text-sm font-heading font-semibold text-white">
+                    No clients in review scope
+                  </p>
+                  <p className="mt-1 text-xs text-zinc-500 max-w-md mx-auto">
+                    Client-level service context appears here when active caseload records are
+                    available. Policy and supervisor-presence evidence remain separate requirements.
+                  </p>
+                </div>
+              )}
             </div>
           </Card>
         </div>
@@ -301,27 +795,56 @@ export default function BcbaDailyWorkstation({ sessionNotes, deficiencies, clien
       {activeTab === 'deficiencies' && (
         <div className="space-y-4">
           <Card className="p-6 bg-zinc-950/80 border border-white/10 rounded-3xl space-y-4">
-            <h3 className="text-lg font-bold text-white font-heading">Flagged Note Deficiency Audits</h3>
+            <h3 className="text-lg font-bold text-white font-heading">
+              Flagged Note Deficiency Audits
+            </h3>
             <p className="text-xs text-zinc-400">
-              Active notes flagged for clinical errors, missing signatures, or data gaps returned to RBTs.
+              Active notes flagged for clinical errors, missing signatures, or data gaps returned to
+              RBTs.
             </p>
 
             <div className="space-y-3">
-              {deficiencies.map(def => (
-                <div key={def.id} className="p-4 bg-zinc-900/50 border border-rose-500/20 rounded-2xl flex justify-between items-center gap-4">
-                  <div className="space-y-1">
-                    <h4 className="font-bold text-rose-400 text-sm">{def.note?.session?.client?.firstName} {def.note?.session?.client?.lastName}</h4>
-                    <p className="text-xs text-zinc-300 font-sans">"{def.description}"</p>
+              {deficiencies.map((def) => {
+                const clientId = def.note?.session?.client?.id as string | undefined;
+                return (
+                  <div
+                    key={def.id}
+                    className="p-4 bg-zinc-900/50 border border-rose-500/20 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+                  >
+                    <div className="space-y-1">
+                      <h4 className="font-bold text-rose-400 text-sm">
+                        {def.note?.session?.client?.firstName}{' '}
+                        {def.note?.session?.client?.lastName}
+                      </h4>
+                      <p className="text-xs text-zinc-300 font-sans">&quot;{def.description}&quot;</p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge className="bg-rose-500/10 text-rose-400 border-rose-500/20 font-mono text-xs">
+                        Pending RBT Fix
+                      </Badge>
+                      {clientId && (
+                        <Link
+                          href={clientChartProgressHref(clientId)}
+                          className="inline-flex items-center gap-1.5 h-8 px-3 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 font-bold text-xs border border-cyan-500/20 transition-all cursor-pointer"
+                        >
+                          <LineChart className="w-3.5 h-3.5" /> Chart Progress
+                        </Link>
+                      )}
+                    </div>
                   </div>
-                  <Badge className="bg-rose-500/10 text-rose-400 border-rose-500/20 font-mono text-xs">
-                    Pending RBT Fix
-                  </Badge>
-                </div>
-              ))}
+                );
+              })}
 
               {deficiencies.length === 0 && (
-                <div className="p-8 text-center text-xs text-zinc-500 border border-dashed border-white/10 rounded-2xl bg-zinc-950/40">
-                  Zero note deficiencies active across your caseload.
+                <div className="p-8 text-center border border-dashed border-white/10 rounded-2xl bg-zinc-950/40">
+                  <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-500/20 bg-emerald-500/10">
+                    <ShieldCheck className="h-4 w-4 text-emerald-400/80" />
+                  </div>
+                  <p className="text-xs font-semibold text-zinc-300">No open deficiencies</p>
+                  <p className="mt-1 text-[11px] text-zinc-500">
+                    Notes flagged for clinical errors or data gaps appear here until the RBT fixes
+                    them.
+                  </p>
                 </div>
               )}
             </div>
