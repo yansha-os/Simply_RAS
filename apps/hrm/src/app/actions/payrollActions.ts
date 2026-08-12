@@ -4,6 +4,7 @@ import { extractSubmissionFingerprint } from '@repo/db/session-note-attestation'
 
 import { prisma } from '@/lib/prisma';
 import { resolveActingRbtUserId } from '@/lib/resolveActingRbt';
+import { requireStaff } from '@/lib/auth-guard';
 import {
   derivePayHoldFromFlags,
   estimateUnitsFromWindow,
@@ -46,6 +47,16 @@ export type PayableSessionRow = {
  * surfaces IN_PROGRESS sessions as DB-backed incomplete holds.
  */
 export async function listRbtPayrollSessions(rbtUserId?: string) {
+  const gate = await requireStaff();
+  if (!gate.ok) {
+    return {
+      success: false as const,
+      sessions: [] as PayableSessionRow[],
+      summary: null,
+      error: gate.error,
+    };
+  }
+
   try {
     const resolvedId = await resolveActingRbtUserId(rbtUserId);
     if (!resolvedId) {
