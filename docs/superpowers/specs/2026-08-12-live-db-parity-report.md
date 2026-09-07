@@ -1,6 +1,6 @@
 # Live DB ↔ schema.prisma Parity Report — 2026-08-12
 
-**Verdict: 2 actionable discrepancies** (both nullability, fix SQL below). Everything else matches: **all 36 schema models exist as tables, zero missing columns, zero missing enum values.** All 6 `docs/sql` scripts — including `2026-08-12-magic-link-expiry.sql` — are confirmed applied.
+**Historical verdict:** 2 actionable nullability discrepancies were observed on 2026-08-12. Both were corrected and independently verified in `Simple_RAS_CRM_DEV` on 2026-09-07 by [`2026-09-07-182218Z-nullability-parity.sql`](../../sql/2026-09-07-182218Z-nullability-parity.sql). Everything else in the original comparison matched: **all 36 schema models existed as tables, with zero missing columns and zero missing enum values.**
 
 Read-only verification of the live Supabase database against `prisma/schema.prisma`
 (byte-identical to `packages/db/prisma/schema.prisma` at time of check).
@@ -32,49 +32,24 @@ Live DB: 39 tables, 477 columns, 13 enums. Schema: 36 models, 13 enums.
 
 ## Discrepancies
 
-### 1. `ActionItem.creatorId` — NOT NULL in DB, optional in schema (ACTIONABLE — live bug)
+### 1. `ActionItem.creatorId` — resolved 2026-09-07
 
-Schema declares `creatorId String? @db.Uuid` with `onDelete: SetNull`; live column is `NOT NULL`.
-`createActionItem()` in `apps/crm/src/app/actions/actionItems.ts` never sets `creatorId`, so **that insert fails against the live DB today**. The live FK delete rule is also `RESTRICT` instead of the schema's `SET NULL`, which would make deleting a referenced `User` fail.
+Schema declares `creatorId String? @db.Uuid`; the live column was `NOT NULL`. The current action supplies the authenticated creator ID, but the database now also matches the optional Prisma field. Prisma does not declare `onDelete: SetNull` for this relation, so the existing `RESTRICT` rule remains intentional.
 
-### 2. `ReAuthPacket.attendancePct` — nullable in DB, NOT NULL in schema (ACTIONABLE — safe now, latent)
+### 2. `ReAuthPacket.attendancePct` — resolved 2026-09-07
 
-Schema (and `2026-08-12-schema-parity-backfill.sql`) declare `DOUBLE PRECISION NOT NULL DEFAULT 95.0`; live column has the default but allows NULL (table pre-existed, so the backfill's `CREATE TABLE IF NOT EXISTS` no-op'd). Table currently has 0 rows, so nothing is broken yet — tighten it now while it's free.
+Schema (and `2026-08-12-schema-parity-backfill.sql`) declare `DOUBLE PRECISION NOT NULL DEFAULT 95.0`; the live column had the default but allowed NULL because the pre-existing table made the backfill's `CREATE TABLE IF NOT EXISTS` a no-op. The parity migration backfilled any null values and enforced `NOT NULL`.
 
-### Fix SQL — paste into Supabase SQL Editor (idempotent, no order dependency)
+### Fix SQL
 
-```sql
--- 2026-08-12 parity fixes: ActionItem.creatorId optional + ReAuthPacket.attendancePct NOT NULL
--- Source: docs/superpowers/specs/2026-08-12-live-db-parity-report.md
-
--- 1) ActionItem.creatorId: schema says optional (FK ON DELETE SET NULL).
---    Live DB has NOT NULL + RESTRICT → createActionItem() (no creatorId) fails.
-ALTER TABLE "ActionItem" ALTER COLUMN "creatorId" DROP NOT NULL;
-
-DO $$
-BEGIN
-  IF EXISTS (
-    SELECT 1 FROM information_schema.referential_constraints
-    WHERE constraint_name = 'ActionItem_creatorId_fkey' AND delete_rule <> 'SET NULL'
-  ) THEN
-    ALTER TABLE "ActionItem" DROP CONSTRAINT "ActionItem_creatorId_fkey";
-    ALTER TABLE "ActionItem" ADD CONSTRAINT "ActionItem_creatorId_fkey"
-      FOREIGN KEY ("creatorId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-  END IF;
-END $$;
-
--- 2) ReAuthPacket.attendancePct: schema says NOT NULL DEFAULT 95.0; live DB is nullable.
---    Backfill first (currently 0 rows, so this is a no-op safety net).
-UPDATE "ReAuthPacket" SET "attendancePct" = 95.0 WHERE "attendancePct" IS NULL;
-ALTER TABLE "ReAuthPacket" ALTER COLUMN "attendancePct" SET NOT NULL;
-```
+The canonical transaction-wrapped fix is [`2026-09-07-182218Z-nullability-parity.sql`](../../sql/2026-09-07-182218Z-nullability-parity.sql). Apply state is tracked in [`docs/sql/README.md`](../../sql/README.md).
 
 ## Benign drift (no action required)
 
 - **39 timestamp columns are `timestamptz` in DB vs Prisma-default `timestamp(3)`** — deliberate: the hand-written `docs/sql` scripts use `TIMESTAMPTZ` (better practice). Prisma Client reads/writes these fine. Affected tables: SessionNote (4 signer/convert timestamps), IntakePacket (2 magic-link), ClientMessage (2), StaffMessage (2), CandidateOnboardingPacket (9), AtsInterview (5), AtsHelpTicket (3), AtsHelpMessage (1), AtsInterviewRecording (1), ApplicantDeviceSession (3), OnboardingSignatureEvent (1), CaseOpening (2), CaseApplication (4). If anyone ever wants `prisma migrate diff` against the live DB to come back clean, annotate these fields `@db.Timestamptz` in schema.prisma — do **not** downgrade the DB columns.
-- **3 extra tables in DB with no schema model and zero code references** (orphaned legacy): `AuditLog`, `FirstSessionConsensus`, `StartDatePoll`. Leave them; drop later if desired (destructive — not included here).
+- **The 3 extra orphaned tables originally observed** (`AuditLog`, `FirstSessionConsensus`, `StartDatePoll`) were empty and dependency-free, then removed from `Simple_RAS_CRM_DEV` on 2026-09-07 by [`2026-09-07-180522Z-drop-empty-legacy-tables.sql`](../../sql/2026-09-07-180522Z-drop-empty-legacy-tables.sql).
 - **3 legacy `ClientStatus` labels in DB** not in schema: `DOCS_PENDING`, `AUTH_INITIATED`, `AUTHORIZED`. Verified **0 Client rows** use them, so Prisma deserialization is safe. Postgres can't cheaply drop enum values; ignore. (Enum label *order* also differs from schema — only matters for `ORDER BY` on the enum column.)
-- **`docs/sql` README script 7 (`2026-08-12-session-indexes.sql`)**: the file does not exist yet and the live `Session` table has only its primary-key index. Not a schema-parity gap (schema.prisma has no `@@index` on Session at time of check) — flagging so the index work isn't assumed done.
+- **Session indexes:** the original audit predated `docs/sql/2026-08-12-session-indexes.sql`; the live supporting-index audit was subsequently completed and the remaining foreign-key gaps were corrected in DEV on 2026-09-07.
 
 ## Fully matching tables (21 of 36 exact; the other 15 differ only by the items above)
 
