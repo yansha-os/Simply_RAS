@@ -11,7 +11,7 @@
  *
  * Safety: SELECT-only. Every pooled connection additionally runs
  * `SET default_transaction_read_only = on` so even a bug in this script
- * cannot write. Never run DDL/DML here (Supabase session pooler, manual-SQL
+ * cannot write. Never run DDL/DML here (Supabase transaction pooler, manual-SQL
  * workflow — see .cursor/rules/supabase-manual-sql.mdc).
  *
  * Marker inventory (source of truth: code, verified 2026-08-12):
@@ -85,6 +85,11 @@ if (!process.env.DATABASE_URL) {
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   max: 1,
+  connectionTimeoutMillis: 5_000,
+  idleTimeoutMillis: 10_000,
+  maxLifetimeSeconds: 300,
+  query_timeout: 30_000,
+  ssl: { rejectUnauthorized: false },
   options: '-c default_transaction_read_only=on',
 });
 

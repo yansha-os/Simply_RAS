@@ -767,6 +767,11 @@ async function runLiveChecker() {
   const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     max: 1,
+    connectionTimeoutMillis: 5_000,
+    idleTimeoutMillis: 10_000,
+    maxLifetimeSeconds: 300,
+    query_timeout: 30_000,
+    ssl: { rejectUnauthorized: false },
     options: '-c default_transaction_read_only=on',
   });
   const prisma = new PrismaClient({ adapter: new PrismaPg(pool) });
@@ -799,7 +804,7 @@ async function runLiveChecker() {
   const results = [];
 
   try {
-    // Supabase's session pooler may ignore startup `options`. Set the same GUC
+    // Supabase's transaction pooler may ignore startup `options`. Set the same GUC
     // explicitly on the sole pg connection before Prisma receives that session.
     // This changes connection state only; it does not mutate database data/schema.
     const bootstrapClient = await pool.connect();
