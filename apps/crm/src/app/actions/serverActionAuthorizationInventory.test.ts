@@ -1,6 +1,5 @@
-import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { relative, resolve } from 'node:path';
+import { readdirSync, readFileSync } from 'node:fs';
+import { extname, relative, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const ROOT = process.cwd();
@@ -25,35 +24,36 @@ const AUTHORIZATION_MARKERS = [
   'isDevToolsEnabled(',
 ] as const;
 
-function rgFiles(args: string[]): string {
-  try {
-    return execFileSync('rg', args, { cwd: ROOT, encoding: 'utf8' });
-  } catch (error) {
-    const status =
-      error && typeof error === 'object' && 'status' in error
-        ? Number(error.status)
-        : null;
-    if (status === 1) return '';
-    throw error;
+function sourceFiles(extensions: ReadonlySet<string>): string[] {
+  const pending = [resolve(ROOT, 'apps/crm/src'), resolve(ROOT, 'apps/hrm/src')];
+  const files: string[] = [];
+
+  while (pending.length > 0) {
+    const directory = pending.pop();
+    if (!directory) break;
+
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = resolve(directory, entry.name);
+      if (entry.isDirectory()) {
+        pending.push(path);
+      } else if (entry.isFile() && extensions.has(extname(entry.name))) {
+        files.push(path);
+      }
+    }
   }
+
+  return files.sort();
 }
 
 describe('Server Action authorization inventory', () => {
   it('requires every database-backed action module to declare an authorization boundary', () => {
-    const output = rgFiles([
-      '-l',
-      "^['\"]use server['\"]",
-      'apps/crm/src',
-      'apps/hrm/src',
-      '--glob',
-      '*.ts',
-    ]);
     const violations: string[] = [];
 
-    for (const rawPath of output.split(/\r?\n/).filter(Boolean)) {
-      const normalized = relative(ROOT, resolve(ROOT, rawPath)).replaceAll('\\', '/');
+    for (const path of sourceFiles(new Set(['.ts']))) {
+      const normalized = relative(ROOT, path).replaceAll('\\', '/');
       if (normalized.endsWith('.test.ts')) continue;
-      const source = readFileSync(resolve(ROOT, rawPath), 'utf8');
+      const source = readFileSync(path, 'utf8');
+      if (!/^['"]use server['"]/.test(source)) continue;
       if (!/\bprisma\./.test(source)) continue;
       if (REVIEWED_PUBLIC_DATABASE_ACTIONS.has(normalized)) continue;
       if (!AUTHORIZATION_MARKERS.some((marker) => source.includes(marker))) {
@@ -65,18 +65,10 @@ describe('Server Action authorization inventory', () => {
   });
 
   it('has no duplicate legacy RBT profile-sync action', () => {
-    const tracked = rgFiles([
-      '-l',
-      'syncRbtProfileToCrm',
-      'apps/crm/src',
-      'apps/hrm/src',
-      '--glob',
-      '*.ts',
-      '--glob',
-      '*.tsx',
-    ])
-      .split(/\r?\n/)
-      .filter((path) => path && !path.endsWith('.test.ts'));
+    const tracked = sourceFiles(new Set(['.ts', '.tsx']))
+      .filter((path) => !path.endsWith('.test.ts'))
+      .filter((path) => readFileSync(path, 'utf8').includes('syncRbtProfileToCrm'))
+      .map((path) => relative(ROOT, path).replaceAll('\\', '/'));
     expect(tracked).toEqual([]);
   });
 });
