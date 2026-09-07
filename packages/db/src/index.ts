@@ -1,6 +1,7 @@
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
+import { SUPABASE_ROOT_CA } from './supabaseCa';
 
 const connectionString = process.env.DATABASE_URL;
 
@@ -14,10 +15,7 @@ function createPrismaClient() {
     idleTimeoutMillis: 10_000,
     maxLifetimeSeconds: 300,
     query_timeout: 30_000,
-    // Supabase's shared pooler currently presents a self-signed chain. Requiring
-    // TLS still prevents plaintext PHI transport; certificate verification can be
-    // enabled after the project CA is installed in each Render service.
-    ssl: { rejectUnauthorized: false },
+    ssl: { ca: SUPABASE_ROOT_CA, rejectUnauthorized: true },
   });
 
   return new PrismaClient({ adapter: new PrismaPg(pool) });

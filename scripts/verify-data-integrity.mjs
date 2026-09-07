@@ -9,7 +9,7 @@
  *
  * Safety:
  * - The pg startup packet forces default_transaction_read_only=on.
- * - If the session pooler strips that startup GUC, one exact session-local
+ * - If the transaction pooler strips that startup GUC, one exact session-local
  *   SET default_transaction_read_only=on is issued before Prisma can query.
  * - The pool is limited to one connection, and the GUC is verified before and
  *   after all checks.
@@ -29,6 +29,10 @@ import { PrismaClient } from '@prisma/client';
 import { Pool } from 'pg';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const supabaseCa = readFileSync(
+  path.join(repoRoot, 'packages', 'db', 'certs', 'prod-ca-2021.crt'),
+  'utf8'
+);
 
 const MUTATING_SQL =
   /\b(ALTER|CALL|COMMENT|COPY|CREATE|DELETE|DO|DROP|GRANT|INSERT|MERGE|REFRESH|REINDEX|REVOKE|SECURITY\s+LABEL|TRUNCATE|UPDATE|VACUUM)\b/i;
@@ -771,7 +775,7 @@ async function runLiveChecker() {
     idleTimeoutMillis: 10_000,
     maxLifetimeSeconds: 300,
     query_timeout: 30_000,
-    ssl: { rejectUnauthorized: false },
+    ssl: { ca: supabaseCa, rejectUnauthorized: true },
     options: '-c default_transaction_read_only=on',
   });
   const prisma = new PrismaClient({ adapter: new PrismaPg(pool) });

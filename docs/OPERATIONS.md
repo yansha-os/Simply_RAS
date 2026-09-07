@@ -50,7 +50,7 @@ Topology notes:
 
 - Supabase **Enforce SSL on incoming connections** is enabled on DEV (verified 2026-09-07): the configured TLS client connects and an explicit plaintext client is rejected with `ESSLREQUIRED`.
 - Enable and independently verify the same control on production before any live PHI. This setting restarts the database briefly, so schedule it before launch traffic.
-- Runtime Prisma and both read-only verification scripts require TLS in their `pg` configuration. The current shared-pooler certificate chain requires `rejectUnauthorized: false`; install the Supabase project CA in each Render service before upgrading to full certificate and hostname verification.
+- Runtime Prisma and both read-only verification scripts require TLS with certificate and hostname verification. The public Supabase Root 2021 CA is pinned at `packages/db/certs/prod-ca-2021.crt`; review and rotate it before its 2031-04-26 expiry or whenever Supabase changes its published project CA.
 
 ### Restore / rollback runbook
 

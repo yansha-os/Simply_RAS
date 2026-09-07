@@ -45,6 +45,10 @@ import { PrismaClient } from '@prisma/client';
 // ---------------------------------------------------------------------------
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const supabaseCa = readFileSync(
+  path.join(repoRoot, 'packages', 'db', 'certs', 'prod-ca-2021.crt'),
+  'utf8'
+);
 
 function loadDotEnv() {
   if (process.env.DATABASE_URL) return;
@@ -89,7 +93,7 @@ const pool = new Pool({
   idleTimeoutMillis: 10_000,
   maxLifetimeSeconds: 300,
   query_timeout: 30_000,
-  ssl: { rejectUnauthorized: false },
+  ssl: { ca: supabaseCa, rejectUnauthorized: true },
   options: '-c default_transaction_read_only=on',
 });
 
