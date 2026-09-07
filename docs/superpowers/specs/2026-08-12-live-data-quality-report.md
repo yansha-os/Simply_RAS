@@ -6,6 +6,19 @@
 **Checker:** `node scripts/verify-data-integrity.mjs`  
 **Result:** **FAIL — 3 row-level violations across 2 of 8 checks**
 
+## Current verification — 2026-09-07
+
+All eight integrity categories now pass against `Simple_RAS_CRM_DEV`. The final DQ1
+finding was three distinct clients sharing a recognized two-character placeholder in
+`Client.medicaidId`; guarded SQL
+[`2026-09-07-200123Z-null-placeholder-medicaid-ids.sql`](../../sql/2026-09-07-200123Z-null-placeholder-medicaid-ids.sql)
+converted only those three placeholder values to `NULL`. Independent post-check:
+three guarded rows, three null values, zero recognized placeholders.
+
+The separate `verify-no-demo-data.mjs` cutover gate intentionally remains red while
+the designated Studio learner is `ACTIVE` for sandbox workflow testing. It is not an
+integrity-check failure and must be cleared only before activating a real cohort.
+
 ## Read-only evidence
 
 - The checker used one pooled connection.
