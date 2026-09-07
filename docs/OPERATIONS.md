@@ -6,7 +6,7 @@ Readiness context: [production-readiness gap analysis](./superpowers/specs/2026-
 
 ## 1. Deploy
 
-Two independent Next.js 16 servers off one npm-workspaces monorepo. CRM on **:3000**, HRM on **:3001**, both against the **same** `DATABASE_URL` (Supabase **session pooler** — no direct Postgres URL exists; never point agents/CLI DDL at it).
+Two independent Next.js 16 servers off one npm-workspaces monorepo. CRM on **:3000**, HRM on **:3001**, both against the **same** `DATABASE_URL` (Supabase shared **transaction pooler** on `:6543`; never point agents/CLI DDL at it).
 
 ```bash
 npm ci
@@ -67,7 +67,7 @@ Rolling back a **bad migration only** (DB otherwise fine): there are no down-scr
 Wiring it up:
 
 - **Host logs:** keep both processes under something that captures stdout (Vercel/host log drain, or `pm2`/systemd journal if self-hosted). That is the only place log lines appear.
-- **Supabase logs:** dashboard → Logs → Postgres for query errors/connection saturation (session pooler has a connection cap — two apps share it).
+- **Supabase logs:** dashboard → Logs → Postgres for query errors/connection saturation (the transaction pooler has a connection cap — two apps share it). Each app process is bounded to five `pg` clients, waits at most five seconds for a connection, cancels queries after 30 seconds, and recycles connections after five minutes.
 - **Uptime:** point any external pinger (UptimeRobot, Better Stack, Pingdom, etc.) at `https://<crm>/api/health` **and** `https://<hrm>/api/health`, expecting HTTP 200. Example — UptimeRobot: two "HTTP(s)" monitors, one per URL, 1–5 min interval; it treats 503 as down automatically, which is exactly what a failed DB probe returns. Locally: `http://localhost:3000/api/health` / `http://localhost:3001/api/health`.
 - **Error alerting:** Sentry (Next.js SDK in both apps) is the cheapest step up — its hook belongs in the existing `src/instrumentation.ts`. Until then, host log alerts on `"level":"error"` / `FATAL` strings.
 

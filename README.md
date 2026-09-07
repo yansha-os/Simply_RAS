@@ -18,7 +18,7 @@ npm run db:generate
 
 Copy env vars into the root and/or each app as needed — full per-app table in [`docs/ENV.md`](docs/ENV.md):
 
-- `DATABASE_URL` — Supabase Postgres (session pooler is fine for the app)
+- `DATABASE_URL` — Supabase Postgres (the shared transaction pooler on port `6543` is used by the app)
 - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `NEXT_PUBLIC_HRM_URL` (CRM), `NEXT_PUBLIC_CRM_URL` + `SUPABASE_SERVICE_ROLE_KEY` (HRM) — cross-app links / storage admin
 - `NEXT_PUBLIC_ENABLE_DEV_TOOLS` — set to `true` only for local demo impersonation (never in production)

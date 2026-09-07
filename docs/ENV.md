@@ -4,13 +4,13 @@ Env **names** only — never commit secret values. Every variable below is actua
 read in code (verified by grepping `process.env` across `apps/` and `packages/`,
 2026-08-12). Ports: CRM runs on **3000**, HRM on **3001** (`next dev -p …` in each
 app's `package.json`). Both apps share **one** Supabase Postgres via the same
-`DATABASE_URL` (session pooler).
+`DATABASE_URL` (shared Supavisor transaction pooler, port `6543`).
 
 ## CRM (`apps/crm`, port 3000)
 
 | Variable | Scope | Purpose / read in |
 |----------|-------|-------------------|
-| `DATABASE_URL` | server | Shared Postgres (Supabase session pooler) — read by `packages/db/src/index.ts` |
+| `DATABASE_URL` | server | Shared Postgres (Supabase transaction pooler, port `6543`) — read by `packages/db/src/index.ts`; TLS is required in code |
 | `NEXT_PUBLIC_SUPABASE_URL` | public | Supabase project URL — `lib/supabase/{server,client}.ts`, `middleware.ts` |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | public | Supabase anon key — same call sites as above |
 | `NEXT_PUBLIC_HRM_URL` | public | Cross-app deep links / redirects to HRM — `middleware.ts`, `login/actions.ts` |
