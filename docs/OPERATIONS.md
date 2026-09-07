@@ -46,6 +46,12 @@ Topology notes:
 - Enable **PITR (point-in-time recovery)** before any live PHI — daily snapshots alone can lose up to a day of clinical notes.
 - Before pasting any non-trivial SQL: note the timestamp (PITR target) or take a manual backup first.
 
+### Database transport security
+
+- Supabase **Enforce SSL on incoming connections** is enabled on DEV (verified 2026-09-07): the configured TLS client connects and an explicit plaintext client is rejected with `ESSLREQUIRED`.
+- Enable and independently verify the same control on production before any live PHI. This setting restarts the database briefly, so schedule it before launch traffic.
+- Runtime Prisma and both read-only verification scripts require TLS in their `pg` configuration. The current shared-pooler certificate chain requires `rejectUnauthorized: false`; install the Supabase project CA in each Render service before upgrading to full certificate and hostname verification.
+
 ### Restore / rollback runbook
 
 1. Stop writes: stop both app processes (or block traffic). One DB serves both apps — restore affects CRM **and** HRM.
