@@ -71,6 +71,17 @@ A read-only catalog comparison checked all 171 fields with `@default(...)` in `p
 
 Current classification: **zero actionable column-default gaps**.
 
+## Primary, unique, and check-constraint audit — 2026-09-07
+
+A read-only `pg_constraint`/`pg_index` comparison against Prisma's offline generated DDL found:
+
+- All 36 Prisma models have their expected single-column `id` primary key, and every primary-key constraint is validated.
+- All 12 Prisma uniqueness guarantees exist on the correct ordered column set, including one-to-one relations, magic-link tokens, candidate email, case code, and the composite case-application key.
+- `ApplicantDeviceSession(candidateId, deviceFingerprint)` uses the legacy live name `ApplicantDeviceSession_candidate_device_unique` instead of Prisma's generated `ApplicantDeviceSession_candidateId_deviceFingerprint_key`; its definition is otherwise identical. Index names are not used by the application, so this naming-only drift is intentionally accepted.
+- DEV has zero table check constraints, matching the fact that Prisma's schema declares none.
+
+Current classification: **zero actionable primary-key, uniqueness, or check-constraint gaps**.
+
 ## Fully matching tables (21 of 36 exact; the other 15 differ only by the items above)
 
 User, Client, Document, Authorization, AuthCptCode, Session, ContactLog, RbtOnboarding, NoteDeficiency, PARequest, GoalTemplate, Notification, SkillTarget, SessionTrialData, BehaviorTarget, BehaviorLog, StaffCredential, EVVLog, ScheduleAppointment, AuditLogVault, AtsCandidate
