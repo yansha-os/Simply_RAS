@@ -10,11 +10,16 @@
 
 const DEV_TOOLS_FLAG_ON = process.env.NEXT_PUBLIC_ENABLE_DEV_TOOLS === 'true';
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const IS_RENDER_DEPLOYMENT = Boolean(
+  process.env.RENDER ||
+    process.env.RENDER_SERVICE_ID ||
+    process.env.RENDER_EXTERNAL_HOSTNAME
+);
 
-if (IS_PRODUCTION && DEV_TOOLS_FLAG_ON) {
+if ((IS_PRODUCTION || IS_RENDER_DEPLOYMENT) && DEV_TOOLS_FLAG_ON) {
   const message =
-    '[SECURITY] FATAL: NEXT_PUBLIC_ENABLE_DEV_TOOLS=true while NODE_ENV=production. ' +
-    'Dev tools (impersonation / demo seeding) must never be enabled in a production build. ' +
+    '[SECURITY] FATAL: NEXT_PUBLIC_ENABLE_DEV_TOOLS=true in a production or Render deployment. ' +
+    'Dev tools (impersonation / demo seeding) must never be enabled in a deployed build. ' +
     'Unset NEXT_PUBLIC_ENABLE_DEV_TOOLS in this environment and rebuild.';
   console.error(message);
   throw new Error(message);
@@ -26,5 +31,14 @@ if (IS_PRODUCTION && DEV_TOOLS_FLAG_ON) {
  * above makes a misconfigured prod build fail loudly instead).
  */
 export function isDevToolsEnabled(): boolean {
-  return !IS_PRODUCTION && DEV_TOOLS_FLAG_ON;
+  const isRenderDeployment = Boolean(
+    process.env.RENDER ||
+      process.env.RENDER_SERVICE_ID ||
+      process.env.RENDER_EXTERNAL_HOSTNAME
+  );
+  return (
+    process.env.NODE_ENV !== 'production' &&
+    !isRenderDeployment &&
+    process.env.NEXT_PUBLIC_ENABLE_DEV_TOOLS === 'true'
+  );
 }

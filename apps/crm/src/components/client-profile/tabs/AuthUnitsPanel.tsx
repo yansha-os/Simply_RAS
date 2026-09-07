@@ -327,6 +327,14 @@ export default function AuthUnitsPanel({
                       </div>
                     </div>
 
+                    {line.unitsRemaining != null && line.unitsRemaining <= 0 && (
+                      <div className="mt-2 flex items-center gap-2 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-1.5 text-xs text-rose-300">
+                        <AlertTriangle className="h-4 w-4 shrink-0" />
+                        <span className="font-semibold">
+                          Overbill Warning: {line.cptCode} unit budget depleted ({line.unitsRemaining} units remaining). Schedule modifications required.
+                        </span>
+                      </div>
+                    )}
                     {line.unitsAuthorized != null && !line.manualReviewRequired && (
                       <div className="mt-2">
                         <div className="h-1.5 overflow-hidden rounded-full bg-white/5">

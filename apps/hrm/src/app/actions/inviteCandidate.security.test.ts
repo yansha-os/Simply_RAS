@@ -54,7 +54,7 @@ vi.mock('@/lib/rbtManagerMetrics', () => ({
 vi.mock('@/lib/clinicTimezone', () => ({ startOfClinicDay: vi.fn() }));
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }));
 
-import { inviteCandidate, setAtsStage } from './atsActions';
+import { addAtsCandidate, inviteCandidate, setAtsStage } from './atsActions';
 
 function candidate(token: string, activationStatus = 'PENDING_HR_REVIEW') {
   return {
@@ -162,6 +162,21 @@ describe('inviteCandidate access rotation', () => {
     expect(second.magicLinkUrl).toContain(secondToken);
     expect(mocks.prisma.applicantDeviceSession.updateMany).toHaveBeenCalledTimes(2);
   });
+
+  it.each(['HIRED', 'REJECTED'])('does not resurrect a %s candidate', async (stage) => {
+    mocks.prisma.atsCandidate.findUnique.mockResolvedValue({
+      ...candidate(PRE_APPROVAL_TOKEN),
+      stage,
+    });
+
+    const result = await inviteCandidate(CANDIDATE_ID);
+
+    expect(result).toMatchObject({ success: false });
+    expect(result.error).toMatch(/cannot be invited again/i);
+    expect(mocks.prisma.candidateOnboardingPacket.update).not.toHaveBeenCalled();
+    expect(mocks.prisma.applicantDeviceSession.updateMany).not.toHaveBeenCalled();
+    expect(mocks.prisma.atsCandidate.update).not.toHaveBeenCalled();
+  });
 });
 
 describe('terminal candidate session revocation', () => {
@@ -173,6 +188,10 @@ describe('terminal candidate session revocation', () => {
     const result = await setAtsStage(CANDIDATE_ID, 'REJECTED', 'REJECTED');
 
     expect(result).toMatchObject({ success: true });
+    expect(mocks.prisma.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      { isolationLevel: 'Serializable' }
+    );
     expect(mocks.prisma.applicantDeviceSession.updateMany).toHaveBeenCalledWith({
       where: { candidateId: CANDIDATE_ID, revokedAt: null },
       data: { revokedAt: expect.any(Date) },
@@ -181,5 +200,23 @@ describe('terminal candidate session revocation', () => {
       where: { candidateId: CANDIDATE_ID },
       data: { magicLinkRevokedAt: expect.any(Date) },
     });
+  });
+});
+
+describe('staff-created candidate input integrity', () => {
+  it.each([
+    ['invalid email', { name: 'New Candidate', email: 'not-an-email', experienceYears: 1 }],
+    ['oversized name', { name: 'x'.repeat(161), email: 'new@example.com', experienceYears: 1 }],
+    ['negative experience', { name: 'New Candidate', email: 'new@example.com', experienceYears: -1 }],
+    ['fractional experience', { name: 'New Candidate', email: 'new@example.com', experienceYears: 1.5 }],
+  ])('rejects %s before querying or writing', async (_label, invalid) => {
+    const result = await addAtsCandidate({
+      ...invalid,
+      roleApplied: 'RBT',
+    });
+
+    expect(result).toMatchObject({ success: false });
+    expect(mocks.prisma.atsCandidate.findUnique).not.toHaveBeenCalled();
+    expect(mocks.prisma.atsCandidate.update).not.toHaveBeenCalled();
   });
 });

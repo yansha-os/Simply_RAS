@@ -3,14 +3,16 @@
 import React, { useState } from 'react';
 import BillingPaQueue from './BillingPaQueue';
 import TreatmentPaQueue from './TreatmentPaQueue';
+import type { PaQueueClient } from './PaQueueShared';
 
 /** Clients whose PA of this type is denied (clerical, or clinical with P2P unresolved). */
-function attentionCount(clients: any[], type: 'ASSESSMENT' | 'TREATMENT') {
-  return clients.filter((c) =>
-    c.paRequests?.some(
-      (p: any) =>
-        p.type === type &&
-        (p.status === 'DENIED_CLERICAL' || (p.status === 'DENIED_CLINICAL' && !p.p2pResolved))
+function attentionCount(clients: PaQueueClient[], type: 'ASSESSMENT' | 'TREATMENT') {
+  return clients.filter((client) =>
+    client.paRequests?.some(
+      (pa) =>
+        pa.type === type &&
+        (pa.status === 'DENIED_CLERICAL' ||
+          (pa.status === 'DENIED_CLINICAL' && !pa.p2pResolved))
     )
   ).length;
 }
@@ -19,8 +21,8 @@ export default function BillingQueueTabs({
   assessmentClients,
   treatmentClients,
 }: {
-  assessmentClients: any[];
-  treatmentClients: any[];
+  assessmentClients: PaQueueClient[];
+  treatmentClients: PaQueueClient[];
 }) {
   const [activeTab, setActiveTab] = useState<'assessment' | 'treatment'>('assessment');
 
@@ -28,7 +30,7 @@ export default function BillingQueueTabs({
   const treatmentAttention = attentionCount(treatmentClients, 'TREATMENT');
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-3">
       <div className="flex gap-2 border-b border-white/10 pb-0">
         <button
           type="button"

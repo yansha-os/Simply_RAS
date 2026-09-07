@@ -7,6 +7,8 @@ import {
   getStatusGuidance,
   statusIndex,
 } from '@/lib/clientStatusGates';
+import { isClinicalFamilyCorrectionLoop, shouldShowClinicalWaitingForFamilyBanner } from '@/lib/clinicalReviewApprovals';
+import { parsePacketFormData } from '@/lib/safeParseJson';
 
 /** Collapsed visual spine — intermediate statuses map onto these nodes. */
 const PIPELINE_STEPS = [
@@ -76,7 +78,16 @@ function parseRejections(raw: unknown): Record<string, string> {
   return {};
 }
 
-export default function FlowMap({ client }: { client: any }) {
+type FlowMapClient = {
+  status: string;
+  intakePacket: {
+    status: string;
+    rejectionDetails: unknown;
+    formData: unknown;
+  } | null;
+};
+
+export default function FlowMap({ client }: { client: FlowMapClient }) {
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
 
   const rawStatus: string = client.status;
@@ -99,7 +110,7 @@ export default function FlowMap({ client }: { client: any }) {
         statusIndex(rawStatus) >= statusIndex('DOCS_APPROVED_INTAKE');
 
       if (pastIntake) {
-        dynamicLabelOverrides[effectiveStatus] = 'Changes Needed';
+        dynamicLabelOverrides[effectiveStatus] = 'Waiting for family';
       } else {
         effectiveStatus = 'DOCS_SUBMITTED';
         dynamicLabelOverrides['DOCS_SUBMITTED'] =
@@ -113,6 +124,23 @@ export default function FlowMap({ client }: { client: any }) {
         effectiveStatus = 'DOCS_SUBMITTED';
         dynamicLabelOverrides['DOCS_SUBMITTED'] = 'Review Needed';
       }
+    } else if (
+      isClinicalFamilyCorrectionLoop({
+        clientStatus: rawStatus,
+        packetStatus: packet.status,
+        rejectionDetails: parsedRejections,
+      })
+    ) {
+      const packetFormData = parsePacketFormData(packet.formData);
+      dynamicLabelOverrides['DOCS_APPROVED_INTAKE'] =
+        shouldShowClinicalWaitingForFamilyBanner({
+          clientStatus: rawStatus,
+          packetStatus: packet.status,
+          rejectionDetails: parsedRejections,
+          formData: packetFormData,
+        })
+          ? 'Waiting for family'
+          : 'Needs review';
     }
   }
 
@@ -326,7 +354,7 @@ export default function FlowMap({ client }: { client: any }) {
             )}
             {selectedNode === 'ACTIVE' && rawStatus !== 'DISCHARGED' && (
               <p className="mt-3 font-mono text-[10.5px] text-zinc-500 leading-relaxed">
-                Delivery: RAS Session Studio · Claims: Plutus manual tracker after BCBA e-sign.
+                Delivery: RAS Session Studio · Claims: CRM billing after BCBA e-sign.
               </p>
             )}
           </div>

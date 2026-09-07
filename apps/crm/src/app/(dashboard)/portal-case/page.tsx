@@ -9,7 +9,7 @@ export default async function CasePortalPage() {
   if (!access.ok) notFound();
 
   const clients = await prisma.client.findMany({
-    select: { status: true },
+    select: { status: true, caseCoordinatorId: true },
     orderBy: { updatedAt: 'desc' },
   });
 

@@ -8,9 +8,8 @@ import {
   Users,
   Activity,
   PenTool,
-  FileSignature,
   ClipboardCheck,
-  FileSearch,
+  FileText,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -32,13 +31,12 @@ const navItems: Record<string, NavItem[]> = {
     { name: 'Clients', href: '/clinical-support/clients', icon: Users },
     { name: 'Billing', isHeader: true },
     { name: 'Dashboard', href: '/portal-billing', icon: LayoutDashboard },
-    { name: 'Clients', href: '/portal-billing/clients', icon: Users },
-    { name: 'Dual-Run Audit', href: '/portal-billing/audit', icon: FileSearch },
+    { name: 'PA Queue', href: '/portal-billing/clients', icon: Users },
+    { name: 'Session Claims', href: '/portal-billing/claims', icon: FileText },
     { name: 'Clinical', isHeader: true },
     { name: 'Dashboard', href: '/portal-clinical', icon: LayoutDashboard },
     { name: 'Clients (BCBAs)', href: '/portal-clinical/bcbas', icon: Users },
     { name: 'Clinical Review', href: '/portal-clinical/review', icon: ClipboardCheck },
-    { name: 'Unsigned Notes', href: '/portal-clinical/notes', icon: FileSignature },
     { name: 'Daily Workstation', href: '/portal-clinical/daily', icon: PenTool },
     { name: 'Case Coordinator', isHeader: true },
     { name: 'Dashboard', href: '/portal-case-coord', icon: LayoutDashboard },
@@ -46,8 +44,18 @@ const navItems: Record<string, NavItem[]> = {
     { name: 'Clients', href: '/portal-case-coord/clients', icon: Users },
   ],
   INTAKE_PA_COORDINATOR: [
+    { name: 'Intake Portal', isHeader: true },
     { name: 'Dashboard', href: '/portal-case', icon: LayoutDashboard },
     { name: 'Clients', href: '/portal-case/clients', icon: Users },
+    { name: 'Billing', isHeader: true },
+    { name: 'Dashboard', href: '/portal-billing', icon: LayoutDashboard },
+    { name: 'Clients', href: '/portal-billing/clients', icon: Users },
+  ],
+  /** @deprecated SESSION_NOTES_COORDINATOR — same nav as BILLING (in-CRM billing agents). */
+  SESSION_NOTES_COORDINATOR: [
+    { name: 'Billing Dashboard', href: '/portal-billing', icon: LayoutDashboard },
+    { name: 'PA Queue', href: '/portal-billing/clients', icon: Users },
+    { name: 'Session Claims', href: '/portal-billing/claims', icon: FileText },
   ],
   CASE_COORDINATOR: [
     { name: 'Dashboard', href: '/portal-case-coord', icon: LayoutDashboard },
@@ -65,7 +73,6 @@ const navItems: Record<string, NavItem[]> = {
     { name: 'Dashboard', href: '/portal-clinical', icon: LayoutDashboard },
     { name: 'Clinical Queue', href: '/portal-clinical/bcbas', icon: Users },
     { name: 'Clinical Review', href: '/portal-clinical/review', icon: ClipboardCheck },
-    { name: 'Unsigned Notes', href: '/portal-clinical/notes', icon: FileSignature },
     { name: 'Daily Workstation', href: '/portal-clinical/daily', icon: PenTool },
     { name: 'Clinical Support', isHeader: true },
     { name: 'Dashboard', href: '/clinical-support', icon: LayoutDashboard },
@@ -81,13 +88,12 @@ const navItems: Record<string, NavItem[]> = {
     { name: 'Clients', href: '/clinical-support/clients', icon: Users },
     { name: 'Billing', isHeader: true },
     { name: 'Dashboard', href: '/portal-billing', icon: LayoutDashboard },
-    { name: 'Clients', href: '/portal-billing/clients', icon: Users },
-    { name: 'Dual-Run Audit', href: '/portal-billing/audit', icon: FileSearch },
+    { name: 'PA Queue', href: '/portal-billing/clients', icon: Users },
+    { name: 'Session Claims', href: '/portal-billing/claims', icon: FileText },
     { name: 'Clinical', isHeader: true },
     { name: 'Dashboard', href: '/portal-clinical', icon: LayoutDashboard },
     { name: 'Clinical Queue', href: '/portal-clinical/bcbas', icon: Users },
     { name: 'Clinical Review', href: '/portal-clinical/review', icon: ClipboardCheck },
-    { name: 'Unsigned Notes', href: '/portal-clinical/notes', icon: FileSignature },
     { name: 'Daily Workstation', href: '/portal-clinical/daily', icon: PenTool },
     { name: 'Case Coordinator', isHeader: true },
     { name: 'Dashboard', href: '/portal-case-coord', icon: LayoutDashboard },
@@ -98,13 +104,17 @@ const navItems: Record<string, NavItem[]> = {
     { name: 'Clinical Dashboard', href: '/portal-clinical', icon: LayoutDashboard },
     { name: 'Clinical Queue', href: '/portal-clinical/bcbas', icon: Users },
     { name: 'Clinical Review', href: '/portal-clinical/review', icon: ClipboardCheck },
-    { name: 'Unsigned Notes', href: '/portal-clinical/notes', icon: FileSignature },
     { name: 'Daily Workstation', href: '/portal-clinical/daily', icon: PenTool },
   ],
   BILLING: [
     { name: 'Billing Dashboard', href: '/portal-billing', icon: LayoutDashboard },
-    { name: 'Clients', href: '/portal-billing/clients', icon: Users },
-    { name: 'Dual-Run Audit', href: '/portal-billing/audit', icon: FileSearch },
+    { name: 'PA Queue', href: '/portal-billing/clients', icon: Users },
+    { name: 'Session Claims', href: '/portal-billing/claims', icon: FileText },
+  ],
+  FINANCE: [
+    { name: 'Billing Dashboard', href: '/portal-billing', icon: LayoutDashboard },
+    { name: 'PA Queue', href: '/portal-billing/clients', icon: Users },
+    { name: 'Session Claims', href: '/portal-billing/claims', icon: FileText },
   ],
 };
 
@@ -112,8 +122,7 @@ export function SidebarNav({ role }: { role: string }) {
   const pathname = usePathname();
   const items = navItems[role] || [];
 
-  // Longest-prefix match so nested routes (e.g. /portal-billing/audit) highlight
-  // their own item instead of the section dashboard link.
+  // Longest-prefix match so nested routes highlight their own item instead of the section dashboard link.
   let activeHref: string | undefined;
   for (const item of items) {
     if (!item.href) continue;
@@ -131,7 +140,7 @@ export function SidebarNav({ role }: { role: string }) {
               key={`header-${idx}`}
               className="font-mono text-[10px] font-semibold tracking-[1.5px] text-[var(--dawn)] uppercase px-[10px] mb-[8px] mt-[24px] flex items-center gap-[6px] opacity-0 group-hover:opacity-100 transition-opacity duration-300 whitespace-nowrap min-w-[200px]"
             >
-              <span className="opacity-50">//</span> {item.name}
+              <span className="opacity-50">{'//'}</span> {item.name}
             </div>
           );
         }
@@ -144,22 +153,22 @@ export function SidebarNav({ role }: { role: string }) {
             href={item.href || '#'}
             className={`flex items-center gap-[12px] px-[13px] group-hover:px-[12px] w-[44px] group-hover:w-[224px] h-[44px] rounded-xl text-[13.5px] font-medium cursor-pointer transition-all duration-300 ease-in-out whitespace-nowrap overflow-hidden group/item ${
               active
-                ? 'bg-brand-orange-500/15 text-white font-semibold border border-brand-orange-500/30 shadow-lg shadow-brand-orange-500/10'
-                : 'text-[var(--ink-400)] bg-white/[0.02] hover:bg-white/[0.06] hover:text-white hover:shadow-md border border-transparent hover:border-white/[0.05]'
+                ? 'bg-brand-orange-500/15 text-slate-900 dark:text-white font-semibold border border-brand-orange-500/30 shadow-md shadow-brand-orange-500/10'
+                : 'text-slate-600 dark:text-[var(--ink-400)] bg-slate-900/[0.03] dark:bg-white/[0.02] hover:bg-slate-900/[0.06] dark:hover:bg-white/[0.06] hover:text-slate-900 dark:hover:text-white hover:shadow-sm border border-transparent hover:border-slate-300 dark:hover:border-white/[0.05]'
             }`}
             title={item.name}
           >
             <span
-              className={`w-[18px] flex-shrink-0 flex items-center justify-center text-[15px] transition-colors duration-200 drop-shadow-[0_0_8px_rgba(255,107,0,0.4)] ${
-                active ? 'text-brand-orange-400' : 'text-brand-orange-500 group-hover/item:text-brand-orange-400'
+              className={`w-[18px] flex-shrink-0 flex items-center justify-center transition-colors duration-200 drop-shadow-[0_0_8px_rgba(255,107,0,0.4)] ${
+                active ? 'text-brand-orange-600 dark:text-brand-orange-400' : 'text-brand-orange-500 group-hover/item:text-brand-orange-600 dark:group-hover/item:text-brand-orange-400'
               }`}
             >
-              {item.icon === Activity ? '◷' : item.icon === Users ? '◍' : item.icon === FileSearch ? '◈' : '▦'}
+              {item.icon ? <item.icon className="w-[15px] h-[15px]" strokeWidth={2.25} /> : null}
             </span>
             <span className="opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center gap-[8px]">
               {item.name}
               {active && (
-                <span className="w-1.5 h-1.5 rounded-full bg-brand-orange-400 animate-pulse shrink-0" />
+                <span className="w-1.5 h-1.5 rounded-full bg-brand-orange-500 dark:bg-brand-orange-400 animate-pulse shrink-0" />
               )}
             </span>
           </Link>

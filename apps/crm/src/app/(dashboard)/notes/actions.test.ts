@@ -51,6 +51,8 @@ const mocks = vi.hoisted(() => {
     requireStaff: vi.fn(),
     requireClientAccess: vi.fn(),
     collectNoteCredentialWarnings: vi.fn(),
+    assertNoteCredentialHardStop: vi.fn(),
+    getStaffNpi: vi.fn(),
     createNotification: vi.fn(),
     revalidatePath: vi.fn(),
   };
@@ -58,19 +60,35 @@ const mocks = vi.hoisted(() => {
 
 vi.mock('@/lib/prisma', () => ({ prisma: mocks.prisma }));
 vi.mock('@/lib/auth-guard', () => ({
-  PLUTUS_TRACKER_ROLES: [
+  SESSION_NOTES_CONVERSION_ROLES: [
     'CEO',
     'CLINICAL_DIRECTOR',
     'OPS_DIRECTOR',
     'BILLING',
     'FINANCE',
-    'CASE_COORDINATOR',
+    'SESSION_NOTES_COORDINATOR',
   ],
   requireStaff: mocks.requireStaff,
   requireClientAccess: mocks.requireClientAccess,
 }));
 vi.mock('@/lib/staffCredentials.server', () => ({
   collectNoteCredentialWarnings: mocks.collectNoteCredentialWarnings,
+  assertNoteCredentialHardStop: mocks.assertNoteCredentialHardStop,
+  getStaffNpi: mocks.getStaffNpi,
+}));
+vi.mock('@/lib/billing/noteClaimScrub', () => ({
+  scrubNoteForConvert: vi.fn(() => ({
+    sessionId: SESSION_ID,
+    noteId: NOTE_ID,
+    clientId: CLIENT_ID,
+    clientName: 'Test Client',
+    cptCode: '97153',
+    dateOfService: '2026-08-12',
+    billableUnits: 4,
+    status: 'CLEAN',
+    defects: [],
+    plutusReady: true,
+  })),
 }));
 vi.mock('@/app/actions/notifications', () => ({
   createNotification: mocks.createNotification,
@@ -131,6 +149,14 @@ function note(overrides: Record<string, unknown> = {}) {
       scheduledEnd: new Date('2026-08-12T14:00:00.000Z'),
       actualStart: new Date('2026-08-12T13:00:00.000Z'),
       actualEnd: new Date('2026-08-12T14:00:00.000Z'),
+      client: {
+        status: 'STAFFING_PENDING',
+        firstName: 'Test',
+        lastName: 'Client',
+        primaryDiagnosisCode: 'F84.0',
+        insurancePayer: 'Medicaid',
+        authorizations: [],
+      },
     },
     ...overrides,
   };
@@ -191,21 +217,21 @@ beforeEach(() => {
     ok: true,
     user: {
       id: ACTOR_ID,
-      role: 'BILLING',
+      role: 'SESSION_NOTES_COORDINATOR',
       isActive: true,
-      firstName: 'Bill',
-      lastName: 'Reviewer',
-      email: 'billing@example.test',
+      firstName: 'Notes',
+      lastName: 'Coordinator',
+      email: 'snc@example.test',
     },
   });
   mocks.requireClientAccess.mockResolvedValue({
     ok: true,
-    user: { id: ACTOR_ID, role: 'BILLING', isActive: true },
+    user: { id: ACTOR_ID, role: 'SESSION_NOTES_COORDINATOR', isActive: true },
   });
   mocks.prisma.sessionNote.findUnique.mockResolvedValue(note());
   mocks.tx.user.findFirst.mockResolvedValue({
     id: ACTOR_ID,
-    role: 'BILLING',
+    role: 'SESSION_NOTES_COORDINATOR',
     isActive: true,
   });
   mocks.tx.authorization.findMany.mockResolvedValue([
@@ -231,9 +257,25 @@ beforeEach(() => {
     async (callback: (tx: typeof mocks.tx) => unknown) => callback(mocks.tx),
   );
   mocks.collectNoteCredentialWarnings.mockResolvedValue([]);
+  mocks.assertNoteCredentialHardStop.mockResolvedValue({ ok: true, warnings: [] });
 });
 
 describe('convertNoteToBillable', () => {
+  it('denies billing read-only actors from conversion', async () => {
+    mocks.requireStaff.mockResolvedValueOnce({
+      ok: false,
+      error: 'You are not authorized to perform this action.',
+    });
+
+    const result = await convertNoteToBillable(NOTE_ID, convertOptions());
+
+    expect(result).toMatchObject({
+      success: false,
+      gateCode: 'AUTHORIZATION_DENIED',
+    });
+    expect(mocks.prisma.sessionNote.findUnique).not.toHaveBeenCalled();
+  });
+
   it('requires a normalized nonblank Plutus reference', async () => {
     const result = await convertNoteToBillable(
       NOTE_ID,
@@ -371,6 +413,22 @@ describe('convertNoteToBillable', () => {
   });
 
   it('fails the atomic conversion when its required override audit cannot commit', async () => {
+    mocks.requireStaff.mockResolvedValueOnce({
+      ok: true,
+      user: {
+        id: ACTOR_ID,
+        role: 'CEO',
+        isActive: true,
+        firstName: 'Ops',
+        lastName: 'Lead',
+        email: 'ceo@example.test',
+      },
+    });
+    mocks.tx.user.findFirst.mockResolvedValueOnce({
+      id: ACTOR_ID,
+      role: 'CEO',
+      isActive: true,
+    });
     mocks.tx.authorization.findMany.mockResolvedValueOnce([
       {
         id: 'auth-1',

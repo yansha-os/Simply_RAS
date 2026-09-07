@@ -19,6 +19,7 @@ import {
 import { toast } from 'sonner';
 import {
   createHelpTicket,
+  escalateTicketToHeadHrByApplicant,
   listHelpTickets,
   sendHelpMessage,
   type HelpTicketDto,
@@ -49,7 +50,7 @@ interface HelpTicket {
   categoryLabel: string;
   subject: string;
   message: string;
-  status: 'OPEN' | 'CLAIMED' | 'IN_PROGRESS' | 'RESOLVED';
+  status: 'OPEN' | 'CLAIMED' | 'IN_PROGRESS' | 'RESOLVED' | 'ESCALATED_HEAD_HR';
   createdAt: string;
   assignedHrAgent?: string;
   candidateName?: string;
@@ -80,6 +81,7 @@ export default function RbtHelpDeskPage() {
   const [category, setCategory] = useState('GENERAL_QUESTION');
   const [subject, setSubject] = useState('');
   const [message, setMessage] = useState('');
+  const [requestHeadHr] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [activeTab, setActiveTab] = useState<'NEW_TICKET' | 'ACTIVE_TICKETS'>('NEW_TICKET');
   const [replyInput, setReplyInput] = useState('');
@@ -118,6 +120,8 @@ export default function RbtHelpDeskPage() {
     })),
   });
 
+  const [isOfferStage, setIsOfferStage] = useState(false);
+
   useEffect(() => {
     const loadTickets = () => {
       void (async () => {
@@ -132,6 +136,16 @@ export default function RbtHelpDeskPage() {
           return;
         }
         setCandidateId(id);
+
+        try {
+          const { getMyWageOffer } = await import('@/app/actions/wageOfferActions');
+          const wageRes = await getMyWageOffer();
+          if (wageRes.success && wageRes.data) {
+            setIsOfferStage(true);
+          }
+        } catch {
+          setIsOfferStage(false);
+        }
 
         const res = await listHelpTickets({ candidateId: id, activeOnly: true });
         if (!res.success) {
@@ -202,6 +216,7 @@ export default function RbtHelpDeskPage() {
       subject,
       message,
       candidateName: resolveCandidateDisplayName(),
+      requestHeadHr,
     });
     setIsSubmitting(false);
 
@@ -218,6 +233,17 @@ export default function RbtHelpDeskPage() {
     setActiveTab('ACTIVE_TICKETS');
     setLoadState('ready');
     toast.success('Support ticket submitted to HR.');
+  };
+
+  const handleEscalateToHeadHr = async (ticketId: string) => {
+    const res = await escalateTicketToHeadHrByApplicant(ticketId);
+    if (!res.success || !res.ticket) {
+      toast.error(res.error || 'Failed to escalate ticket');
+      return;
+    }
+    const mapped = mapDto(res.ticket);
+    setTickets((prev) => prev.map((t) => (t.id === mapped.id ? mapped : t)));
+    toast.success('Ticket escalated directly to Head of HR!');
   };
 
   const autosizeReply = () => {
@@ -345,27 +371,27 @@ export default function RbtHelpDeskPage() {
   const sessionBlocked = loadState === 'no_session';
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6 select-none animate-fade-in text-white pb-16 relative">
-      <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(ellipse_at_top,_rgba(249,115,22,0.14),_transparent_55%)]" />
+    <div className="max-w-6xl mx-auto space-y-6 select-none animate-fade-in text-slate-900 pb-16 relative">
+      <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(ellipse_at_top,_rgba(249,115,22,0.08),_transparent_55%)]" />
 
       {/* HEADER */}
-      <div className="bg-zinc-950/80 backdrop-blur-xl p-6 sm:p-8 rounded-3xl border border-white/10 shadow-2xl flex flex-col md:flex-row md:items-center justify-between gap-6 relative overflow-hidden">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_15%_20%,rgba(249,115,22,0.15),transparent_45%)] pointer-events-none" />
+      <div className="bg-[#FFFDF8] backdrop-blur-xl p-6 sm:p-8 rounded-3xl border border-[#E2D5B7] shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-6 relative overflow-hidden text-slate-900">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_15%_20%,rgba(249,115,22,0.06),transparent_45%)] pointer-events-none" />
         <div className="flex items-center gap-4 relative z-10">
-          <div className="w-14 h-14 rounded-2xl bg-brand-orange-500/15 border border-brand-orange-500/30 text-brand-orange-400 flex items-center justify-center shrink-0 shadow-lg">
+          <div className="w-14 h-14 rounded-2xl bg-orange-100 border border-orange-200 text-[#F97316] flex items-center justify-center shrink-0 shadow-sm">
             <LifeBuoy className="w-8 h-8" />
           </div>
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-2xl sm:text-3xl font-black font-heading tracking-tight text-white">
+              <h1 className="text-2xl sm:text-3xl font-black font-heading tracking-tight text-slate-900">
                 RBT Candidate Help Desk
               </h1>
-              <span className="bg-brand-orange-500/10 text-brand-orange-400 border border-brand-orange-500/20 text-[10px] font-mono font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider inline-flex items-center gap-1.5">
-                <span className="dot-live w-1.5 h-1.5 rounded-full bg-brand-orange-400" />
+              <span className="bg-orange-100 text-orange-800 border border-orange-300 text-[10px] font-mono font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider inline-flex items-center gap-1.5">
+                <span className="dot-live w-1.5 h-1.5 rounded-full bg-orange-500" />
                 Live support
               </span>
             </div>
-            <p className="text-xs text-zinc-400 font-medium mt-1">
+            <p className="text-xs text-slate-600 font-medium mt-1">
               Real AtsHelpTicket rows — ask HR about certs, interviews, availability, or wage offers.
             </p>
           </div>
@@ -378,7 +404,7 @@ export default function RbtHelpDeskPage() {
             className={`px-4 py-2.5 rounded-2xl font-black text-xs transition-all cursor-pointer shadow-md flex items-center gap-2 border ${
               activeTab === 'NEW_TICKET'
                 ? 'bg-brand-orange-500 text-white border-brand-orange-400'
-                : 'bg-zinc-900/80 hover:bg-zinc-800 text-zinc-300 border-white/10 hover:border-brand-orange-500/40'
+                : 'bg-[#F9F5EC] hover:bg-white text-slate-800 border-[#E2D5B7] hover:border-brand-orange-500/40'
             }`}
           >
             <PlusCircle className="w-4 h-4" />
@@ -390,7 +416,7 @@ export default function RbtHelpDeskPage() {
             className={`px-4 py-2.5 rounded-2xl font-black text-xs transition-all cursor-pointer shadow-md flex items-center gap-2 border ${
               activeTab === 'ACTIVE_TICKETS'
                 ? 'bg-brand-orange-500 text-white border-brand-orange-400'
-                : 'bg-zinc-900/80 hover:bg-zinc-800 text-zinc-300 border-white/10 hover:border-brand-orange-500/40'
+                : 'bg-[#F9F5EC] hover:bg-white text-slate-800 border-[#E2D5B7] hover:border-brand-orange-500/40'
             }`}
           >
             <MessageSquare className="w-4 h-4" />
@@ -400,11 +426,11 @@ export default function RbtHelpDeskPage() {
       </div>
 
       {sessionBlocked && (
-        <div className="bg-amber-500/10 border border-amber-500/30 rounded-3xl p-5 flex items-start gap-3 backdrop-blur-xl">
-          <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+        <div className="bg-amber-50 border border-amber-300 rounded-3xl p-5 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
           <div className="space-y-1">
-            <p className="text-sm font-bold text-amber-200">No applicant session</p>
-            <p className="text-xs font-mono text-zinc-400 leading-relaxed">
+            <p className="text-sm font-bold text-amber-900">No applicant session</p>
+            <p className="text-xs font-mono text-amber-800 leading-relaxed">
               Open your magic-link invite or use Dev Tools to impersonate a real AtsCandidate.
               Help desk will not invent demo tickets.
             </p>
@@ -414,29 +440,29 @@ export default function RbtHelpDeskPage() {
 
       {/* NEW TICKET */}
       {activeTab === 'NEW_TICKET' && (
-        <div className="bg-zinc-950/80 backdrop-blur-xl border border-white/10 rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl max-w-2xl mx-auto">
-          <div className="flex items-center gap-3 border-b border-white/10 pb-4">
-            <div className="w-10 h-10 rounded-2xl bg-brand-orange-500/15 border border-brand-orange-500/30 text-brand-orange-400 flex items-center justify-center">
+        <div className="bg-[#FFFDF8] border border-[#E2D5B7] rounded-3xl p-6 sm:p-8 space-y-6 shadow-xl max-w-2xl mx-auto">
+          <div className="flex items-center gap-3 border-b border-[#E2D5B7] pb-4">
+            <div className="w-10 h-10 rounded-2xl bg-orange-100 border border-orange-200 text-[#F97316] flex items-center justify-center">
               <LifeBuoy className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-lg font-black text-white font-heading">Submit help ticket</h2>
-              <p className="text-xs text-zinc-400 font-medium">
+              <h2 className="text-lg font-black text-slate-900 font-heading">Submit help ticket</h2>
+              <p className="text-xs text-slate-600 font-medium">
                 Creates a durable AtsHelpTicket HR can claim from /ats/help-tickets.
               </p>
             </div>
           </div>
 
-          <form onSubmit={handleCreateTicket} className="space-y-4 text-xs font-semibold text-zinc-300">
+          <form onSubmit={handleCreateTicket} className="space-y-4 text-xs font-semibold text-slate-700">
             <div>
-              <label className="block mb-1.5 font-bold uppercase tracking-wider text-zinc-400">
+              <label className="block mb-1.5 font-bold uppercase tracking-wider text-slate-600">
                 Category
               </label>
               <select
                 value={category}
                 onChange={(e) => setCategory(e.target.value)}
                 disabled={sessionBlocked}
-                className="w-full bg-zinc-900/80 border border-white/10 rounded-2xl p-3 text-xs text-white font-bold outline-none focus:border-brand-orange-500 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+                className="w-full bg-[#FFFDF8] border border-[#E2D5B7] rounded-2xl p-3 text-xs text-slate-900 font-bold outline-none focus:border-brand-orange-500 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <option value="GENERAL_QUESTION">General Onboarding &amp; Compliance</option>
                 <option value="UPLOAD_CERTIFICATE">40-Hour RBT Certificate upload</option>
@@ -449,7 +475,7 @@ export default function RbtHelpDeskPage() {
             </div>
 
             <div>
-              <label className="block mb-1.5 font-bold uppercase tracking-wider text-zinc-400">
+              <label className="block mb-1.5 font-bold uppercase tracking-wider text-slate-600">
                 Subject
               </label>
               <input
@@ -459,12 +485,12 @@ export default function RbtHelpDeskPage() {
                 onChange={(e) => setSubject(e.target.value)}
                 disabled={sessionBlocked}
                 placeholder="e.g., Question about e-signature consent"
-                className="w-full bg-zinc-900/80 border border-white/10 rounded-2xl p-3 text-xs text-white font-bold outline-none focus:border-brand-orange-500 disabled:cursor-not-allowed disabled:opacity-50 placeholder:text-zinc-600"
+                className="w-full bg-[#FFFDF8] border border-[#E2D5B7] rounded-2xl p-3 text-xs text-slate-900 font-bold outline-none focus:border-brand-orange-500 disabled:cursor-not-allowed disabled:opacity-50 placeholder:text-slate-400"
               />
             </div>
 
             <div>
-              <label className="block mb-1.5 font-bold uppercase tracking-wider text-zinc-400">
+              <label className="block mb-1.5 font-bold uppercase tracking-wider text-slate-600">
                 Description
               </label>
               <textarea
@@ -474,7 +500,7 @@ export default function RbtHelpDeskPage() {
                 onChange={(e) => setMessage(e.target.value)}
                 disabled={sessionBlocked}
                 placeholder="Describe what you need so HR can help immediately…"
-                className="w-full bg-zinc-900/80 border border-white/10 rounded-2xl p-3.5 text-xs text-white font-medium outline-none focus:border-brand-orange-500 resize-none disabled:cursor-not-allowed disabled:opacity-50 placeholder:text-zinc-600"
+                className="w-full bg-[#FFFDF8] border border-[#E2D5B7] rounded-2xl p-3.5 text-xs text-slate-900 font-medium outline-none focus:border-brand-orange-500 resize-none disabled:cursor-not-allowed disabled:opacity-50 placeholder:text-slate-400"
               />
             </div>
 
@@ -483,7 +509,7 @@ export default function RbtHelpDeskPage() {
                 <button
                   type="button"
                   onClick={() => setActiveTab('ACTIVE_TICKETS')}
-                  className="px-5 py-3 rounded-2xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-white/10 font-bold text-xs cursor-pointer transition-all"
+                  className="px-5 py-3 rounded-2xl bg-[#F9F5EC] hover:bg-white text-slate-800 border border-[#E2D5B7] font-bold text-xs cursor-pointer transition-all"
                 >
                   View my tickets
                 </button>
@@ -491,7 +517,7 @@ export default function RbtHelpDeskPage() {
               <button
                 type="submit"
                 disabled={isSubmitting || sessionBlocked}
-                className="px-6 py-3.5 rounded-2xl bg-brand-orange-500 hover:bg-orange-600 disabled:opacity-40 text-white font-extrabold text-xs cursor-pointer disabled:cursor-not-allowed shadow-lg shadow-orange-500/20 transition-all flex items-center gap-2"
+                className="px-6 py-3.5 rounded-2xl bg-brand-orange-500 hover:bg-orange-600 disabled:opacity-40 text-white font-extrabold text-xs cursor-pointer disabled:cursor-not-allowed shadow-lg transition-all flex items-center gap-2"
               >
                 <Send className="w-4 h-4" />
                 <span>{isSubmitting ? 'Submitting…' : 'Submit to HR'}</span>
@@ -504,28 +530,28 @@ export default function RbtHelpDeskPage() {
       {/* ACTIVE TICKETS + CHAT */}
       {activeTab === 'ACTIVE_TICKETS' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="bg-zinc-950/80 backdrop-blur-xl border border-white/10 rounded-3xl p-5 space-y-4 shadow-2xl h-fit">
-            <h3 className="text-sm font-black font-heading text-white uppercase tracking-wider flex items-center gap-2 border-b border-white/10 pb-3">
-              <FileText className="w-4 h-4 text-brand-orange-400" /> My tickets ({tickets.length})
+          <div className="bg-[#FFFDF8] border border-[#E2D5B7] rounded-3xl p-5 space-y-4 shadow-xl h-fit">
+            <h3 className="text-sm font-black font-heading text-slate-900 uppercase tracking-wider flex items-center gap-2 border-b border-[#E2D5B7] pb-3">
+              <FileText className="w-4 h-4 text-[#F97316]" /> My tickets ({tickets.length})
             </h3>
 
             <div className="space-y-3">
               {loadState === 'loading' ? (
-                <div className="p-8 text-center text-zinc-400 font-mono text-xs border border-dashed border-white/10 rounded-2xl flex flex-col items-center gap-2">
-                  <Loader2 className="w-5 h-5 animate-spin text-brand-orange-400" />
+                <div className="p-8 text-center text-slate-600 font-mono text-xs border border-dashed border-[#E2D5B7] rounded-2xl flex flex-col items-center gap-2">
+                  <Loader2 className="w-5 h-5 animate-spin text-[#F97316]" />
                   Loading from database…
                 </div>
               ) : loadState === 'error' ? (
-                <div className="p-6 text-center space-y-2 border border-dashed border-rose-500/30 bg-rose-500/5 rounded-2xl">
-                  <AlertTriangle className="w-6 h-6 text-rose-400 mx-auto" />
-                  <p className="text-xs font-bold text-rose-300">Could not load tickets</p>
-                  <p className="text-[11px] font-mono text-zinc-500">{loadError}</p>
+                <div className="p-6 text-center space-y-2 border border-dashed border-rose-300 bg-rose-50 rounded-2xl">
+                  <AlertTriangle className="w-6 h-6 text-rose-600 mx-auto" />
+                  <p className="text-xs font-bold text-rose-900">Could not load tickets</p>
+                  <p className="text-[11px] font-mono text-rose-800">{loadError}</p>
                 </div>
               ) : tickets.length === 0 ? (
-                <div className="p-6 text-center space-y-3 border border-dashed border-white/10 rounded-2xl bg-zinc-900/40">
-                  <LifeBuoy className="w-8 h-8 text-zinc-600 mx-auto" />
-                  <p className="text-xs font-bold text-zinc-300">No support tickets yet</p>
-                  <p className="text-[11px] font-mono text-zinc-500 leading-relaxed">
+                <div className="p-6 text-center space-y-3 border border-dashed border-[#E2D5B7] rounded-2xl bg-[#F9F5EC]">
+                  <LifeBuoy className="w-8 h-8 text-slate-400 mx-auto" />
+                  <p className="text-xs font-bold text-slate-800">No support tickets yet</p>
+                  <p className="text-[11px] font-mono text-slate-600 leading-relaxed">
                     You have no open AtsHelpTicket rows for this applicant session.
                   </p>
                   <button
@@ -544,35 +570,39 @@ export default function RbtHelpDeskPage() {
                     <div
                       key={t.id}
                       onClick={() => setSelectedTicketId(t.id)}
-                      className={`p-4 rounded-2xl border transition-all duration-300 cursor-pointer space-y-2 hover:scale-[1.01] hover:shadow-2xl ${
+                      className={`p-4 rounded-2xl border transition-all duration-300 cursor-pointer space-y-2 hover:scale-[1.01] hover:shadow-md ${
                         isSelected
-                          ? 'bg-brand-orange-500/10 border-brand-orange-500/60 shadow-lg'
-                          : 'bg-zinc-900/80 border-white/5 hover:border-brand-orange-500/40'
+                          ? 'bg-orange-50 border-brand-orange-500/60 shadow-md'
+                          : 'bg-[#F9F5EC] border-[#E2D5B7] hover:border-brand-orange-500/40'
                       }`}
                     >
                       <div className="flex items-center justify-between">
-                        <span className="font-mono text-[10px] font-black text-brand-orange-400">
+                        <span className="font-mono text-[10px] font-black text-[#C2410C]">
                           {t.ticketNumber}
                         </span>
                         <span
                           className={`px-2 py-0.5 rounded-full text-[9px] font-mono font-black uppercase border ${
                             t.status === 'RESOLVED'
-                              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                              : t.status === 'CLAIMED' || t.status === 'IN_PROGRESS'
-                                ? 'bg-blue-500/10 text-blue-400 border-blue-500/20'
-                                : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                              ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                              : t.status === 'ESCALATED_HEAD_HR'
+                                ? 'bg-purple-100 text-purple-900 border-purple-300'
+                                : t.status === 'CLAIMED' || t.status === 'IN_PROGRESS'
+                                  ? 'bg-blue-100 text-blue-800 border-blue-300'
+                                  : 'bg-amber-100 text-amber-900 border-amber-300'
                           }`}
                         >
                           {t.status === 'RESOLVED'
                             ? '✓ Resolved'
-                            : t.status === 'CLAIMED' || t.status === 'IN_PROGRESS'
-                              ? 'HR claimed'
-                              : 'Open'}
+                            : t.status === 'ESCALATED_HEAD_HR'
+                              ? '✓ Claimed by Head of HR'
+                              : t.status === 'CLAIMED' || t.status === 'IN_PROGRESS'
+                                ? 'HR claimed'
+                                : 'Open'}
                         </span>
                       </div>
-                      <h4 className="font-extrabold text-xs text-white line-clamp-1">{t.subject}</h4>
-                      <p className="text-[11px] text-zinc-400 font-medium line-clamp-2">{t.message}</p>
-                      <div className="flex items-center justify-between text-[10px] font-mono text-zinc-500 pt-1 border-t border-white/5">
+                      <h4 className="font-extrabold text-xs text-slate-900 line-clamp-1">{t.subject}</h4>
+                      <p className="text-[11px] text-slate-600 font-medium line-clamp-2">{t.message}</p>
+                      <div className="flex items-center justify-between text-[10px] font-mono text-slate-500 pt-1 border-t border-[#E2D5B7]">
                         <span>{t.categoryLabel}</span>
                         <span>{t.createdAt}</span>
                       </div>
@@ -583,41 +613,59 @@ export default function RbtHelpDeskPage() {
             </div>
           </div>
 
-          <div className="lg:col-span-2 bg-zinc-950/80 backdrop-blur-xl border border-white/10 rounded-3xl shadow-2xl flex flex-col overflow-hidden min-h-[580px] relative">
+          <div className="lg:col-span-2 bg-[#FFFDF8] border border-[#E2D5B7] rounded-3xl shadow-xl flex flex-col overflow-hidden min-h-[580px] relative">
             {selectedTicket ? (
               <>
-                <div className="p-5 border-b border-white/10 bg-zinc-900/80 backdrop-blur-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="p-5 border-b border-[#E2D5B7] bg-[#FFFDF8] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div className="space-y-1">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-mono text-xs font-black text-brand-orange-400 bg-brand-orange-500/10 border border-brand-orange-500/20 px-2.5 py-0.5 rounded-full">
+                      <span className="font-mono text-xs font-black text-[#C2410C] bg-orange-100 border border-orange-200 px-2.5 py-0.5 rounded-full">
                         {selectedTicket.ticketNumber}
                       </span>
-                      <h3 className="font-black text-white text-sm font-heading">
+                      <h3 className="font-black text-slate-900 text-sm font-heading">
                         {selectedTicket.subject}
                       </h3>
                     </div>
-                    <p className="text-xs text-zinc-400 font-semibold">
+                    <p className="text-xs text-slate-600 font-semibold">
                       Assigned:{' '}
-                      <strong className="text-brand-orange-400">
-                        {selectedTicket.assignedHrAgent || 'Pending HR assignment'}
+                      <strong className="text-[#C2410C]">
+                        {selectedTicket.assignedHrAgent || (selectedTicket.status === 'ESCALATED_HEAD_HR' ? 'Head of HR' : 'Pending HR assignment')}
                       </strong>
                     </p>
                   </div>
-                  <span
-                    className={`px-3 py-1 rounded-full text-xs font-mono font-black uppercase border self-start sm:self-auto ${
-                      selectedTicket.status === 'RESOLVED'
-                        ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                        : selectedTicket.status === 'CLAIMED' ||
-                            selectedTicket.status === 'IN_PROGRESS'
-                          ? 'bg-blue-500/10 text-blue-400 border-blue-500/20'
-                          : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
-                    }`}
-                  >
-                    {selectedTicket.status}
-                  </span>
+                  <div className="flex items-center gap-2 self-start sm:self-auto">
+                    {selectedTicket.status === 'ESCALATED_HEAD_HR' || selectedTicket.category === 'WAGE_OFFER' || selectedTicket.subject?.includes('[WAGE_OFFER]') ? (
+                      <span className="px-3 py-1 rounded-full text-xs font-mono font-black uppercase border bg-purple-100 text-purple-900 border-purple-300 flex items-center gap-1 shadow-sm">
+                        <span>✓ Claimed by Head of HR</span>
+                      </span>
+                    ) : isOfferStage && selectedTicket.status !== 'RESOLVED' ? (
+                      <button
+                        type="button"
+                        onClick={() => handleEscalateToHeadHr(selectedTicket.id)}
+                        className="px-3 py-1 rounded-full text-xs font-mono font-extrabold border bg-purple-600 hover:bg-purple-700 text-white cursor-pointer transition-all flex items-center gap-1 shadow-md"
+                      >
+                        <span>👑 Discuss Wage Offer with Head of HR</span>
+                      </button>
+                    ) : null}
+
+                    <span
+                      className={`px-3 py-1 rounded-full text-xs font-mono font-black uppercase border ${
+                        selectedTicket.status === 'RESOLVED'
+                          ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                          : selectedTicket.status === 'ESCALATED_HEAD_HR' || selectedTicket.category === 'WAGE_OFFER' || selectedTicket.subject?.includes('[WAGE_OFFER]')
+                            ? 'bg-purple-100 text-purple-900 border-purple-300'
+                            : selectedTicket.status === 'CLAIMED' ||
+                                selectedTicket.status === 'IN_PROGRESS'
+                              ? 'bg-blue-100 text-blue-800 border-blue-300'
+                              : 'bg-amber-100 text-amber-900 border-amber-300'
+                      }`}
+                    >
+                      {selectedTicket.status === 'ESCALATED_HEAD_HR' || selectedTicket.category === 'WAGE_OFFER' || selectedTicket.subject?.includes('[WAGE_OFFER]') ? 'HEAD HR REVIEW' : selectedTicket.status}
+                    </span>
+                  </div>
                 </div>
 
-                <div className="flex-1 p-6 overflow-y-auto bg-zinc-950/60 max-h-[380px]">
+                <div className="flex-1 p-6 overflow-y-auto bg-[#F9F5EC] max-h-[380px]">
                   {selectedTicket.messages.map((msg, i) => {
                     const isCandidate = msg.sender === 'CANDIDATE';
                     const prev = selectedTicket.messages[i - 1];
@@ -631,38 +679,38 @@ export default function RbtHelpDeskPage() {
                         }`}
                       >
                         <div
-                          className={`w-8 h-8 rounded-2xl flex items-center justify-center font-bold text-xs shrink-0 shadow-md ${
+                          className={`w-8 h-8 rounded-2xl flex items-center justify-center font-bold text-xs shrink-0 shadow-sm ${
                             groupStart ? '' : 'invisible'
                           } ${
                             isCandidate
                               ? 'bg-brand-orange-500 text-white'
-                              : 'bg-zinc-800 text-zinc-200 border border-white/10'
+                              : 'bg-white text-slate-800 border border-[#E2D5B7]'
                           }`}
                         >
                           {getInitials(msg.senderName)}
                         </div>
                         <div
-                          className={`p-4 rounded-2xl space-y-2 text-xs shadow-md backdrop-blur-xl ${
+                          className={`p-4 rounded-2xl space-y-2 text-xs shadow-sm ${
                             isCandidate
-                              ? `bg-brand-orange-500/90 text-white border border-brand-orange-400/30 ${groupStart ? 'rounded-tr-none' : ''}`
-                              : `bg-zinc-900/80 text-zinc-200 border border-white/10 ${groupStart ? 'rounded-tl-none' : ''}`
+                              ? `bg-brand-orange-500 text-white ${groupStart ? 'rounded-tr-none' : ''}`
+                              : `bg-white text-slate-800 border border-[#E2D5B7] ${groupStart ? 'rounded-tl-none' : ''}`
                           }`}
                         >
                           {groupStart && (
-                            <div className="flex items-center justify-between gap-4 border-b border-white/20 pb-1 mb-1">
+                            <div className="flex items-center justify-between gap-4 border-b border-black/10 pb-1 mb-1">
                               <span className="font-extrabold text-[11px]">{msg.senderName}</span>
                               <span className="font-mono text-[9px] opacity-80">{msg.timestamp}</span>
                             </div>
                           )}
 
                           {msg.type === 'JITSI_CALL' ? (
-                            <div className="p-3.5 bg-black/40 rounded-xl border border-white/20 space-y-2.5">
+                            <div className="p-3.5 bg-slate-50 rounded-xl border border-[#E2D5B7] space-y-2.5 text-slate-900">
                               <div className="flex items-center gap-2">
                                 <span
-                                  className={`w-2.5 h-2.5 rounded-full ${msg.isHostJoined ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400 animate-pulse'}`}
+                                  className={`w-2.5 h-2.5 rounded-full ${msg.isHostJoined ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500 animate-pulse'}`}
                                 />
                                 <span
-                                  className={`font-black text-xs uppercase tracking-wider flex items-center gap-1 ${msg.isHostJoined ? 'text-emerald-300' : 'text-amber-300'}`}
+                                  className={`font-black text-xs uppercase tracking-wider flex items-center gap-1 ${msg.isHostJoined ? 'text-emerald-700' : 'text-amber-800'}`}
                                 >
                                   <Video className="w-4 h-4" />{' '}
                                   {msg.isHostJoined
@@ -670,7 +718,7 @@ export default function RbtHelpDeskPage() {
                                     : 'Call request sent (awaiting HR host)'}
                                 </span>
                               </div>
-                              <p className="text-xs opacity-90 leading-relaxed font-medium">
+                              <p className="text-xs text-slate-700 leading-relaxed font-medium">
                                 {msg.text}
                               </p>
                               {msg.isHostJoined ? (
@@ -686,22 +734,22 @@ export default function RbtHelpDeskPage() {
                                       launchJitsiMeetingWindow(easyUrl);
                                     }
                                   }}
-                                  className="w-full bg-emerald-500 hover:bg-emerald-400 text-black font-black text-xs py-3 px-4 rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-2"
+                                  className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs py-3 px-4 rounded-xl shadow-md transition-all cursor-pointer flex items-center justify-center gap-2"
                                 >
-                                  <Video className="w-4 h-4 text-black" />
+                                  <Video className="w-4 h-4 text-white" />
                                   <span>Join video call →</span>
                                 </button>
                               ) : (
-                                <div className="w-full bg-zinc-800/90 text-amber-300 border border-amber-500/30 font-bold text-xs py-2.5 px-3 rounded-xl text-center flex items-center justify-center gap-2 font-mono">
-                                  <Clock className="w-4 h-4 text-amber-400 animate-spin" />
+                                <div className="w-full bg-amber-50 text-amber-900 border border-amber-300 font-bold text-xs py-2.5 px-3 rounded-xl text-center flex items-center justify-center gap-2 font-mono">
+                                  <Clock className="w-4 h-4 text-amber-600 animate-spin" />
                                   <span>Waiting for HR host to join first…</span>
                                 </div>
                               )}
                             </div>
                           ) : msg.type === 'DOCUMENT' ? (
-                            <div className="p-3 bg-black/30 rounded-xl border border-white/10 flex items-center justify-between gap-3 font-mono text-xs">
+                            <div className="p-3 bg-slate-50 rounded-xl border border-[#E2D5B7] flex items-center justify-between gap-3 font-mono text-xs text-slate-900">
                               <div className="flex items-center gap-2">
-                                <FileText className="w-4 h-4 text-brand-orange-300" />
+                                <FileText className="w-4 h-4 text-[#F97316]" />
                                 <span className="font-bold truncate max-w-[180px]">
                                   {msg.fileName}
                                 </span>
@@ -715,7 +763,7 @@ export default function RbtHelpDeskPage() {
                                     toast.message('Document preview unavailable for this attachment.');
                                   }
                                 }}
-                                className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white cursor-pointer"
+                                className="p-1.5 rounded-lg bg-[#E2D5B7] hover:bg-slate-300 text-slate-800 cursor-pointer"
                               >
                                 <Download className="w-3.5 h-3.5" />
                               </button>
@@ -732,10 +780,10 @@ export default function RbtHelpDeskPage() {
                     .map((o) => (
                       <div key={o.localId} className="flex flex-col items-end mt-1 gap-1">
                         <div
-                          className={`max-w-[88%] p-4 rounded-2xl text-xs shadow-md backdrop-blur-xl border ${
+                          className={`max-w-[88%] p-4 rounded-2xl text-xs shadow-sm border ${
                             o.status === 'failed'
-                              ? 'bg-rose-500/15 text-rose-100 border-rose-500/40'
-                              : 'bg-brand-orange-500/60 text-white border-brand-orange-400/20'
+                              ? 'bg-rose-100 text-rose-900 border-rose-300'
+                              : 'bg-brand-orange-500/80 text-white border-brand-orange-400/20'
                           }`}
                         >
                           <p className="leading-relaxed font-medium whitespace-pre-wrap">{o.text}</p>
@@ -744,14 +792,14 @@ export default function RbtHelpDeskPage() {
                           <button
                             type="button"
                             onClick={() => retryReply(o)}
-                            className="flex items-center gap-1 text-[9px] font-mono font-black text-rose-400 hover:text-rose-300 cursor-pointer"
+                            className="flex items-center gap-1 text-[9px] font-mono font-black text-rose-600 hover:text-rose-700 cursor-pointer"
                           >
                             <RotateCcw className="w-3 h-3" />
                             Failed to send — tap to retry
                           </button>
                         ) : (
-                          <span className="flex items-center gap-1 text-[9px] font-mono text-zinc-500">
-                            <Loader2 className="w-3 h-3 animate-spin" /> Sending…
+                          <span className="flex items-center gap-1 text-[9px] font-mono text-slate-500">
+                            <Loader2 className="w-3 h-3 animate-spin text-[#F97316]" /> Sending…
                           </span>
                         )}
                       </div>
@@ -761,7 +809,7 @@ export default function RbtHelpDeskPage() {
 
                 <form
                   onSubmit={handleSendReply}
-                  className="p-4 border-t border-white/10 bg-zinc-900/80 backdrop-blur-xl flex items-end gap-3 relative"
+                  className="p-4 border-t border-[#E2D5B7] bg-[#FFFDF8] flex items-end gap-3 relative"
                 >
                   {showPlusMenu && (
                     <div
@@ -774,10 +822,10 @@ export default function RbtHelpDeskPage() {
                     <button
                       type="button"
                       onClick={() => setShowPlusMenu(!showPlusMenu)}
-                      className={`w-10 h-10 rounded-2xl border flex items-center justify-center transition-all cursor-pointer shadow-md ${
+                      className={`w-10 h-10 rounded-2xl border flex items-center justify-center transition-all cursor-pointer shadow-sm ${
                         showPlusMenu
                           ? 'bg-brand-orange-500 text-white border-brand-orange-400 rotate-45'
-                          : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border-white/10 hover:text-white'
+                          : 'bg-[#F9F5EC] hover:bg-white text-slate-800 border-[#E2D5B7] hover:text-[#F97316]'
                       }`}
                       title="Attach file / request call"
                     >
@@ -785,18 +833,18 @@ export default function RbtHelpDeskPage() {
                     </button>
 
                     {showPlusMenu && (
-                      <div className="absolute bottom-14 left-0 bg-zinc-950 border border-white/15 rounded-2xl p-2.5 shadow-2xl space-y-1.5 w-64 z-50 animate-scale-up backdrop-blur-2xl">
+                      <div className="absolute bottom-14 left-0 bg-[#FFFDF8] border border-[#E2D5B7] rounded-2xl p-2.5 shadow-2xl space-y-1.5 w-64 z-50 animate-scale-up">
                         <button
                           type="button"
                           onClick={handleRequestJitsiCall}
-                          className="w-full p-2.5 rounded-xl bg-zinc-900 hover:bg-brand-orange-500/20 text-white font-extrabold text-xs flex items-center gap-2.5 transition-all text-left border border-white/5 hover:border-brand-orange-500/30 cursor-pointer"
+                          className="w-full p-2.5 rounded-xl bg-[#F9F5EC] hover:bg-orange-50 text-slate-900 font-extrabold text-xs flex items-center gap-2.5 transition-all text-left border border-[#E2D5B7] cursor-pointer"
                         >
-                          <div className="w-7 h-7 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                          <div className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center">
                             <Video className="w-4 h-4" />
                           </div>
                           <div>
-                            <span className="block text-white">Request instant call</span>
-                            <span className="text-[10px] text-zinc-400 font-mono">
+                            <span className="block text-slate-900 font-bold">Request instant call</span>
+                            <span className="text-[10px] text-slate-500 font-mono">
                               Host-locked until HR joins
                             </span>
                           </div>
@@ -804,14 +852,14 @@ export default function RbtHelpDeskPage() {
                         <button
                           type="button"
                           onClick={() => fileInputRef.current?.click()}
-                          className="w-full p-2.5 rounded-xl bg-zinc-900 hover:bg-brand-orange-500/20 text-white font-extrabold text-xs flex items-center gap-2.5 transition-all text-left border border-white/5 hover:border-brand-orange-500/30 cursor-pointer"
+                          className="w-full p-2.5 rounded-xl bg-[#F9F5EC] hover:bg-orange-50 text-slate-900 font-extrabold text-xs flex items-center gap-2.5 transition-all text-left border border-[#E2D5B7] cursor-pointer"
                         >
-                          <div className="w-7 h-7 rounded-lg bg-blue-500/20 text-blue-400 flex items-center justify-center">
+                          <div className="w-7 h-7 rounded-lg bg-blue-100 text-blue-800 flex items-center justify-center">
                             <Paperclip className="w-4 h-4" />
                           </div>
                           <div>
-                            <span className="block text-white">Upload PDF / file</span>
-                            <span className="text-[10px] text-zinc-400 font-mono">
+                            <span className="block text-slate-900 font-bold">Upload PDF / file</span>
+                            <span className="text-[10px] text-slate-500 font-mono">
                               Attach to this thread
                             </span>
                           </div>
@@ -842,12 +890,12 @@ export default function RbtHelpDeskPage() {
                       }
                     }}
                     placeholder="Message HR… (Enter to send, Shift+Enter for a new line)"
-                    className="flex-1 resize-none bg-zinc-950 border border-white/10 rounded-2xl px-4 py-3 text-xs text-white placeholder-zinc-500 outline-none focus:border-brand-orange-500 font-medium max-h-[120px]"
+                    className="flex-1 resize-none bg-[#F9F5EC] border border-[#E2D5B7] rounded-2xl px-4 py-3 text-xs text-slate-900 placeholder-slate-400 outline-none focus:border-brand-orange-500 focus:bg-white font-medium max-h-[120px]"
                   />
                   <button
                     type="submit"
                     disabled={!replyInput.trim()}
-                    className="bg-brand-orange-500 hover:bg-orange-600 disabled:opacity-40 text-white font-black text-xs px-5 py-3 rounded-2xl shadow-lg transition-all cursor-pointer disabled:cursor-not-allowed flex items-center gap-1.5 shrink-0"
+                    className="bg-brand-orange-500 hover:bg-orange-600 disabled:opacity-40 text-white font-black text-xs px-5 py-3 rounded-2xl shadow-md transition-all cursor-pointer disabled:cursor-not-allowed flex items-center gap-1.5 shrink-0"
                   >
                     <Send className="w-4 h-4" />
                     <span>Send</span>
@@ -855,9 +903,9 @@ export default function RbtHelpDeskPage() {
                 </form>
               </>
             ) : (
-              <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-3 text-zinc-500">
-                <LifeBuoy className="w-12 h-12 text-zinc-700" />
-                <h4 className="font-black text-white text-sm">
+              <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-3 text-slate-500">
+                <LifeBuoy className="w-12 h-12 text-slate-400" />
+                <h4 className="font-black text-slate-900 text-sm">
                   {loadState === 'loading'
                     ? 'Loading tickets…'
                     : loadState === 'error'
@@ -866,7 +914,7 @@ export default function RbtHelpDeskPage() {
                         ? 'No applicant session'
                         : 'No ticket selected'}
                 </h4>
-                <p className="text-xs text-zinc-400 max-w-sm font-mono leading-relaxed">
+                <p className="text-xs text-slate-600 max-w-sm font-mono leading-relaxed">
                   {loadState === 'error'
                     ? loadError
                     : loadState === 'no_session'

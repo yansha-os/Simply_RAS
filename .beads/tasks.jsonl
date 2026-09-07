@@ -1,0 +1,179 @@
+{"version": 1, "created_at": "2026-08-16T21:44:00Z", "tasks": [
+  {
+    "id": "TASK-20260819-01",
+    "title": "Cross-App Notification Engine & Client Portal Notification Center",
+    "status": "COMPLETED",
+    "spec": "docs/superpowers/specs/2026-08-11-aba-crm-hrm-spine-roadmap.md",
+    "skills": ["server-action-pattern", "crm-app-map", "supabase-migration-generator"],
+    "completed_at": "2026-08-19T18:35:00Z"
+  },
+  {
+    "id": "TASK-20260819-02",
+    "title": "BACB Monthly Supervision Compliance & Verification Engine",
+    "status": "COMPLETED",
+    "spec": "docs/superpowers/specs/2026-08-11-aba-emr-artemis-replacement-roadmap.md",
+    "skills": ["server-action-pattern", "crm-app-map"],
+    "completed_at": "2026-08-19T18:38:00Z"
+  },
+  {
+    "id": "TASK-20260819-03",
+    "title": "Payer-Specific Billing Math, MUE Daily Limits & PA Burn-Down Engine",
+    "status": "COMPLETED",
+    "spec": "docs/superpowers/specs/2026-08-11-aba-session-note-data-collection-spec.md",
+    "skills": ["crm-app-map"],
+    "completed_at": "2026-08-19T18:38:00Z"
+  },
+  {
+    "id": "TASK-20260819-04",
+    "title": "ABA Clinical Goal Mastery & ABC Functional Behavior Analytics",
+    "status": "COMPLETED",
+    "spec": "docs/superpowers/specs/2026-08-11-aba-session-note-data-collection-spec.md",
+    "skills": ["crm-app-map"],
+    "completed_at": "2026-08-19T18:39:00Z"
+  },
+  {
+    "id": "TASK-20260819-05",
+    "title": "Hyper-Custom Theme & Animation Engine 2.0 (24+ Themes, Interactive Physics & Presets)",
+    "status": "COMPLETED",
+    "spec": "docs/superpowers/specs/2026-08-12-bundle-splitting-plan.md",
+    "skills": ["crm-app-map", "hrm-app-map"],
+    "completed_at": "2026-08-19T18:43:00Z"
+  },
+  {
+    "id": "TASK-20260819-06",
+    "title": "Repo-Wide 1% Edge Case Hardening & Defensive Resilience Engine",
+    "status": "COMPLETED",
+    "spec": "docs/superpowers/specs/2026-08-12-secondary-weakness-audit.md",
+    "skills": ["server-action-pattern", "crm-app-map", "hrm-app-map", "verification-before-completion"],
+    "completed_at": "2026-08-19T18:48:00Z"
+  },
+  {
+    "id": "TASK-20260819-07",
+    "title": "Interactive Cursor Trails, Click Physics, 32+ Unique Themes, and Dynamic Light/Dark Mode Engine",
+    "status": "COMPLETED",
+    "spec": "docs/superpowers/specs/2026-08-12-bundle-splitting-plan.md",
+    "skills": ["crm-app-map", "hrm-app-map", "verification-before-completion"],
+    "completed_at": "2026-08-19T18:56:00Z"
+  },
+  {
+    "id": "TASK-20260819-08",
+    "title": "Complete Zero-Black Light Mode Transformation, 12 Cursor Trails, 8 Click Shockwaves, 5 Reticles, Web Audio SFX & Interactive Test Pad",
+    "status": "COMPLETED",
+    "spec": "docs/superpowers/specs/2026-08-12-bundle-splitting-plan.md",
+    "skills": ["crm-app-map", "hrm-app-map", "verification-before-completion"],
+    "completed_at": "2026-08-19T19:44:00Z"
+  },
+  {
+    "id": "TASK-20260819-09",
+    "title": "Multi-Payer Prior Authorization & Auth CPT Code Ledger Engine",
+    "status": "COMPLETED",
+    "spec": "docs/superpowers/specs/2026-08-11-aba-emr-artemis-replacement-roadmap.md",
+    "skills": ["server-action-pattern", "crm-app-map", "verification-before-completion"],
+    "completed_at": "2026-08-19T20:00:00Z"
+  },
+  {
+    "id": "TASK-20260819-10",
+    "title": "Caregiver Training & Family Guidance Engine (CPT 97156)",
+    "status": "COMPLETED",
+    "spec": "docs/superpowers/specs/2026-08-11-aba-emr-artemis-replacement-roadmap.md",
+    "skills": ["server-action-pattern", "crm-app-map", "verification-before-completion"],
+    "completed_at": "2026-08-19T20:05:00Z"
+  },
+  {
+    "id": "TASK-20260819-11",
+    "title": "Session Cancellation, No-Show & Make-Up Session Coordinator",
+    "status": "COMPLETED",
+    "spec": "docs/superpowers/specs/2026-08-11-aba-emr-artemis-replacement-roadmap.md",
+    "skills": ["server-action-pattern", "crm-app-map", "verification-before-completion"],
+    "completed_at": "2026-08-19T20:10:00Z"
+  },
+  {
+    "id": "TASK-20260819-12",
+    "title": "HIPAA Compliance & Audit Log Vault Inspector",
+    "status": "COMPLETED",
+    "spec": "docs/superpowers/specs/2026-08-11-aba-emr-artemis-replacement-roadmap.md",
+    "skills": ["server-action-pattern", "crm-app-map", "verification-before-completion"],
+    "completed_at": "2026-08-19T20:15:00Z"
+  },
+  {
+    "id": "TASK-20260819-13",
+    "title": "Re-Authorization Packet Compiler & Clinical Report Generator (97151 / Re-Auth)",
+    "status": "COMPLETED",
+    "spec": "docs/superpowers/specs/2026-08-11-aba-emr-artemis-replacement-roadmap.md",
+    "skills": ["server-action-pattern", "crm-app-map", "verification-before-completion"],
+    "completed_at": "2026-08-19T20:20:00Z"
+  },
+  {
+    "id": "TASK-20260819-14",
+    "title": "Staff Credential & Payer Credentialing Watchdog",
+    "status": "COMPLETED",
+    "spec": "docs/superpowers/specs/2026-08-11-aba-emr-artemis-replacement-roadmap.md",
+    "skills": ["server-action-pattern", "crm-app-map", "verification-before-completion"],
+    "completed_at": "2026-08-19T20:25:00Z"
+  },
+  {
+    "id": "TASK-20260819-15",
+    "title": "Protocol Modification & Clinical Supervision Note Engine (CPT 97155)",
+    "status": "COMPLETED",
+    "spec": "docs/superpowers/specs/2026-08-11-aba-emr-artemis-replacement-roadmap.md",
+    "skills": ["server-action-pattern", "crm-app-map", "verification-before-completion"],
+    "completed_at": "2026-08-19T20:30:00Z"
+  },
+  {
+    "id": "TASK-20260819-16",
+    "title": "Unified EMR Document Vault & Artemis Migration Archive",
+    "status": "COMPLETED",
+    "spec": "docs/superpowers/specs/2026-08-11-aba-emr-artemis-replacement-roadmap.md",
+    "skills": ["server-action-pattern", "crm-app-map", "verification-before-completion"],
+    "completed_at": "2026-08-19T20:35:00Z"
+  },
+  {
+    "id": "TASK-20260819-17",
+    "title": "Pre-Submission Claim Scrubber & Denial Prevention Validator",
+    "status": "COMPLETED",
+    "spec": "docs/superpowers/specs/2026-08-11-aba-emr-artemis-replacement-roadmap.md",
+    "skills": ["server-action-pattern", "crm-app-map", "verification-before-completion"],
+    "completed_at": "2026-08-19T20:40:00Z"
+  },
+  {
+    "id": "TASK-20260819-18",
+    "title": "Intelligent Scheduling & Concurrency Calendar Engine",
+    "status": "COMPLETED",
+    "spec": "docs/superpowers/specs/2026-08-12-calendar-unification-plan.md",
+    "skills": ["server-action-pattern", "crm-app-map", "verification-before-completion"],
+    "completed_at": "2026-08-19T20:45:00Z"
+  },
+  {
+    "id": "TASK-20260819-19",
+    "title": "Parent Treatment Portal & Telehealth Guidance Hub",
+    "status": "COMPLETED",
+    "spec": "docs/superpowers/specs/2026-08-11-aba-emr-artemis-replacement-roadmap.md",
+    "skills": ["server-action-pattern", "crm-app-map", "verification-before-completion"],
+    "completed_at": "2026-08-19T20:50:00Z"
+  },
+  {
+    "id": "TASK-20260819-20",
+    "title": "Claim Denial Appeals & Payer Dispute Resolution Engine",
+    "status": "COMPLETED",
+    "spec": "docs/superpowers/specs/2026-08-11-aba-emr-artemis-replacement-roadmap.md",
+    "skills": ["server-action-pattern", "crm-app-map", "verification-before-completion"],
+    "completed_at": "2026-08-19T20:55:00Z"
+  },
+  {
+    "id": "TASK-20260819-21",
+    "title": "EVV Real-Time Geofence & State Aggregator Dispatcher",
+    "status": "COMPLETED",
+    "spec": "docs/superpowers/specs/2026-08-11-aba-emr-artemis-replacement-roadmap.md",
+    "skills": ["server-action-pattern", "crm-app-map", "verification-before-completion"],
+    "completed_at": "2026-08-19T21:00:00Z"
+  },
+  {
+    "id": "TASK-20260905-01",
+    "title": "Three-Month ABA Pilot Stabilization and Readiness Program",
+    "status": "IN_PROGRESS",
+    "spec": "docs/superpowers/specs/2026-08-20-pre-prod-readiness-checklist.md",
+    "skills": ["crm-app-map", "hrm-app-map", "server-action-pattern", "verification-before-completion"],
+    "started_at": "2026-09-05T21:15:00Z",
+    "scope": "Stabilize the existing CRM/HRM system for a controlled ABA pilot: release hygiene, security verification, workflow invariants, staging/manual QA, and pilot go/no-go evidence. No new product-surface expansion unless it closes a pilot blocker."
+  }
+]}

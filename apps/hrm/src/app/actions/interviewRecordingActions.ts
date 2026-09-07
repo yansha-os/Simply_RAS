@@ -13,6 +13,7 @@ import {
   RECORDING_WRONG_TYPE_ERROR,
   extensionForMime,
   isAllowedRecordingMime,
+  isInterviewRecordingStoragePath,
   magicBytesMatchMime,
   normalizeMimeType,
 } from '@/lib/uploadValidation';
@@ -59,14 +60,10 @@ async function getStorageClient() {
 }
 
 async function ensureInterview(candidateId: string) {
-  const existing = await prisma.atsInterview.findUnique({
+  return prisma.atsInterview.upsert({
     where: { candidateId },
-    select: { id: true },
-  });
-  if (existing) return existing;
-
-  return prisma.atsInterview.create({
-    data: {
+    update: {},
+    create: {
       candidateId,
       status: 'IN_PROGRESS',
     },
@@ -110,6 +107,18 @@ export async function listInterviewRecordings(candidateId: string) {
 
     for (const row of rows) {
       try {
+        if (
+          row.storageBucket !== BUCKET ||
+          !isInterviewRecordingStoragePath({
+            candidateId: row.candidateId,
+            interviewId: row.interviewId,
+            recordingId: row.id,
+            mimeType: row.mimeType,
+            storagePath: row.storagePath,
+          })
+        ) {
+          continue;
+        }
         const url = await signedUrlFor(client, row.storagePath, row.storageBucket);
         data.push({
           id: row.id,
@@ -153,46 +162,55 @@ async function readObjectHead(
   client: Awaited<ReturnType<typeof getStorageClient>>['client'],
   path: string
 ): Promise<{ bytes: Uint8Array; totalSize: number | null } | null> {
-  const { data, error } = await client.storage
-    .from(BUCKET)
-    .createSignedUrl(path, 60);
-  if (error || !data?.signedUrl) return null;
+  try {
+    const { data, error } = await client.storage
+      .from(BUCKET)
+      .createSignedUrl(path, 60);
+    if (error || !data?.signedUrl) return null;
 
-  const res = await fetch(data.signedUrl, {
-    headers: { Range: `bytes=0-${MAGIC_BYTES_LENGTH - 1}` },
-  });
-  if (!res.ok) return null;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
 
-  let totalSize: number | null = null;
-  const contentRange = res.headers.get('content-range');
-  if (contentRange) {
-    // "bytes 0-15/12345678"
-    const total = Number(contentRange.split('/')[1]);
-    if (Number.isFinite(total)) totalSize = total;
-  } else {
-    const contentLength = Number(res.headers.get('content-length'));
-    if (Number.isFinite(contentLength)) totalSize = contentLength;
+    const res = await fetch(data.signedUrl, {
+      headers: { Range: `bytes=0-${MAGIC_BYTES_LENGTH - 1}` },
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timer));
+
+    if (!res.ok) return null;
+
+    let totalSize: number | null = null;
+    const contentRange = res.headers.get('content-range');
+    if (contentRange) {
+      const total = Number(contentRange.split('/')[1]);
+      if (Number.isFinite(total)) totalSize = total;
+    } else {
+      const contentLength = Number(res.headers.get('content-length'));
+      if (Number.isFinite(contentLength)) totalSize = contentLength;
+    }
+
+    const bytes = new Uint8Array(MAGIC_BYTES_LENGTH);
+    let bytesRead = 0;
+    const reader = res.body?.getReader();
+    if (reader) {
+      while (bytesRead < MAGIC_BYTES_LENGTH) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        const remaining = MAGIC_BYTES_LENGTH - bytesRead;
+        const slice = chunk.value.subarray(0, remaining);
+        bytes.set(slice, bytesRead);
+        bytesRead += slice.length;
+      }
+      await reader.cancel();
+    } else {
+      const buf = await res.arrayBuffer();
+      const slice = new Uint8Array(buf.slice(0, MAGIC_BYTES_LENGTH));
+      bytes.set(slice);
+      bytesRead = slice.length;
+    }
+    return { bytes: bytes.subarray(0, bytesRead), totalSize };
+  } catch {
+    return null;
   }
-
-  const reader = res.body?.getReader();
-  if (!reader) return null;
-  const chunks: Uint8Array[] = [];
-  let received = 0;
-  while (received < MAGIC_BYTES_LENGTH) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
-    received += value.length;
-  }
-  await reader.cancel().catch(() => {});
-
-  const bytes = new Uint8Array(received);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.length;
-  }
-  return { bytes, totalSize };
 }
 
 /**
@@ -431,6 +449,18 @@ export async function deleteInterviewRecording(recordingId: string) {
     if (!row) {
       return { success: false as const, error: 'Recording not found.' };
     }
+    if (
+      row.storageBucket !== BUCKET ||
+      !isInterviewRecordingStoragePath({
+        candidateId: row.candidateId,
+        interviewId: row.interviewId,
+        recordingId: row.id,
+        mimeType: row.mimeType,
+        storagePath: row.storagePath,
+      })
+    ) {
+      return { success: false as const, error: 'Recording storage metadata is invalid.' };
+    }
 
     const { client } = await getStorageClient();
     const { error: storageError } = await client.storage
@@ -442,7 +472,10 @@ export async function deleteInterviewRecording(recordingId: string) {
         'deleteInterviewRecording storage failed:',
         storageError.message
       );
-      // Still delete metadata so UI stays consistent
+      return {
+        success: false as const,
+        error: 'Storage deletion failed. The recording remains tracked so deletion can be retried.',
+      };
     }
 
     await prisma.atsInterviewRecording.delete({ where: { id: recordingId } });

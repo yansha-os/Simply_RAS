@@ -3,11 +3,20 @@
 import React, { useState, useTransition } from 'react';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { Activity, ShieldCheck, UserCheck, Calendar, AlertTriangle, Plus, CheckCircle2 } from 'lucide-react';
+import { Activity, ShieldCheck, UserCheck, Calendar, Plus, CheckCircle2 } from 'lucide-react';
 import { createActionItem } from '@/app/actions/actionItems';
 import { toast } from 'sonner';
 
-export default function ClientActiveCommandCenter({ client }: { client: any }) {
+type ActiveCaseClient = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  caseCoordinatorId: string | null;
+  bcba: { firstName: string; lastName: string } | null;
+  rbt: { firstName: string; lastName: string } | null;
+};
+
+export default function ClientActiveCommandCenter({ client }: { client: ActiveCaseClient }) {
   const [showLogModal, setShowLogModal] = useState(false);
   const [eventType, setEventType] = useState('SCHEDULE_CHANGE');
   const [eventNotes, setEventNotes] = useState('');
@@ -27,7 +36,7 @@ export default function ClientActiveCommandCenter({ client }: { client: any }) {
         title,
         description: eventNotes,
         clientId: client.id,
-        assigneeId: client.caseCoordinatorId
+        assigneeId: client.caseCoordinatorId ?? undefined
       });
 
       if (res.success) {
@@ -60,7 +69,7 @@ export default function ClientActiveCommandCenter({ client }: { client: any }) {
 
         <Button
           onClick={() => setShowLogModal(!showLogModal)}
-          className="bg-brand-orange-500 hover:bg-brand-orange-600 text-white font-bold text-xs px-4 h-9"
+          className="bg-brand-orange-500 hover:bg-brand-orange-600 text-white font-bold text-xs px-4 h-9 cursor-pointer"
         >
           <Plus className="w-4 h-4 mr-1.5" /> Log Event / Fire Ticket
         </Button>
@@ -100,10 +109,10 @@ export default function ClientActiveCommandCenter({ client }: { client: any }) {
             </div>
 
             <div className="flex justify-end gap-2 pt-2 border-t border-white/5">
-              <Button type="button" variant="secondary" onClick={() => setShowLogModal(false)} className="text-xs bg-zinc-800 text-zinc-300">
+              <Button type="button" variant="secondary" onClick={() => setShowLogModal(false)} className="text-xs bg-zinc-800 text-zinc-300 cursor-pointer">
                 Cancel
               </Button>
-              <Button type="submit" disabled={isPending} className="text-xs bg-brand-orange-500 text-white font-bold">
+              <Button type="submit" disabled={isPending} className="text-xs bg-brand-orange-500 text-white font-bold cursor-pointer disabled:cursor-not-allowed">
                 Submit Ticket
               </Button>
             </div>

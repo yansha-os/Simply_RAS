@@ -150,4 +150,29 @@ describe('assertClaimReadyForSubmit', () => {
       expect(res.error).toContain('not claim-ready');
     }
   });
+
+  describe('1% edge cases & defensive resilience', () => {
+    it('handles undefined/null trials, probes, interventions safely', () => {
+      const malformedInput = {
+        ...completeInput(),
+        trials: undefined,
+        probes: undefined,
+        interventions: undefined,
+        frequencies: undefined,
+        durations: undefined,
+        taskAnalyses: undefined,
+      } as unknown as ClaimReadyEvalInput;
+      const res = evaluateClaimReady(malformedInput);
+      expect(res.claimReady).toBe(false);
+      expect(Array.isArray(res.blocks)).toBe(true);
+    });
+
+    it('handles NaN/negative sessionSeconds safely', () => {
+      const res1 = evaluateClaimReady(completeInput({ sessionSeconds: NaN }));
+      expect(res1.claimReady).toBe(false);
+
+      const res2 = evaluateClaimReady(completeInput({ sessionSeconds: -500 }));
+      expect(res2.claimReady).toBe(false);
+    });
+  });
 });

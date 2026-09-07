@@ -125,6 +125,9 @@ beforeEach(() => {
   mocks.notifyUsers.mockResolvedValue({ success: true, notified: 1 });
   mocks.prisma.atsCandidate.findUnique.mockResolvedValue(null);
   mocks.prisma.atsCandidate.update.mockResolvedValue(candidate('HIRED'));
+  mocks.prisma.$transaction.mockImplementation(
+    async (operation: (tx: typeof mocks.prisma) => unknown) => operation(mocks.prisma)
+  );
 });
 
 describe('ATS hiring Server Action boundary', () => {
@@ -194,6 +197,20 @@ describe('ATS hiring Server Action boundary', () => {
       error: expect.stringMatching(/final hire action/i),
     });
     expect(mocks.hireCandidateDomain).not.toHaveBeenCalled();
+  });
+
+  it('does not overwrite a newer board move with a stale advance', async () => {
+    mocks.prisma.atsCandidate.findUnique
+      .mockResolvedValueOnce(candidate('PHONE_SCREEN'))
+      .mockResolvedValueOnce(candidate('OFFER'));
+
+    const result = await advanceAtsStage(CANDIDATE_ID);
+
+    expect(result).toMatchObject({
+      success: false,
+      error: expect.stringMatching(/stage changed/i),
+    });
+    expect(mocks.prisma.atsCandidate.update).not.toHaveBeenCalled();
   });
 
   it('delegates the internal notification enqueue to the transactional domain service', async () => {

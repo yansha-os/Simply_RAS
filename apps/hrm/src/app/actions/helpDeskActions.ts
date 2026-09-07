@@ -7,6 +7,11 @@ import { getCurrentUser } from '@/lib/auth';
 import { requireRole } from '@/lib/auth-guard';
 import type { Role } from '@repo/db';
 import {
+  CANDIDATE_SESSION_COOKIE,
+  DEVICE_FINGERPRINT_COOKIE,
+  resolveFingerprintValidCandidate,
+} from '@/lib/candidateDeviceSession';
+import {
   asRecord,
   deriveAtsStage,
   readProgressFromPacket,
@@ -22,22 +27,19 @@ const ATS_STAFF_ROLES = [
   'SUPER_ADMIN',
 ] as Role[];
 
-const ACTIVE_STATUSES = ['OPEN', 'CLAIMED', 'IN_PROGRESS'] as const;
+const ACTIVE_STATUSES = ['OPEN', 'CLAIMED', 'IN_PROGRESS', 'ESCALATED_HEAD_HR'] as const;
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const SESSION_COOKIE = 'ras_device_session_token';
 
-/** Device-bound ATS candidate from httpOnly session cookie (no fake c1 fallback). */
+/** Resolve applicant identity only through the live candidate/fingerprint session row. */
 async function resolveSessionCandidateId(): Promise<string | null> {
   try {
     const cookieStore = await cookies();
-    const id = cookieStore.get(SESSION_COOKIE)?.value || null;
-    if (!isUuid(id)) return null;
-    const row = await prisma.atsCandidate.findUnique({
-      where: { id },
-      select: { id: true },
-    });
-    return row?.id ?? null;
+    const candidate = await resolveFingerprintValidCandidate(
+      cookieStore.get(CANDIDATE_SESSION_COOKIE)?.value,
+      cookieStore.get(DEVICE_FINGERPRINT_COOKIE)?.value
+    );
+    return candidate?.id ?? null;
   } catch {
     return null;
   }
@@ -63,7 +65,7 @@ export type HelpTicketDto = {
   categoryLabel: string;
   subject: string;
   message: string;
-  status: 'OPEN' | 'CLAIMED' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED';
+  status: 'OPEN' | 'CLAIMED' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED' | 'ESCALATED_HEAD_HR';
   createdAt: string;
   assignedHrAgent?: string;
   claimedByUserId?: string | null;
@@ -206,8 +208,10 @@ function toTicketDto(row: {
     status: (row.status as HelpTicketDto['status']) || 'OPEN',
     createdAt: formatCreatedAt(row.createdAt),
     assignedHrAgent: row.claimedBy
-      ? `${row.claimedBy.firstName} ${row.claimedBy.lastName}`
-      : undefined,
+      ? `${row.claimedBy.firstName} ${row.claimedBy.lastName}`.trim()
+      : row.status === 'ESCALATED_HEAD_HR'
+        ? 'Head of HR'
+        : undefined,
     claimedByUserId: row.claimedByUserId,
     candidateName: `${row.candidate.firstName} ${row.candidate.lastName}`.trim(),
     candidateEmail: row.candidate.email,
@@ -278,6 +282,7 @@ export async function createHelpTicket(input: {
   subject: string;
   message: string;
   candidateName?: string;
+  requestHeadHr?: boolean;
 }) {
   try {
     const user = await getCurrentUser();
@@ -318,12 +323,21 @@ export async function createHelpTicket(input: {
       input.candidateName ||
       `${candidate.firstName} ${candidate.lastName}`.trim();
 
+    const isHeadHrRequest =
+      Boolean(input.requestHeadHr) ||
+      input.category === 'HEAD_HR_DIRECT' ||
+      input.subject.includes('[HEAD_HR]');
+    const priority = isHeadHrRequest ? 'HEAD_HR_REQUESTED' : 'NORMAL';
+    const status = isHeadHrRequest ? 'ESCALATED_HEAD_HR' : 'OPEN';
+    const subjectPrefix =
+      isHeadHrRequest && !input.subject.includes('[HEAD_HR]') ? '[HEAD_HR] ' : '';
+
     const ticket = await prisma.atsHelpTicket.create({
       data: {
         candidateId,
-        subject: `[${category}] ${input.subject.trim()}`,
-        status: 'OPEN',
-        priority: 'NORMAL',
+        subject: `${subjectPrefix}[${category}] ${input.subject.trim()}`,
+        status,
+        priority,
         messages: {
           create: {
             senderType: 'CANDIDATE',
@@ -360,6 +374,117 @@ export async function createHelpTicket(input: {
   }
 }
 
+export async function escalateTicketToHeadHrByApplicant(ticketId: string) {
+  try {
+    if (!isUuid(ticketId)) {
+      return { success: false, error: 'Invalid ticket id.' };
+    }
+
+    const sessionCandidateId = await resolveSessionCandidateId();
+    if (!sessionCandidateId) {
+      return {
+        success: false,
+        error:
+          'No active applicant session. Open your magic link to escalate your wage-offer ticket.',
+      };
+    }
+
+    const existing = await prisma.atsHelpTicket.findUnique({
+      where: { id: ticketId },
+      select: { id: true, candidateId: true, status: true },
+    });
+    if (!existing) {
+      return { success: false, error: 'Ticket not found.' };
+    }
+    if (existing.candidateId !== sessionCandidateId) {
+      return { success: false, error: 'FORBIDDEN: Not your applicant ticket.' };
+    }
+
+    const headHrUser = await prisma.user.findFirst({
+      where: { role: 'HEAD_HR', isActive: true },
+      select: { id: true },
+    });
+
+    const ticket = await prisma.atsHelpTicket.update({
+      where: { id: ticketId },
+      data: {
+        status: 'ESCALATED_HEAD_HR',
+        priority: 'HEAD_HR_REQUESTED',
+        claimedByUserId: headHrUser?.id || undefined,
+        messages: {
+          create: {
+            senderType: 'SYSTEM',
+            senderUserId: null,
+            body: encodeBody({
+              text: `Applicant requested executive discussion on Wage Offer. Assigned for Head of HR review.`,
+              type: 'TEXT',
+              senderName: 'System',
+            }),
+          },
+        },
+      },
+      include: ticketInclude,
+    });
+
+    revalidatePath('/ats');
+    revalidatePath('/ats/help-tickets');
+    revalidatePath('/rbt/help-desk');
+
+    return { success: true, ticket: toTicketDto(ticket) };
+  } catch (error: unknown) {
+    console.error(
+      'escalateTicketToHeadHrByApplicant failed:',
+      error instanceof Error ? error.message : 'Unknown'
+    );
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to escalate ticket.',
+    };
+  }
+}
+
+export async function forwardHelpTicketToHeadHr(ticketId: string) {
+  try {
+    await requireRole(ATS_STAFF_ROLES);
+    const user = await getCurrentUser();
+
+    const ticket = await prisma.atsHelpTicket.update({
+      where: { id: ticketId },
+      data: {
+        status: 'ESCALATED_HEAD_HR',
+        priority: 'FORWARDED_TO_HEAD_HR',
+        messages: {
+          create: {
+            senderType: 'SYSTEM',
+            senderUserId: user && UUID_RE.test(user.id) ? user.id : null,
+            body: encodeBody({
+              text: `⏩ Ticket escalated and forwarded to Head of HR for executive review by ${user?.firstName || 'HR Agent'}.`,
+              type: 'TEXT',
+              senderName: 'System / HR Forward',
+            }),
+          },
+        },
+      },
+      include: ticketInclude,
+    });
+
+    revalidatePath('/ats');
+    revalidatePath('/ats/help-tickets');
+    revalidatePath('/rbt/help-desk');
+
+    return { success: true, ticket: toTicketDto(ticket) };
+  } catch (error: unknown) {
+    console.error(
+      'forwardHelpTicketToHeadHr failed:',
+      error instanceof Error ? error.message : 'Unknown'
+    );
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to forward ticket.',
+    };
+  }
+}
+
 export async function listHelpTickets(options?: {
   candidateId?: string;
   activeOnly?: boolean;
@@ -373,7 +498,9 @@ export async function listHelpTickets(options?: {
     const isStaff = ATS_STAFF_ROLES.includes(user.role as Role);
     const where: {
       candidateId?: string;
-      status?: { in: string[] };
+      status?: { in?: string[]; notIn?: string[] } | string;
+      priority?: string;
+      OR?: Array<Record<string, unknown>>;
     } = {};
 
     if (options?.candidateId) {
@@ -404,7 +531,17 @@ export async function listHelpTickets(options?: {
       where.candidateId = sessionId;
     }
 
-    if (options?.activeOnly !== false) {
+    if (isStaff && user.role === 'HEAD_HR') {
+      where.status = { notIn: ['RESOLVED', 'CLOSED'] };
+      where.OR = [
+        { status: 'ESCALATED_HEAD_HR' },
+        { priority: 'FORWARDED_TO_HEAD_HR' },
+        { priority: 'HEAD_HR_REQUESTED' },
+        { subject: { contains: '[HEAD_HR]' } },
+      ];
+    } else if (isStaff) {
+      where.status = { in: ['OPEN', 'CLAIMED', 'IN_PROGRESS'] };
+    } else if (options?.activeOnly !== false) {
       where.status = { in: [...ACTIVE_STATUSES] };
     }
 
@@ -567,33 +704,34 @@ export async function sendHelpMessage(
   }
 ) {
   try {
+    if (!isUuid(ticketId)) {
+      return { success: false, error: 'Ticket not found.' };
+    }
     const user = await getCurrentUser();
     if (!user) {
       return { success: false, error: 'UNAUTHORIZED: Authentication required.' };
     }
 
-    const ticket = await prisma.atsHelpTicket.findUnique({
-      where: { id: ticketId },
+    const isStaff = ATS_STAFF_ROLES.includes(user.role as Role);
+    if (isStaff !== (input.senderSide === 'HR')) {
+      return { success: false, error: 'FORBIDDEN: Invalid sender identity.' };
+    }
+
+    const sessionCandidateId = isStaff ? null : await resolveSessionCandidateId();
+    if (!isStaff && !sessionCandidateId) {
+      return { success: false, error: 'FORBIDDEN: Not your ticket.' };
+    }
+
+    const ticket = await prisma.atsHelpTicket.findFirst({
+      where: {
+        id: ticketId,
+        ...(sessionCandidateId ? { candidateId: sessionCandidateId } : {}),
+      },
       select: { id: true, candidateId: true, status: true },
     });
     if (!ticket) return { success: false, error: 'Ticket not found.' };
     if (ticket.status === 'RESOLVED' || ticket.status === 'CLOSED') {
       return { success: false, error: 'Ticket is already resolved.' };
-    }
-
-    const isStaff = ATS_STAFF_ROLES.includes(user.role as Role);
-    if (input.senderSide === 'HR' && !isStaff) {
-      return { success: false, error: 'FORBIDDEN: Staff only.' };
-    }
-    if (input.senderSide === 'CANDIDATE' && !isStaff) {
-      const sessionId = await resolveSessionCandidateId();
-      if (sessionId !== ticket.candidateId) {
-        // Dev Tools may impersonate an applicant without the cookie — dev builds only.
-        const { isDevToolsEnabled } = await import('@/lib/devToolsGate');
-        if (!isDevToolsEnabled()) {
-          return { success: false, error: 'FORBIDDEN: Not your ticket.' };
-        }
-      }
     }
 
     const senderType =

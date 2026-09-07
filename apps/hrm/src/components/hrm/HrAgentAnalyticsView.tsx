@@ -14,18 +14,12 @@ import {
   CheckCircle2, 
   FileText, 
   PieChart, 
-  Activity, 
-  ArrowUpRight,
   ArrowRight,
   UserCheck,
-  Zap,
   Target,
-  Sparkles,
   ChevronDown,
   ChevronRight,
   Video,
-  StickyNote,
-  User
 } from 'lucide-react';
 
 export default function HrAgentAnalyticsView() {

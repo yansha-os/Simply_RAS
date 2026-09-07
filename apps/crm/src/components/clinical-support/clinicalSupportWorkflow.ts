@@ -18,6 +18,29 @@ export type ClinicalSupportQueues = {
   total: number;
 };
 
+/** Kanban lane keys — maps to profile deep-links for triage-only queue cards. */
+export type ClinicalSupportLane =
+  | 'documentReview'
+  | 'assessmentScheduling'
+  | 'reportAssembly'
+  | 'billingHandoff';
+
+const CLINICAL_SUPPORT_PROFILE_TAB: Record<ClinicalSupportLane, string> = {
+  documentReview: 'clinical',
+  assessmentScheduling: 'assessment',
+  reportAssembly: 'report',
+  billingHandoff: 'billing_handoff',
+};
+
+/** Deep-link a queue card to the workflow tab where CSS completes that handoff. */
+export function clinicalSupportProfileHref(
+  clientId: string,
+  lane: ClinicalSupportLane,
+): string {
+  const tab = CLINICAL_SUPPORT_PROFILE_TAB[lane];
+  return `/client/${clientId}?mode=clinical&tab=${tab}`;
+}
+
 export type ReportReadiness = {
   ready: boolean;
   planComplete: boolean;

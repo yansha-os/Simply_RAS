@@ -3,8 +3,27 @@
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { FileText, DownloadCloud, ClipboardList } from 'lucide-react';
+import { canonicalDocumentReference } from '@/lib/documentReference';
+import { parsePacketFormData } from '@/lib/safeParseJson';
 
-export default function ClientDocumentsTab({ client }: { client: any }) {
+const documentFields = [
+  { key: 'docInsuranceFront', label: 'Insurance Card (Front)' },
+  { key: 'docInsuranceBack', label: 'Insurance Card (Back)' },
+  { key: 'docMedicaidFront', label: 'Medicaid Card (Front)' },
+  { key: 'docMedicaidBack', label: 'Medicaid Card (Back)' },
+  { key: 'docEval', label: 'Diagnostic Evaluation' },
+  { key: 'docReferral', label: 'Physician Referral' },
+  { key: 'docIEP', label: 'IEP Document' },
+  { key: 'docCustody', label: 'Custody Documents' },
+  { key: 'docPriorABA', label: 'Prior ABA Records' },
+] as const;
+
+type ClientDocumentsClient = {
+  id: string;
+  intakePacket: { formData: unknown } | null;
+};
+
+export default function ClientDocumentsTab({ client }: { client: ClientDocumentsClient }) {
   const packet = client.intakePacket;
   
   if (!packet) {
@@ -15,28 +34,11 @@ export default function ClientDocumentsTab({ client }: { client: any }) {
     );
   }
 
-  let parsedFormData: any = {};
-  if (packet.formData) {
-    try {
-      let parsed = typeof packet.formData === 'string' ? JSON.parse(packet.formData) : packet.formData;
-      if (typeof parsed === 'string') parsed = JSON.parse(parsed);
-      parsedFormData = parsed || {};
-    } catch (e) {}
-  }
-
-  const documentFields = [
-    { key: 'docInsuranceFront', label: 'Insurance Card (Front)' },
-    { key: 'docInsuranceBack', label: 'Insurance Card (Back)' },
-    { key: 'docMedicaidFront', label: 'Medicaid Card (Front)' },
-    { key: 'docMedicaidBack', label: 'Medicaid Card (Back)' },
-    { key: 'docEval', label: 'Diagnostic Evaluation' },
-    { key: 'docReferral', label: 'Physician Referral' },
-    { key: 'docIEP', label: 'IEP Document' },
-    { key: 'docCustody', label: 'Custody Documents' },
-    { key: 'docPriorABA', label: 'Prior ABA Records' },
-  ];
-
-  const availableDocs = documentFields.filter(doc => !!parsedFormData[doc.key]?.url);
+  const formData = parsePacketFormData(packet.formData);
+  const availableDocs = documentFields.flatMap((document) => {
+    const url = canonicalDocumentReference(formData[document.key], client.id);
+    return url ? [{ ...document, url }] : [];
+  });
 
   return (
     <div className="space-y-6">
@@ -52,17 +54,17 @@ export default function ClientDocumentsTab({ client }: { client: any }) {
             <p className="text-zinc-500 text-sm">No clinical documents have been uploaded yet.</p>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {availableDocs.map((doc, i) => (
-                <div key={i} className="flex items-center justify-between p-4 bg-zinc-900/50 rounded-lg border border-zinc-800">
+              {availableDocs.map((doc) => (
+                <div key={doc.key} className="flex items-center justify-between p-4 bg-zinc-900/50 rounded-lg border border-zinc-800">
                   <div className="flex items-center text-zinc-300 font-medium">
                     <FileText className="w-4 h-4 mr-3 text-zinc-500" />
                     {doc.label}
                   </div>
                   <a 
-                    href={parsedFormData[doc.key].url} 
+                    href={doc.url}
                     target="_blank" 
                     rel="noopener noreferrer"
-                    className="inline-flex items-center text-xs bg-brand-blue-500 hover:bg-brand-blue-600 text-white px-3 py-1.5 rounded-md shadow-sm transition-colors"
+                    className="inline-flex cursor-pointer items-center text-xs bg-brand-blue-500 hover:bg-brand-blue-600 text-white px-3 py-1.5 rounded-md shadow-sm transition-colors"
                   >
                     <DownloadCloud className="w-3.5 h-3.5 mr-1.5" /> View / Download
                   </a>
@@ -82,8 +84,8 @@ export default function ClientDocumentsTab({ client }: { client: any }) {
         </CardHeader>
         <CardContent className="p-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
-            {Object.entries(parsedFormData)
-              .filter(([key]) => !key.startsWith('doc') && !key.toLowerCase().includes('signature') && !key.toLowerCase().includes('consent'))
+            {Object.entries(formData)
+              .filter(([key]) => !key.startsWith('doc') && !key.startsWith('_') && !key.toLowerCase().includes('signature') && !key.toLowerCase().includes('consent'))
               .map(([key, value]) => {
                 // formatting the camelCase key to readable text
                 const formattedKey = key

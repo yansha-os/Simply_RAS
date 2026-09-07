@@ -2,14 +2,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const CANDIDATE_ID = '11111111-1111-4111-8111-111111111111';
 const FINGERPRINT = '22222222-2222-4222-8222-222222222222';
+const PDF_BYTES = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31]);
 
 const mocks = vi.hoisted(() => {
   const storageUpload = vi.fn();
-  const storageFrom = vi.fn(() => ({ upload: storageUpload }));
+  const storageRemove = vi.fn();
+  const storageFrom = vi.fn(() => ({ upload: storageUpload, remove: storageRemove }));
   const storageClient = { storage: { from: storageFrom } };
 
   return {
     storageUpload,
+    storageRemove,
     storageFrom,
     storageClient,
     revalidatePath: vi.fn(),
@@ -90,8 +93,10 @@ function candidateWithIncompleteCertificate() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.storageRemove.mockResolvedValue({ data: [], error: null });
   mocks.prisma.applicantDeviceSession.findUnique.mockResolvedValue({
     revokedAt: null,
+    boundAt: new Date(),
     candidate: {
       stage: 'INTERVIEW',
       activationStatus: 'ACTIVE',
@@ -112,7 +117,7 @@ describe('uploadFortyHourCertificate evidence integrity', () => {
     const formData = new FormData();
     formData.append(
       'file',
-      new File([new Uint8Array([1, 2, 3])], 'certificate.pdf', {
+      new File([PDF_BYTES], 'certificate.pdf', {
         type: 'application/pdf',
       })
     );
@@ -140,7 +145,7 @@ describe('uploadFortyHourCertificate evidence integrity', () => {
     const formData = new FormData();
     formData.append(
       'file',
-      new File([new Uint8Array([1, 2, 3])], 'certificate.pdf', {
+      new File([PDF_BYTES], 'certificate.pdf', {
         type: 'application/pdf',
       })
     );
@@ -154,7 +159,11 @@ describe('uploadFortyHourCertificate evidence integrity', () => {
     );
     expect(mocks.prisma.atsCandidate.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: CANDIDATE_ID },
+        where: {
+          id: CANDIDATE_ID,
+          stage: 'INTERVIEW',
+          activationStatus: 'ACTIVE',
+        },
         data: expect.objectContaining({
           stage: expect.any(String),
           onboardingPacket: {
@@ -176,6 +185,51 @@ describe('uploadFortyHourCertificate evidence integrity', () => {
     expect(mocks.revalidatePath).not.toHaveBeenCalled();
   });
 
+  it('rejects forged certificate content before touching Storage', async () => {
+    const formData = new FormData();
+    formData.append(
+      'file',
+      new File([new TextEncoder().encode('<html>not a PDF</html>')], 'certificate.pdf', {
+        type: 'application/pdf',
+      })
+    );
+
+    const result = await uploadFortyHourCertificate(formData);
+
+    expect(result).toEqual({
+      success: false,
+      error: 'Certificate content does not match its declared type.',
+    });
+    expect(mocks.storageUpload).not.toHaveBeenCalled();
+    expect(mocks.prisma.atsCandidate.update).not.toHaveBeenCalled();
+  });
+
+  it('removes the uploaded object when the candidate state changes before commit', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    mocks.storageUpload.mockImplementation(async (storagePath: string) => ({
+      data: { path: storagePath },
+      error: null,
+    }));
+    mocks.prisma.atsCandidate.update.mockRejectedValue({ code: 'P2025' });
+    const formData = new FormData();
+    formData.append(
+      'file',
+      new File([PDF_BYTES], 'certificate.pdf', { type: 'application/pdf' })
+    );
+
+    try {
+      const result = await uploadFortyHourCertificate(formData);
+
+      expect(result).toMatchObject({ success: false });
+      expect(mocks.storageRemove).toHaveBeenCalledWith([
+        expect.stringContaining(`${CANDIDATE_ID}/40hr-cert-`),
+      ]);
+      expect(mocks.revalidatePath).not.toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
   it.each([
     ['REJECTED', 'REJECTED'],
     ['HIRED', 'ACTIVE'],
@@ -190,7 +244,7 @@ describe('uploadFortyHourCertificate evidence integrity', () => {
       const formData = new FormData();
       formData.append(
         'file',
-        new File([new Uint8Array([1, 2, 3])], 'certificate.pdf', {
+        new File([PDF_BYTES], 'certificate.pdf', {
           type: 'application/pdf',
         })
       );

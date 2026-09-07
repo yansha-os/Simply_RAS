@@ -113,14 +113,14 @@ export function evaluateConvertGate(note: ConvertGateNote): ConvertGateResult {
     return {
       ok: false,
       code: 'BCBA_SIGN',
-      reason: 'BCBA e-sign required before marking note for Plutus / claims tracker.',
+      reason: 'BCBA e-sign required before marking the claim filed.',
     };
   }
   if (!note.rbtSigned) {
     return {
       ok: false,
       code: 'RBT_SIGN',
-      reason: 'RBT signature required before Plutus handoff.',
+      reason: 'RBT signature required before claim filing.',
     };
   }
 

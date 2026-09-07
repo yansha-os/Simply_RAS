@@ -824,7 +824,7 @@ export default function BcbaSessionEmrTab({ client }: { client: ClientSnapshot }
               'This attestation does not mean the claim was entered, paid, or cleared for conversion.',
             action: {
               label: 'Open notes pipeline',
-              onClick: () => router.push('/notes'),
+              onClick: () => router.push('/portal-billing/claims'),
             },
             duration: 8000,
           });
@@ -1460,15 +1460,38 @@ export default function BcbaSessionEmrTab({ client }: { client: ClientSnapshot }
                     Protocol modification service
                   </span>
                 </div>
-                <div className="rounded-2xl border border-cyan-500/15 bg-cyan-500/[0.05] p-4">
-                  <span className="block font-mono text-[9px] font-bold uppercase tracking-wide text-cyan-300/70">
-                    Observed code ratio
-                  </span>
-                  <span className="mt-1 block font-heading text-2xl font-black text-cyan-300">
+                <div className={`rounded-2xl border p-4 ${
+                  observedServiceRatio == null
+                    ? 'border-white/10 bg-zinc-900/60'
+                    : observedServiceRatio >= 5
+                    ? 'border-emerald-500/25 bg-emerald-500/[0.06]'
+                    : 'border-amber-500/25 bg-amber-500/[0.06]'
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <span className="block font-mono text-[9px] font-bold uppercase tracking-wide text-zinc-400">
+                      BACB Supervision Ratio
+                    </span>
+                    {observedServiceRatio != null && (
+                      <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-[9px] font-bold uppercase ${
+                        observedServiceRatio >= 5
+                          ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                          : 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+                      }`}>
+                        {observedServiceRatio >= 5 ? 'Compliant' : 'Below 5% Threshold'}
+                      </span>
+                    )}
+                  </div>
+                  <span className={`mt-1 block font-heading text-2xl font-black ${
+                    observedServiceRatio == null
+                      ? 'text-zinc-500'
+                      : observedServiceRatio >= 5
+                      ? 'text-emerald-300'
+                      : 'text-amber-300'
+                  }`}>
                     {observedServiceRatio == null ? '—' : `${observedServiceRatio.toFixed(1)}%`}
                   </span>
-                  <span className="mt-1 block text-[10px] text-zinc-600">
-                    97155 time ÷ 97153 time; informational only
+                  <span className="mt-1 block text-[10px] text-zinc-500">
+                    97155 Supervision ÷ 97153 Direct (BACB Min: 5.0%)
                   </span>
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-zinc-900/60 p-4">
@@ -1531,7 +1554,7 @@ export default function BcbaSessionEmrTab({ client }: { client: ClientSnapshot }
               </p>
             </div>
             <Link
-              href="/portal-clinical/notes"
+              href="/portal-clinical/daily?tab=esign"
               className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-cyan-500/25 bg-cyan-500/10 px-4 py-2 font-mono text-[10px] font-bold uppercase text-cyan-300 transition-all hover:border-cyan-400/50 hover:bg-cyan-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
             >
               <FileText className="h-3.5 w-3.5" aria-hidden="true" />

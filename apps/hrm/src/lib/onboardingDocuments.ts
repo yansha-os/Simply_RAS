@@ -266,24 +266,24 @@ export const ONBOARDING_DOCS: OnboardingDocDef[] = [
   {
     step: 26,
     key: 'mandated-reporter-cert',
-    title: 'Mandated Reporter Training Certificate',
+    title: 'Mandated Reporter Training Certificate (Optional / Free NYS Course)',
     legalCite: 'N.Y. Social Services Law § 413',
     kind: 'UPLOAD',
     version: ONBOARDING_PACK_VERSION,
     pdfs: [],
     uploadAccept: 'application/pdf,image/jpeg,image/png',
-    uploadLabel: 'Mandated Reporter Training Certificate',
+    uploadLabel: 'Mandated Reporter Certificate (Free @ nysmandatedreporter.org)',
   },
   {
     step: 27,
     key: 'cpr-cert',
-    title: 'CPR/First Aid Certificate',
+    title: 'CPR/First Aid Certificate (Optional / Deferred 30 Days)',
     legalCite: 'AHA / Red Cross certification',
     kind: 'UPLOAD',
     version: ONBOARDING_PACK_VERSION,
     pdfs: [],
     uploadAccept: 'application/pdf,image/jpeg,image/png',
-    uploadLabel: 'CPR / First Aid Certificate',
+    uploadLabel: 'CPR / First Aid Certificate (Upload or Defer)',
   },
 ];
 

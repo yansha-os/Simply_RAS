@@ -96,6 +96,25 @@ describe('parseClinicalGoalsFromTreatmentPlan', () => {
     expect(snap.skillGoals[0].status).toBe('New');
     expect(snap.brpGoals[0].risk).toBe('Low');
   });
+
+  it('safely normalizes malformed nested goal entries', () => {
+    const snap = parseClinicalGoalsFromTreatmentPlan({
+      skillGoals: [null, 42],
+      brp: ['invalid'],
+      parentGoals: [false],
+    });
+
+    expect(snap.skillGoals).toEqual([
+      expect.objectContaining({ domain: 'Unassigned', description: '', status: 'New' }),
+      expect.objectContaining({ domain: 'Unassigned', description: '', status: 'New' }),
+    ]);
+    expect(snap.brpGoals[0]).toEqual(
+      expect.objectContaining({ behavior: '', risk: 'Low', status: 'New' })
+    );
+    expect(snap.parentGoals[0]).toEqual(
+      expect.objectContaining({ description: '', status: 'New' })
+    );
+  });
 });
 
 describe('mapGoalStatusToSkillTargetStatus', () => {

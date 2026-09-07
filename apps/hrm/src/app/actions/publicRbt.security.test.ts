@@ -20,6 +20,12 @@ vi.mock('@/lib/magicLinkExpiry', () => ({
   newMagicLinkExpiry: mocks.newMagicLinkExpiry,
 }));
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }));
+vi.mock('next/headers', () => ({
+  headers: vi.fn(async () => ({ get: vi.fn(() => '203.0.113.10') })),
+}));
+vi.mock('@/lib/publicApplicationRateLimit', () => ({
+  checkAndRecordPublicApplicationAttempt: () => ({ allowed: true }),
+}));
 
 import {
   submitRbtApplication,
@@ -123,5 +129,15 @@ describe('submitRbtApplication existing-email integrity', () => {
       })
     );
     expect(mocks.prisma.atsCandidate.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects oversized public fields before querying candidate data', async () => {
+    const result = await submitRbtApplication(
+      application({ additionalNotes: 'x'.repeat(4_001) })
+    );
+
+    expect(result).toMatchObject({ success: false });
+    expect(mocks.prisma.atsCandidate.findUnique).not.toHaveBeenCalled();
+    expect(mocks.prisma.atsCandidate.create).not.toHaveBeenCalled();
   });
 });

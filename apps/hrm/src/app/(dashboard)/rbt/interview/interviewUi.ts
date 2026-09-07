@@ -6,12 +6,15 @@ import {
 
 export type InterviewRecordForView = {
   status: string;
-  recommendation: string | null;
+  recommendation?: string | null;
   scheduledDate: string | null;
   scheduledTime: string | null;
 };
 
-export type InterviewPortalRecord = InterviewRecordForView & {
+export type InterviewPortalRecord = Omit<
+  InterviewRecordForView,
+  'recommendation'
+> & {
   id: string;
   interviewerUserId: string | null;
   interviewerName: string | null;

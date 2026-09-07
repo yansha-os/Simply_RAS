@@ -433,42 +433,40 @@ export function RbtStaffCommunicationView() {
         </div>
 
         {/* Chat pane */}
-        <div className="rounded-3xl border border-white/10 bg-zinc-950/95 text-white shadow-2xl overflow-hidden flex flex-col min-h-[520px] relative backdrop-blur-xl">
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,_rgba(249,115,22,0.12),_transparent_55%)]" />
-
+        <div className="rounded-3xl border border-[#E2D5B7] bg-[#FFFDF8] text-slate-900 shadow-xl overflow-hidden flex flex-col min-h-[520px] relative">
           {!selected ? (
-            <div className="relative flex-1 flex items-center justify-center p-8 text-center text-zinc-400 text-sm">
+            <div className="relative flex-1 flex items-center justify-center p-8 text-center text-slate-500 text-sm">
               Select a thread or open Notifications.
             </div>
           ) : isNotifChannel ? (
             <>
-              <div className="relative px-4 py-3 border-b border-white/10 flex items-center justify-between bg-zinc-900/80 backdrop-blur-xl">
+              <div className="relative px-4 py-3 border-b border-[#E2D5B7] flex items-center justify-between bg-[#FFFDF8]">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-2xl bg-sky-500/20 border border-sky-400/30 text-sky-300 flex items-center justify-center">
+                  <div className="w-10 h-10 rounded-2xl bg-sky-100 border border-sky-200 text-sky-800 flex items-center justify-center">
                     <Bell className="w-5 h-5" />
                   </div>
                   <div>
-                    <p className="text-sm font-black">Notifications</p>
-                    <p className="text-[10px] text-zinc-400 font-mono flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse" />
+                    <p className="text-sm font-black text-slate-900">Notifications</p>
+                    <p className="text-[10px] text-slate-500 font-mono flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-sky-500 animate-pulse" />
                       Coming from staffing &amp; clinical alerts
                     </p>
                   </div>
                 </div>
-                <span className="text-[9px] font-mono font-bold uppercase tracking-wider text-zinc-500 border border-white/10 px-2 py-1 rounded-lg">
+                <span className="text-[9px] font-mono font-bold uppercase tracking-wider text-slate-500 border border-[#E2D5B7] bg-[#F9F5EC] px-2 py-1 rounded-lg">
                   Read-only feed
                 </span>
               </div>
 
-              <div className="relative flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+              <div className="relative flex-1 overflow-y-auto p-4 space-y-3 bg-[#F9F5EC] custom-scrollbar">
                 {notifications.length === 0 ? (
                   <div className="h-full min-h-[280px] flex flex-col items-center justify-center text-center gap-3 px-6">
-                    <div className="w-14 h-14 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center">
-                      <Inbox className="w-7 h-7 text-zinc-500" />
+                    <div className="w-14 h-14 rounded-2xl bg-white border border-[#E2D5B7] flex items-center justify-center">
+                      <Inbox className="w-7 h-7 text-slate-400" />
                     </div>
                     <div>
-                      <h3 className="text-base font-black font-heading text-white">No alerts yet</h3>
-                      <p className="text-xs text-zinc-400 mt-1.5 max-w-sm mx-auto leading-relaxed">
+                      <h3 className="text-base font-black font-heading text-slate-900">No alerts yet</h3>
+                      <p className="text-xs text-slate-600 mt-1.5 max-w-sm mx-auto leading-relaxed">
                         When Case Coord, BCBA, or HR send staffing updates, job matches, or note
                         reminders, they show up here from the Notifications system — not as fake demo
                         chats.
@@ -476,7 +474,7 @@ export function RbtStaffCommunicationView() {
                     </div>
                     <Link
                       href="/rbt/help-desk"
-                      className="mt-2 rounded-2xl border border-white/15 bg-white/5 hover:bg-white/10 text-zinc-200 text-[11px] font-black px-4 py-2 cursor-pointer transition-all"
+                      className="mt-2 rounded-2xl border border-[#E2D5B7] bg-white hover:bg-orange-50 text-slate-800 text-[11px] font-black px-4 py-2 cursor-pointer transition-all"
                     >
                       Need help? Open Help Desk →
                     </Link>
@@ -491,23 +489,23 @@ export function RbtStaffCommunicationView() {
                           markNotificationAsRead(n.id).then(() => refreshInbox({ silent: true }));
                         }
                       }}
-                      className={`w-full text-left rounded-2xl border backdrop-blur-xl px-3.5 py-3 transition-all duration-300 cursor-pointer hover:scale-[1.01] hover:border-[#F97316]/40 ${
+                      className={`w-full text-left rounded-2xl border px-3.5 py-3 transition-all duration-300 cursor-pointer hover:scale-[1.01] hover:border-[#F97316]/40 ${
                         n.isRead
-                          ? 'bg-zinc-900/60 border-white/10'
-                          : 'bg-sky-500/10 border-sky-400/25 shadow-lg shadow-sky-500/5'
+                          ? 'bg-white border-[#E2D5B7] text-slate-900'
+                          : 'bg-sky-50 border-sky-300 text-slate-900 shadow-sm'
                       }`}
                     >
                       <div className="flex items-start justify-between gap-2">
-                        <p className="text-xs font-black text-white">{n.title}</p>
+                        <p className="text-xs font-black text-slate-900">{n.title}</p>
                         {!n.isRead && (
-                          <span className="dot-live shrink-0 w-2 h-2 rounded-full bg-sky-400 mt-1" />
+                          <span className="dot-live shrink-0 w-2 h-2 rounded-full bg-sky-500 mt-1" />
                         )}
                       </div>
-                      <p className="text-[11px] text-zinc-300 mt-1 leading-relaxed whitespace-pre-wrap">
+                      <p className="text-[11px] text-slate-700 mt-1 leading-relaxed whitespace-pre-wrap">
                         {n.message}
                       </p>
                       <div className="flex items-center justify-between mt-2 gap-2">
-                        <span className="text-[9px] font-mono text-zinc-500">
+                        <span className="text-[9px] font-mono text-slate-500">
                           {formatNotifTime(n.createdAt)} · {n.type}
                         </span>
                         {n.linkUrl && (
@@ -528,32 +526,32 @@ export function RbtStaffCommunicationView() {
             </>
           ) : (
             <>
-              <div className="relative px-4 py-3 border-b border-white/10 flex items-center justify-between bg-zinc-900/80 backdrop-blur-xl">
+              <div className="relative px-4 py-3 border-b border-[#E2D5B7] flex items-center justify-between bg-[#FFFDF8]">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-2xl bg-[#F97316] text-white flex items-center justify-center text-xs font-black">
                     {selected.initials}
                   </div>
                   <div>
-                    <p className="text-sm font-black">{selected.name}</p>
-                    <p className="text-[10px] text-zinc-400 font-mono flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    <p className="text-sm font-black text-slate-900">{selected.name}</p>
+                    <p className="text-[10px] text-slate-500 font-mono flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                       {selected.subtitle} · live StaffMessage thread
                     </p>
                   </div>
                 </div>
-                <span className="text-[9px] font-mono font-bold uppercase tracking-wider text-zinc-500 border border-white/10 px-2 py-1 rounded-lg">
+                <span className="text-[9px] font-mono font-bold uppercase tracking-wider text-slate-500 border border-[#E2D5B7] bg-[#F9F5EC] px-2 py-1 rounded-lg">
                   HIPAA · Professional
                 </span>
               </div>
 
-              <div className="relative flex-1 overflow-y-auto p-4 custom-scrollbar">
+              <div className="relative flex-1 overflow-y-auto p-4 bg-[#F9F5EC] custom-scrollbar">
                 {threadLoading && messages.length === 0 ? (
-                  <p className="text-center text-zinc-500 text-xs py-16">Loading messages…</p>
+                  <p className="text-center text-slate-500 text-xs py-16">Loading messages…</p>
                 ) : messages.length === 0 && outbox.length === 0 ? (
                   <div className="h-full min-h-[240px] flex flex-col items-center justify-center text-center gap-2 px-6">
-                    <MessageSquare className="w-8 h-8 text-zinc-600" />
-                    <p className="text-sm font-black text-zinc-200">No messages yet</p>
-                    <p className="text-[11px] text-zinc-500 max-w-xs">
+                    <MessageSquare className="w-8 h-8 text-slate-400" />
+                    <p className="text-sm font-black text-slate-800">No messages yet</p>
+                    <p className="text-[11px] text-slate-600 max-w-xs">
                       Start the conversation — Case Coord replies appear here. System alerts stay in
                       Notifications.
                     </p>
@@ -571,7 +569,7 @@ export function RbtStaffCommunicationView() {
                         >
                           {!m.mine && (
                             <div
-                              className={`w-7 h-7 rounded-xl bg-[#F97316] text-white flex items-center justify-center font-black text-[10px] shrink-0 shadow-md shadow-orange-500/20 ${
+                              className={`w-7 h-7 rounded-xl bg-[#F97316] text-white flex items-center justify-center font-black text-[10px] shrink-0 shadow-sm ${
                                 groupStart ? '' : 'invisible'
                               }`}
                             >
@@ -579,10 +577,10 @@ export function RbtStaffCommunicationView() {
                             </div>
                           )}
                           <div
-                            className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-xs border backdrop-blur-xl ${
+                            className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-xs shadow-sm ${
                               m.mine
-                                ? `bg-[#F97316]/20 border-[#F97316]/40 text-orange-50 ${groupStart ? 'rounded-br-md' : ''}`
-                                : `bg-zinc-900/80 border-white/10 text-zinc-100 ${groupStart ? 'rounded-bl-md' : ''}`
+                                ? `bg-brand-orange-500 text-white ${groupStart ? 'rounded-br-none' : ''}`
+                                : `bg-white border border-[#E2D5B7] text-slate-800 ${groupStart ? 'rounded-bl-none' : ''}`
                             }`}
                           >
                             {!m.mine && groupStart && (
@@ -593,7 +591,7 @@ export function RbtStaffCommunicationView() {
                             {m.type === 'JITSI_CALL' ? (
                               <div className="space-y-2">
                                 <p className="font-semibold">{m.text}</p>
-                                <p className="text-[10px] text-amber-200/90 font-medium">
+                                <p className="text-[10px] text-amber-800 font-medium">
                                   ⏳ Waiting for host to join first, then connect…
                                 </p>
                                 <button
@@ -601,7 +599,7 @@ export function RbtStaffCommunicationView() {
                                   onClick={() => {
                                     if (!m.callRoomUrl) return;
                                     const isMobile = /iPhone|iPad|iPod|Android/i.test(
-                                      navigator.userAgent
+                                       navigator.userAgent
                                     );
                                     if (isMobile) window.open(m.callRoomUrl, '_blank');
                                     else
@@ -611,7 +609,7 @@ export function RbtStaffCommunicationView() {
                                         'width=1280,height=800'
                                       );
                                   }}
-                                  className="w-full rounded-xl bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 text-[11px] font-black py-2 cursor-pointer hover:bg-emerald-500/30"
+                                  className="w-full rounded-xl bg-emerald-600 text-white text-[11px] font-black py-2 cursor-pointer hover:bg-emerald-500"
                                 >
                                   🟢 Join Video Call
                                 </button>
@@ -626,7 +624,7 @@ export function RbtStaffCommunicationView() {
                                 {m.text}
                               </p>
                             )}
-                            <p className="text-[9px] font-mono text-zinc-500 mt-1.5 text-right">
+                            <p className="text-[9px] font-mono opacity-80 mt-1.5 text-right">
                               {m.timestamp}
                             </p>
                           </div>
@@ -636,10 +634,10 @@ export function RbtStaffCommunicationView() {
                     {outbox.map((o) => (
                       <div key={o.localId} className="flex flex-col items-end mt-1 gap-1">
                         <div
-                          className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-xs border backdrop-blur-xl ${
+                          className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-xs shadow-sm border ${
                             o.status === 'failed'
-                              ? 'bg-rose-500/15 border-rose-500/40 text-rose-100'
-                              : 'bg-[#F97316]/10 border-[#F97316]/25 text-orange-50'
+                              ? 'bg-rose-100 border-rose-300 text-rose-900'
+                              : 'bg-brand-orange-500/80 text-white border-brand-orange-400/20'
                           }`}
                         >
                           {o.kind === 'DOCUMENT' ? (
@@ -657,13 +655,13 @@ export function RbtStaffCommunicationView() {
                           <button
                             type="button"
                             onClick={() => retryEntry(o)}
-                            className="flex items-center gap-1 text-[9px] font-mono font-black text-rose-400 hover:text-rose-300 cursor-pointer"
+                            className="flex items-center gap-1 text-[9px] font-mono font-black text-rose-600 hover:text-rose-700 cursor-pointer"
                           >
                             <RefreshCw className="w-3 h-3" />
                             Failed to send — tap to retry
                           </button>
                         ) : (
-                          <span className="text-[9px] font-mono text-zinc-500">Sending…</span>
+                          <span className="text-[9px] font-mono text-slate-500">Sending…</span>
                         )}
                       </div>
                     ))}
@@ -672,14 +670,14 @@ export function RbtStaffCommunicationView() {
                 <div ref={bottomRef} />
               </div>
 
-              <div className="relative p-3 border-t border-white/10 bg-zinc-900/90 backdrop-blur-xl">
+              <div className="relative p-3 border-t border-[#E2D5B7] bg-[#FFFDF8]">
                 {showPlus && (
-                  <div className="absolute bottom-[68px] left-3 w-56 rounded-2xl border border-white/15 bg-zinc-950/95 backdrop-blur-2xl shadow-2xl p-2 space-y-1 z-20 animate-fade-in">
+                  <div className="absolute bottom-[68px] left-3 w-56 rounded-2xl border border-[#E2D5B7] bg-[#FFFDF8] shadow-2xl p-2 space-y-1 z-20 animate-fade-in">
                     <button
                       type="button"
                       onClick={requestCall}
                       disabled={isPending}
-                      className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-left text-[11px] font-bold text-zinc-200 hover:bg-white/10 cursor-pointer disabled:cursor-not-allowed"
+                      className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-left text-[11px] font-bold text-slate-800 hover:bg-orange-50 cursor-pointer disabled:cursor-not-allowed"
                     >
                       <Video className="w-4 h-4 text-[#F97316]" />
                       Request Instant Call
@@ -688,15 +686,15 @@ export function RbtStaffCommunicationView() {
                       type="button"
                       onClick={() => fileRef.current?.click()}
                       disabled={isPending}
-                      className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-left text-[11px] font-bold text-zinc-200 hover:bg-white/10 cursor-pointer disabled:cursor-not-allowed"
+                      className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-left text-[11px] font-bold text-slate-800 hover:bg-orange-50 cursor-pointer disabled:cursor-not-allowed"
                     >
-                      <Paperclip className="w-4 h-4 text-sky-400" />
+                      <Paperclip className="w-4 h-4 text-sky-600" />
                       Upload PDF / Document
                     </button>
                     <button
                       type="button"
                       onClick={() => setShowPlus(false)}
-                      className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-left text-[11px] font-bold text-zinc-500 hover:bg-white/5 cursor-pointer"
+                      className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-left text-[11px] font-bold text-slate-500 hover:bg-slate-100 cursor-pointer"
                     >
                       <X className="w-4 h-4" />
                       Close
@@ -720,7 +718,7 @@ export function RbtStaffCommunicationView() {
                   <button
                     type="button"
                     onClick={() => setShowPlus((v) => !v)}
-                    className="w-10 h-10 rounded-2xl bg-[#F97316]/20 border border-[#F97316]/40 text-[#F97316] flex items-center justify-center hover:bg-[#F97316]/30 cursor-pointer shrink-0 shadow-[0_0_16px_rgba(249,115,22,0.25)]"
+                    className="w-10 h-10 rounded-2xl bg-orange-100 border border-orange-200 text-[#F97316] flex items-center justify-center hover:bg-orange-200 cursor-pointer shrink-0 shadow-sm"
                     title="Attachments & call"
                   >
                     <Plus className="w-5 h-5" />
@@ -734,7 +732,7 @@ export function RbtStaffCommunicationView() {
                     }}
                     rows={1}
                     placeholder={`Message ${selected.name.split(',')[0]}…`}
-                    className="flex-1 resize-none rounded-2xl bg-zinc-950 border border-white/10 px-3.5 py-2.5 text-xs text-white placeholder:text-zinc-500 outline-none focus:border-[#F97316]/50 max-h-[120px]"
+                    className="flex-1 resize-none rounded-2xl bg-[#F9F5EC] border border-[#E2D5B7] px-3.5 py-2.5 text-xs text-slate-900 placeholder:text-slate-400 outline-none focus:bg-white focus:border-[#F97316]/50 max-h-[120px]"
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();
@@ -745,13 +743,13 @@ export function RbtStaffCommunicationView() {
                   <button
                     type="submit"
                     disabled={!draft.trim() || isPending}
-                    className="w-10 h-10 rounded-2xl bg-[#F97316] hover:bg-orange-600 disabled:opacity-40 disabled:cursor-not-allowed text-white flex items-center justify-center cursor-pointer shrink-0"
+                    className="w-10 h-10 rounded-2xl bg-[#F97316] hover:bg-orange-600 disabled:opacity-40 disabled:cursor-not-allowed text-white flex items-center justify-center cursor-pointer shrink-0 shadow-sm"
                   >
                     <Send className="w-4 h-4" />
                   </button>
                 </form>
-                <p className="text-[9px] text-zinc-500 mt-2 flex items-center gap-1">
-                  <CheckCircle2 className="w-3 h-3 text-emerald-500" />
+                <p className="text-[9px] text-slate-500 mt-2 flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3 text-emerald-600" />
                   Keep PHI minimal — use initials and case codes when possible.
                 </p>
               </div>

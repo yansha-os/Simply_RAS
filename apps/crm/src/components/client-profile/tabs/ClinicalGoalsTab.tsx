@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState, useTransition } from 'react';
+import type { ClientStatus } from '@prisma/client';
 import {
   Target,
   Activity,
@@ -27,13 +28,13 @@ import {
   type ClinicalGoalStatus,
   type ClinicalGoalsSnapshot,
   type SkillTargetStatus,
+  type SessionStudioSyncStatus,
+  type StudioSkillTargetRow,
 } from '@/lib/clinicalGoals';
 import {
   getSessionStudioSyncStatus,
   syncTreatmentPlanTargetsToSessionStudio,
   updateSkillTargetStatus,
-  type SessionStudioSyncStatus,
-  type StudioSkillTargetRow,
 } from '@/app/actions/clinicalGoalsActions';
 
 function statusBadge(status: ClinicalGoalStatus) {
@@ -268,7 +269,7 @@ export default function ClinicalGoalsTab({
   client,
   onOpenTreatmentPlan,
 }: {
-  client: any;
+  client: { id: string; status: ClientStatus; treatmentPlan: unknown };
   onOpenTreatmentPlan?: () => void;
 }) {
   const [isSyncing, startSync] = useTransition();
@@ -277,8 +278,8 @@ export default function ClinicalGoalsTab({
   const [lastSyncSummary, setLastSyncSummary] = useState<string | null>(null);
 
   const snapshot: ClinicalGoalsSnapshot = useMemo(
-    () => parseClinicalGoalsFromTreatmentPlan(client?.treatmentPlan),
-    [client?.treatmentPlan],
+    () => parseClinicalGoalsFromTreatmentPlan(client.treatmentPlan),
+    [client.treatmentPlan],
   );
 
   const skillsByDomain = useMemo(() => {
@@ -289,7 +290,7 @@ export default function ClinicalGoalsTab({
       map.get(key)!.push(g);
     }
     return Array.from(map.entries());
-  }, [snapshot.skillGoals]);
+  }, [snapshot]);
 
   const hasAnyTargets =
     snapshot.skillGoals.length > 0 ||
@@ -343,10 +344,6 @@ export default function ClinicalGoalsTab({
       !snapshot.planStatus);
 
   const refreshStudioStatus = async () => {
-    if (!client?.id) {
-      setStudioLoading(false);
-      return;
-    }
     setStudioLoading(true);
     const res = await getSessionStudioSyncStatus(client.id);
     if (res.success) {
@@ -356,12 +353,19 @@ export default function ClinicalGoalsTab({
   };
 
   useEffect(() => {
-    void refreshStudioStatus();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- load once per client
-  }, [client?.id]);
+    let cancelled = false;
+    void getSessionStudioSyncStatus(client.id).then((res) => {
+      if (cancelled) return;
+      if (res.success) setStudioSync(res.data);
+      setStudioLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [client.id]);
 
   const handleSyncToSessionStudio = () => {
-    if (!client?.id || isSyncing) return;
+    if (isSyncing) return;
     startSync(async () => {
       const res = await syncTreatmentPlanTargetsToSessionStudio(client.id);
       if (!res.success) {
@@ -382,7 +386,7 @@ export default function ClinicalGoalsTab({
   const [statusPendingId, setStatusPendingId] = useState<string | null>(null);
 
   const handleTargetStatusChange = async (targetId: string, status: SkillTargetStatus) => {
-    if (!client?.id || statusPendingId) return;
+    if (statusPendingId) return;
     setStatusPendingId(targetId);
     const res = await updateSkillTargetStatus(client.id, targetId, status);
     if (!res.success) {
@@ -479,6 +483,17 @@ export default function ClinicalGoalsTab({
             )}
           </div>
         </div>
+
+        {client.status === 'ACTIVE' && !studioLoading && durableTotal === 0 && canSyncStudio && (
+          <div className="mt-4 flex items-start gap-3 rounded-xl border border-amber-500/25 bg-amber-500/10 px-4 py-3">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+            <div className="text-xs leading-relaxed text-amber-100/90">
+              <span className="font-semibold text-amber-300">ACTIVE sandbox client:</span> sync
+              treatment-plan goals to durable SkillTargets before Session Studio claim-ready submit.
+              Dev demo targets (t1/b1…) are blocked on ACTIVE clients by pilot hygiene guards.
+            </div>
+          </div>
+        )}
 
         {/* TP counts */}
         <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">

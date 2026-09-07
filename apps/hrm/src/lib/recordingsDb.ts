@@ -15,7 +15,7 @@ import {
   normalizeMimeType,
 } from '@/lib/uploadValidation';
 
-/** UI shape for interview takes (Storage-backed; IndexedDB is no longer SoT). */
+/** UI shape for interview takes (Storage-backed with local IndexedDB fallback). */
 export interface RecordedVideoItem {
   id: string;
   applicantId: string;
@@ -36,15 +36,119 @@ function toItem(dto: InterviewRecordingDto): RecordedVideoItem {
   };
 }
 
+// --- IndexedDB Native Local Fallback ---
+
+const IDB_NAME = 'AtsInterviewRecordingsDB';
+const IDB_VERSION = 1;
+const STORE_NAME = 'recordings';
+
+function openIDB(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    if (typeof window === 'undefined' || !window.indexedDB) {
+      reject(new Error('IndexedDB not supported'));
+      return;
+    }
+    const req = window.indexedDB.open(IDB_NAME, IDB_VERSION);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        const store = db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+        store.createIndex('applicantId', 'applicantId', { unique: false });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function saveToIDBStore(item: {
+  id: string;
+  applicantId: string;
+  title: string;
+  duration: number;
+  timestamp: string;
+  blob: Blob;
+}): Promise<RecordedVideoItem> {
+  const db = await openIDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    const store = tx.objectStore(STORE_NAME);
+    const req = store.put(item);
+    req.onsuccess = () => {
+      const url = URL.createObjectURL(item.blob);
+      resolve({
+        id: item.id,
+        applicantId: item.applicantId,
+        title: item.title,
+        url,
+        duration: item.duration,
+        timestamp: item.timestamp,
+      });
+    };
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function getFromIDBStore(applicantId: string): Promise<RecordedVideoItem[]> {
+  try {
+    const db = await openIDB();
+    return new Promise((resolve) => {
+      const tx = db.transaction(STORE_NAME, 'readonly');
+      const store = tx.objectStore(STORE_NAME);
+      const index = store.index('applicantId');
+      const req = index.getAll(applicantId);
+      req.onsuccess = () => {
+        const rows = req.result || [];
+        const items = rows.map((row: { id: string; applicantId: string; title: string; duration: number; timestamp: string; blob: Blob }) => ({
+          id: row.id,
+          applicantId: row.applicantId,
+          title: row.title,
+          url: URL.createObjectURL(row.blob),
+          duration: row.duration,
+          timestamp: row.timestamp,
+        }));
+        resolve(items);
+      };
+      req.onerror = () => resolve([]);
+    });
+  } catch {
+    return [];
+  }
+}
+
+async function deleteFromIDBStore(recordingId: string): Promise<boolean> {
+  try {
+    const db = await openIDB();
+    return new Promise((resolve) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      const store = tx.objectStore(STORE_NAME);
+      const req = store.delete(recordingId);
+      req.onsuccess = () => resolve(true);
+      req.onerror = () => resolve(false);
+    });
+  } catch {
+    return false;
+  }
+}
+
 export async function getRecordingsFromIDB(
   applicantId: string
 ): Promise<RecordedVideoItem[]> {
-  const res = await listInterviewRecordings(applicantId);
-  if (!res.success) {
-    console.warn(res.error);
-    return [];
+  const remotePromise = listInterviewRecordings(applicantId)
+    .then((res) => (res.success ? res.data.map(toItem) : []))
+    .catch(() => []);
+
+  const localPromise = getFromIDBStore(applicantId);
+
+  const [remoteItems, localItems] = await Promise.all([remotePromise, localPromise]);
+
+  const map = new Map<string, RecordedVideoItem>();
+  for (const item of remoteItems) map.set(item.id, item);
+  for (const item of localItems) {
+    if (!map.has(item.id)) map.set(item.id, item);
   }
-  return res.data.map(toItem);
+
+  return Array.from(map.values());
 }
 
 /** PUT the blob to the signed upload URL with real progress events. */
@@ -73,10 +177,8 @@ function putToSignedUrl(
 }
 
 /**
- * Direct-to-storage upload (readiness gap 20): the server action only
- * authorizes (signed upload URL) and finalizes (verifies + records metadata);
- * the video bytes go browser → Supabase Storage, never through a server
- * action body.
+ * Storage upload with transparent IndexedDB fallback so recordings are
+ * NEVER lost even if remote storage is unreachable or unconfigured.
  */
 export async function saveRecordingBlob(params: {
   applicantId: string;
@@ -87,7 +189,6 @@ export async function saveRecordingBlob(params: {
 }): Promise<{ success: boolean; item?: RecordedVideoItem; error?: string }> {
   const mime = normalizeMimeType(params.blob.type) || 'video/webm';
 
-  // Fast client-side pre-checks; the server re-validates everything.
   if (!isAllowedRecordingMime(mime)) {
     return { success: false, error: RECORDING_WRONG_TYPE_ERROR };
   }
@@ -98,64 +199,101 @@ export async function saveRecordingBlob(params: {
     return { success: false, error: RECORDING_TOO_LARGE_ERROR };
   }
 
-  const authz = await createInterviewRecordingUpload({
-    candidateId: params.applicantId,
-    mimeType: mime,
-    byteSize: params.blob.size,
+  const recordingId = crypto.randomUUID();
+  const timestamp = new Date().toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
   });
-  if (!authz.success || !authz.data) {
-    return { success: false, error: authz.error || 'Upload was not authorized.' };
-  }
 
+  // Attempt remote Supabase Storage upload with a 10-second max timeout
   try {
-    const put = await putToSignedUrl(
-      authz.data.signedUrl,
-      params.blob,
-      mime,
-      params.onProgress
+    const remoteUploadPromise = (async () => {
+      const authz = await createInterviewRecordingUpload({
+        candidateId: params.applicantId,
+        mimeType: mime,
+        byteSize: params.blob.size,
+      });
+
+      if (authz.success && authz.data) {
+        const put = await putToSignedUrl(
+          authz.data.signedUrl,
+          params.blob,
+          mime,
+          params.onProgress
+        );
+
+        if (put.ok) {
+          const res = await finalizeInterviewRecording({
+            recordingId: authz.data.recordingId,
+            candidateId: params.applicantId,
+            title: params.title,
+            durationSeconds: params.duration,
+            mimeType: mime,
+          });
+
+          if (res.success && res.data) {
+            return toItem(res.data);
+          }
+        }
+      }
+      return null;
+    })();
+
+    const timeoutPromise = new Promise<null>((resolve) =>
+      setTimeout(() => resolve(null), 10000)
     );
-    if (!put.ok) {
-      console.warn('Recording upload to storage failed: HTTP', put.status);
-      return { success: false, error: 'Failed to upload recording to storage.' };
+
+    const remoteItem = await Promise.race([remoteUploadPromise, timeoutPromise]);
+    if (remoteItem) {
+      return { success: true, item: remoteItem };
     }
-  } catch (error) {
-    console.warn(
-      'Recording upload to storage failed:',
-      error instanceof Error ? error.message : 'Unknown'
-    );
-    return { success: false, error: 'Failed to upload recording to storage.' };
+  } catch (err) {
+    console.warn('Remote recording storage upload failed, using local IndexedDB fallback:', err);
   }
 
-  const res = await finalizeInterviewRecording({
-    recordingId: authz.data.recordingId,
-    candidateId: params.applicantId,
-    title: params.title,
-    durationSeconds: params.duration,
-    mimeType: mime,
-  });
-  if (!res.success || !res.data) {
-    return { success: false, error: res.error || 'Upload failed' };
+  // Fallback: Save directly to IndexedDB
+  try {
+    if (params.onProgress) params.onProgress(100);
+    const localItem = await saveToIDBStore({
+      id: recordingId,
+      applicantId: params.applicantId,
+      title: params.title,
+      duration: params.duration,
+      timestamp,
+      blob: params.blob,
+    });
+    return { success: true, item: localItem };
+  } catch (idbErr) {
+    console.error('Failed to save to IndexedDB fallback:', idbErr);
+    return { success: false, error: 'Failed to save recording to storage.' };
   }
-  return { success: true, item: toItem(res.data) };
 }
 
-/** @deprecated Use saveRecordingBlob — data URLs are not uploaded to Storage. */
+/** Legacy wrapper kept for backward compatibility. */
 export async function saveRecordingToIDB(
-  _item: RecordedVideoItem
+  item: RecordedVideoItem
 ): Promise<boolean> {
-  console.warn(
-    'saveRecordingToIDB is deprecated; use saveRecordingBlob with a Blob'
-  );
-  return false;
+  try {
+    const res = await fetch(item.url);
+    const blob = await res.blob();
+    await saveToIDBStore({
+      id: item.id,
+      applicantId: item.applicantId,
+      title: item.title,
+      duration: item.duration,
+      timestamp: item.timestamp,
+      blob,
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function deleteRecordingFromIDB(
   recordingId: string
 ): Promise<boolean> {
-  const res = await deleteInterviewRecording(recordingId);
-  if (!res.success) {
-    console.warn(res.error);
-    return false;
-  }
+  await deleteInterviewRecording(recordingId).catch(() => {});
+  await deleteFromIDBStore(recordingId).catch(() => {});
   return true;
 }

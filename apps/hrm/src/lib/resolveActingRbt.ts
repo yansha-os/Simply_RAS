@@ -58,10 +58,20 @@ export async function resolveActingRbtContext(): Promise<ActingRbtContext> {
 
   // A fingerprint-valid hired device session is authoritative for RBT identity.
   if (sessionCandidate?.stage === 'HIRED' && sessionCandidate.userId) {
-    return {
-      candidateId: sessionCandidate.id,
-      rbtUserId: sessionCandidate.userId,
-    };
+    const activeRbt = await prisma.user.findFirst({
+      where: {
+        id: sessionCandidate.userId,
+        role: 'RBT',
+        isActive: true,
+      },
+      select: { id: true },
+    });
+    if (activeRbt) {
+      return {
+        candidateId: sessionCandidate.id,
+        rbtUserId: activeRbt.id,
+      };
+    }
   }
 
   const user = await getCurrentUser();
@@ -102,7 +112,7 @@ export async function resolveActingRbtContext(): Promise<ActingRbtContext> {
   }
 
   // True applicant path: keep device-session candidate, no staff User yet
-  if (sessionCandidate) {
+  if (sessionCandidate && sessionCandidate.stage !== 'HIRED') {
     return {
       candidateId: sessionCandidate.id,
       rbtUserId: null,

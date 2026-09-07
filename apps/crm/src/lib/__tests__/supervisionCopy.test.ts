@@ -8,7 +8,7 @@ const auditedSurfacePaths = [
   'apps/crm/src/components/client-profile/ClientProfileTabs.tsx',
   'apps/crm/src/components/magic-link/ClientPortalView.tsx',
   'apps/crm/src/components/magic-link/Form02Consent.tsx',
-  'apps/crm/src/components/portal-billing/BillingPaQueue.tsx',
+  'apps/crm/src/components/portal-billing/BillingDashboard.tsx',
   'apps/crm/src/components/public-rbt/RbtPublicLanding.tsx',
   'apps/crm/src/lib/pdf/treatmentPlanReportModel.ts',
   'apps/hrm/src/components/public-rbt/RbtPublicLanding.tsx',
@@ -86,7 +86,7 @@ describe('supervision and CPT 97155 surface copy', () => {
     ).toContain('adaptive behavior treatment with protocol modification by a qualified clinician');
 
     expect(
-      surfaceSource['apps/crm/src/components/portal-billing/BillingPaQueue.tsx']
+      surfaceSource['apps/crm/src/components/portal-billing/BillingDashboard.tsx']
     ).toContain("label: 'Protocol mod · qualified clinician'");
 
     for (const reportModelPath of [

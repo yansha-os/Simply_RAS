@@ -30,6 +30,10 @@ export async function login(prevState: { error?: string } | null, formData: Form
     return { error: 'Password is required.' };
   }
 
+  if (email.length > 254 || password.length > 1_024) {
+    return { error: 'Invalid email or password.' };
+  }
+
   // DEV-ONLY: email-pattern shortcuts for local portal testing. Gated behind
   // isDevToolsEnabled() (non-prod NODE_ENV + explicit flag, with a boot-time
   // assert that kills a misconfigured prod build). In a prod-configured env
@@ -43,9 +47,21 @@ export async function login(prevState: { error?: string } | null, formData: Form
       revalidatePath('/', 'layout');
       redirect(hrmUrl('/ats'));
     }
-    if (email.includes('payroll@') || email.includes('finance')) {
+    if (email.includes('payroll@')) {
       revalidatePath('/', 'layout');
       redirect(hrmUrl('/payroll'));
+    }
+    if (email.includes('intake@') || email.includes('intake_pa')) {
+      revalidatePath('/', 'layout');
+      redirect('/portal-case');
+    }
+    if (email.includes('finance@') || email.includes('billing@')) {
+      revalidatePath('/', 'layout');
+      redirect('/portal-billing');
+    }
+    if (email.includes('notes@') || email.includes('session_notes')) {
+      revalidatePath('/', 'layout');
+      redirect('/portal-billing');
     }
     if (email.includes('rbt@')) {
       revalidatePath('/', 'layout');
@@ -131,18 +147,22 @@ function routeByRole(role: string): never {
     case 'RECRUITER':
     case 'ATS':
       redirect(hrmUrl('/ats'));
-    case 'FINANCE':
     case 'PAYROLL':
       redirect(hrmUrl('/payroll'));
+    case 'FINANCE':
+      redirect('/portal-billing');
     case 'RBT':
       redirect('/rbt');
     case 'BCBA':
     case 'CLINICAL_DIRECTOR':
-    case 'CLINICAL_SUPPORT':
       redirect('/portal-clinical');
-    case 'CASE_COORDINATOR':
+    case 'CLINICAL_SUPPORT':
+      redirect('/clinical-support');
     case 'INTAKE_PA_COORDINATOR':
+      redirect('/portal-case');
+    case 'CASE_COORDINATOR':
       redirect('/portal-case-coord');
+    case 'SESSION_NOTES_COORDINATOR':
     case 'BILLING':
       redirect('/portal-billing');
     case 'OPS_DIRECTOR':

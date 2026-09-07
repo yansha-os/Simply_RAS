@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildClinicalSupportQueues,
+  clinicalSupportProfileHref,
   getReportReadiness,
 } from './clinicalSupportWorkflow';
 
@@ -31,6 +32,7 @@ describe('buildClinicalSupportQueues', () => {
       client('assemble', 'ASSESSMENT_SCHEDULED'),
       client('billing', 'REPORT_ASSEMBLED'),
       client('active', 'ACTIVE'),
+      client('intake', 'DOCS_SUBMITTED'),
     ]);
 
     expect(queues.documentReview.map((item) => item.id)).toEqual(['docs']);
@@ -38,6 +40,23 @@ describe('buildClinicalSupportQueues', () => {
     expect(queues.reportAssembly.map((item) => item.id)).toEqual(['assemble']);
     expect(queues.billingHandoff.map((item) => item.id)).toEqual(['billing']);
     expect(queues.total).toBe(4);
+  });
+});
+
+describe('clinicalSupportProfileHref', () => {
+  it('deep-links each queue lane to the matching clinical profile tab', () => {
+    expect(clinicalSupportProfileHref('c1', 'documentReview')).toBe(
+      '/client/c1?mode=clinical&tab=clinical',
+    );
+    expect(clinicalSupportProfileHref('c1', 'assessmentScheduling')).toBe(
+      '/client/c1?mode=clinical&tab=assessment',
+    );
+    expect(clinicalSupportProfileHref('c1', 'reportAssembly')).toBe(
+      '/client/c1?mode=clinical&tab=report',
+    );
+    expect(clinicalSupportProfileHref('c1', 'billingHandoff')).toBe(
+      '/client/c1?mode=clinical&tab=billing_handoff',
+    );
   });
 });
 

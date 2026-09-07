@@ -14,14 +14,12 @@ import {
   Save,
   Search,
   ShieldCheck,
-  Trash2,
   Users,
   X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   createStaffCredential,
-  deleteStaffCredential,
   listActiveStaffCredentials,
   revokeStaffCredential,
   updateStaffCredential,
@@ -130,11 +128,15 @@ export default function StaffCredentialManager({
   const [newCredential, setNewCredential] = useState({
     userId: initialStaff[0]?.id ?? '',
     credentialType: '',
+    credentialNumber: '',
+    payerName: 'ALL_PAYERS',
     expirationDate: '',
   });
   const [editing, setEditing] = useState<{
     id: string;
     credentialType: string;
+    credentialNumber: string;
+    payerName: string;
     expirationDate: string;
   } | null>(null);
 
@@ -201,6 +203,8 @@ export default function StaffCredentialManager({
     const result = await createStaffCredential({
       userId: newCredential.userId,
       credentialType: newCredential.credentialType,
+      credentialNumber: newCredential.credentialNumber || null,
+      payerName: newCredential.payerName || null,
       expirationDate: newCredential.expirationDate || null,
     });
     if (!result.success) {
@@ -213,6 +217,8 @@ export default function StaffCredentialManager({
     setNewCredential((current) => ({
       ...current,
       credentialType: '',
+      credentialNumber: '',
+      payerName: 'ALL_PAYERS',
       expirationDate: '',
     }));
     await refreshStaff({ notify: false });
@@ -227,6 +233,8 @@ export default function StaffCredentialManager({
     const result = await updateStaffCredential({
       id: editing.id,
       credentialType: editing.credentialType,
+      credentialNumber: editing.credentialNumber || null,
+      payerName: editing.payerName || null,
       expirationDate: editing.expirationDate || null,
     });
     if (!result.success) {
@@ -256,26 +264,6 @@ export default function StaffCredentialManager({
     }
 
     toast.success('Credential record revoked.');
-    await refreshStaff({ notify: false });
-    setBusyKey(null);
-  }
-
-  async function handleDelete(credential: CredentialRow) {
-    const confirmed = window.confirm(
-      `Permanently delete the stored ${credential.credentialType} record? This cannot be undone.`,
-    );
-    if (!confirmed) return;
-
-    setBusyKey(`delete:${credential.id}`);
-    const result = await deleteStaffCredential(credential.id);
-    if (!result.success) {
-      toast.error(result.error);
-      setBusyKey(null);
-      return;
-    }
-
-    toast.success('Credential record deleted.');
-    if (editing?.id === credential.id) setEditing(null);
     await refreshStaff({ notify: false });
     setBusyKey(null);
   }
@@ -400,7 +388,7 @@ export default function StaffCredentialManager({
 
         <form
           onSubmit={handleCreate}
-          className="relative grid grid-cols-1 items-end gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,0.8fr)_auto]"
+          className="relative grid grid-cols-1 items-end gap-4 md:grid-cols-2 xl:grid-cols-6"
         >
           <label className="space-y-1.5 text-xs font-bold text-zinc-400">
             Active staff member
@@ -420,6 +408,35 @@ export default function StaffCredentialManager({
                 </option>
               ))}
             </select>
+          </label>
+          <label className="space-y-1.5 text-xs font-bold text-zinc-400">
+            Credential number
+            <input
+              maxLength={100}
+              value={newCredential.credentialNumber}
+              onChange={(event) =>
+                setNewCredential((current) => ({
+                  ...current,
+                  credentialNumber: event.target.value,
+                }))
+              }
+              placeholder="Required for NPI/BACB"
+              className={INPUT_CLASS}
+              disabled={busyKey !== null}
+            />
+          </label>
+          <label className="space-y-1.5 text-xs font-bold text-zinc-400">
+            Payer scope
+            <input
+              maxLength={120}
+              value={newCredential.payerName}
+              onChange={(event) =>
+                setNewCredential((current) => ({ ...current, payerName: event.target.value }))
+              }
+              placeholder="ALL_PAYERS"
+              className={INPUT_CLASS}
+              disabled={busyKey !== null}
+            />
           </label>
           <label className="space-y-1.5 text-xs font-bold text-zinc-400">
             Credential type
@@ -545,14 +562,13 @@ export default function StaffCredentialManager({
                     const state = credentialState(credential, asOfDate);
                     const isUpdating = busyKey === `update:${credential.id}`;
                     const isRevoking = busyKey === `revoke:${credential.id}`;
-                    const isDeleting = busyKey === `delete:${credential.id}`;
 
                     if (editing?.id === credential.id) {
                       return (
                         <form
                           key={credential.id}
                           onSubmit={handleUpdate}
-                          className="grid grid-cols-1 items-end gap-3 bg-brand-orange-500/[0.04] px-5 py-4 md:grid-cols-[minmax(0,1fr)_minmax(0,0.7fr)_auto]"
+                          className="grid grid-cols-1 items-end gap-3 bg-brand-orange-500/[0.04] px-5 py-4 md:grid-cols-2 xl:grid-cols-5"
                         >
                           <label className="space-y-1.5 text-xs font-bold text-zinc-400">
                             Credential type
@@ -566,6 +582,36 @@ export default function StaffCredentialManager({
                                   current
                                     ? { ...current, credentialType: event.target.value }
                                     : current,
+                                )
+                              }
+                              className={INPUT_CLASS}
+                              disabled={busyKey !== null}
+                            />
+                          </label>
+                          <label className="space-y-1.5 text-xs font-bold text-zinc-400">
+                            Credential number
+                            <input
+                              maxLength={100}
+                              value={editing.credentialNumber}
+                              onChange={(event) =>
+                                setEditing((current) =>
+                                  current
+                                    ? { ...current, credentialNumber: event.target.value }
+                                    : current,
+                                )
+                              }
+                              className={INPUT_CLASS}
+                              disabled={busyKey !== null}
+                            />
+                          </label>
+                          <label className="space-y-1.5 text-xs font-bold text-zinc-400">
+                            Payer scope
+                            <input
+                              maxLength={120}
+                              value={editing.payerName}
+                              onChange={(event) =>
+                                setEditing((current) =>
+                                  current ? { ...current, payerName: event.target.value } : current,
                                 )
                               }
                               className={INPUT_CLASS}
@@ -654,6 +700,8 @@ export default function StaffCredentialManager({
                               setEditing({
                                 id: credential.id,
                                 credentialType: credential.credentialType,
+                                credentialNumber: credential.credentialNumber ?? '',
+                                payerName: credential.payerName ?? 'ALL_PAYERS',
                                 expirationDate: credential.expirationDate ?? '',
                               })
                             }
@@ -674,19 +722,6 @@ export default function StaffCredentialManager({
                               <Ban className="h-3.5 w-3.5" />
                             )}
                             Revoke
-                          </button>
-                          <button
-                            type="button"
-                            disabled={busyKey !== null}
-                            onClick={() => void handleDelete(credential)}
-                            className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-xl border border-rose-500/20 bg-rose-500/5 px-3 text-[11px] font-bold text-rose-300 transition-all duration-300 hover:border-rose-500/40 hover:bg-rose-500/10 disabled:cursor-not-allowed disabled:opacity-40"
-                          >
-                            {isDeleting ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            ) : (
-                              <Trash2 className="h-3.5 w-3.5" />
-                            )}
-                            Delete
                           </button>
                         </div>
                       </div>

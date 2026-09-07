@@ -25,14 +25,9 @@ export default async function IntakeClientsPage() {
     orderBy: { updatedAt: 'desc' },
   });
 
-  const coordinators = await prisma.user.findMany({
-    where: { role: 'CASE_COORDINATOR', isActive: true },
-    select: { id: true, firstName: true, lastName: true },
-  });
-
   return (
     <div className="p-8">
-      <IntakeQueue clients={clients} coordinators={coordinators} />
+      <IntakeQueue clients={clients} />
     </div>
   );
 }

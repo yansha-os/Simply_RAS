@@ -46,8 +46,32 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${inter.variable} ${fraunces.variable} ${ibmPlexMono.variable} h-full antialiased dark`}
+      className={`${inter.variable} ${fraunces.variable} ${ibmPlexMono.variable} h-full antialiased`}
+      suppressHydrationWarning
     >
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function() {
+                try {
+                  var m = localStorage.getItem('ras_theme_mode') || 'professional-matte';
+                  var a = localStorage.getItem('ras_theme_accent') || 'orange';
+                  var c = localStorage.getItem('ras_rbt_color_mode') || 'light';
+                  var o = localStorage.getItem('ras_theme_opacity') || '35';
+                  var el = document.documentElement;
+                  el.setAttribute('data-mode', m);
+                  el.setAttribute('data-accent', a);
+                  el.setAttribute('data-color-mode', c);
+                  var isV2 = (m === 'supernova' || m === 'nebula-hyper-drift' || m === 'quantum-matrix' || m === 'synthwave-84' || m === 'aurora-borealis' || m === 'emerald-cyber' || m === 'holographic-prism' || m === 'solar-flare' || m === 'deep-space-void' || m === 'cyberpunk-neon');
+                  el.setAttribute('data-engine', isV2 ? 'v2' : 'v1');
+                  el.style.setProperty('--glass-opacity', (parseInt(o, 10) / 100).toString());
+                } catch (e) {}
+              })();
+            `,
+          }}
+        />
+      </head>
       <body className="min-h-full flex flex-col font-sans bg-[var(--navy-950)] text-[var(--ink-100)] overflow-x-hidden">
         <ThemeProvider>
           <div className="star-layer star-layer-1"></div>

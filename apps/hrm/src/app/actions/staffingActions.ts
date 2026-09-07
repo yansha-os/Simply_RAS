@@ -6,6 +6,9 @@
  * HR focuses on ATS applicant-cycle progress.
  */
 export async function dispatchRbtCandidate(_clientId: string, _rbtCandidateId: string, _candidateName: string) {
+  void _clientId;
+  void _rbtCandidateId;
+  void _candidateName;
   return {
     success: false,
     error:

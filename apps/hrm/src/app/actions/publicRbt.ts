@@ -2,7 +2,37 @@
 
 import { prisma } from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
+import { headers } from 'next/headers';
 import { newMagicLinkExpiry } from '@/lib/magicLinkExpiry';
+import { checkAndRecordPublicApplicationAttempt } from '@/lib/publicApplicationRateLimit';
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function isPrismaUniqueConflict(error: unknown): boolean {
+  return Boolean(
+    error &&
+      typeof error === 'object' &&
+      'code' in error &&
+      error.code === 'P2002'
+  );
+}
+
+function validStringArray(value: unknown, maxItems: number): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length <= maxItems &&
+    value.every((item) => typeof item === 'string' && item.length <= 80)
+  );
+}
+
+async function requestIp(): Promise<string> {
+  const headerStore = await headers();
+  return (
+    headerStore.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+    headerStore.get('x-real-ip') ||
+    'unknown'
+  );
+}
 
 function normalizeApplyZip(raw: string | undefined | null): string | null {
   if (!raw) return null;
@@ -46,8 +76,49 @@ export interface RbtApplicationInput {
 /** Apply creates AtsCandidate only — RBT User is created at hire in HRM. */
 export async function submitRbtApplication(data: RbtApplicationInput) {
   try {
-    if (!data.firstName || !data.lastName || !data.email || !data.phoneNumber) {
+    if (!data || JSON.stringify(data).length > 50_000) {
+      return { success: false, error: 'Application payload is invalid or too large.' };
+    }
+
+    const firstName = String(data.firstName || '').trim();
+    const lastName = String(data.lastName || '').trim();
+    const email = String(data.email || '').toLowerCase().trim();
+    const phoneNumber = String(data.phoneNumber || '').trim();
+    if (
+      !firstName ||
+      firstName.length > 80 ||
+      !lastName ||
+      lastName.length > 80 ||
+      !EMAIL_RE.test(email) ||
+      email.length > 254 ||
+      phoneNumber.length < 7 ||
+      phoneNumber.length > 32
+    ) {
       return { success: false, error: 'Missing required personal information.' };
+    }
+    if (
+      String(data.addressLine1 || '').length > 200 ||
+      String(data.addressLine2 || '').length > 200 ||
+      String(data.city || '').length > 100 ||
+      String(data.state || '').length > 50 ||
+      String(data.zipCode || '').length > 16 ||
+      String(data.additionalNotes || '').length > 4_000 ||
+      (data.languages !== undefined && !validStringArray(data.languages, 20)) ||
+      !validStringArray(data.preferredBoroughs, 10) ||
+      !validStringArray(data.availabilityHours, 7)
+    ) {
+      return { success: false, error: 'Application fields are invalid or too large.' };
+    }
+
+    const rateLimit = checkAndRecordPublicApplicationAttempt(
+      await requestIp(),
+      email
+    );
+    if (!rateLimit.allowed) {
+      return {
+        success: false,
+        error: 'Too many application attempts. Please try again later.',
+      };
     }
 
     if (!data.backgroundCheckConsent) {
@@ -58,20 +129,19 @@ export async function submitRbtApplication(data: RbtApplicationInput) {
       return { success: false, error: 'You must confirm you are 18 or older to apply.' };
     }
 
-    if (data.workAuth === 'No') {
+    if (data.workAuth !== 'Yes') {
       return {
         success: false,
         error: 'US work authorization is required for this role.',
       };
     }
 
-    const email = data.email.toLowerCase().trim();
     const transportation = (data.transportation || '').trim();
     const hasTransportation =
       transportation.length > 0 && !transportation.toLowerCase().startsWith('no');
 
     const dossier = {
-      phoneNumber: data.phoneNumber,
+      phoneNumber,
       addressLine1: data.addressLine1,
       addressLine2: data.addressLine2 || null,
       city: data.city || null,
@@ -115,10 +185,10 @@ export async function submitRbtApplication(data: RbtApplicationInput) {
     const uploadToken = crypto.randomUUID();
     const created = await prisma.atsCandidate.create({
       data: {
-        firstName: data.firstName,
-        lastName: data.lastName,
+        firstName,
+        lastName,
         email,
-        phone: data.phoneNumber,
+        phone: phoneNumber,
         appliedRole: 'RBT',
         stage: 'APPLIED',
         activationStatus: 'PENDING_HR_REVIEW',
@@ -152,12 +222,13 @@ export async function submitRbtApplication(data: RbtApplicationInput) {
       'Error submitting RBT application:',
       error instanceof Error ? error.message : error
     );
-    return {
-      success: false,
-      error:
-        error instanceof Error
-          ? error.message
-          : 'Failed to submit application. Please try again.',
-    };
+    if (isPrismaUniqueConflict(error)) {
+      return {
+        success: true,
+        message:
+          'Application received. If you have already applied, use your existing secure link or contact HR for assistance.',
+      };
+    }
+    return { success: false, error: 'Failed to submit application. Please try again.' };
   }
 }

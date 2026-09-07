@@ -46,7 +46,7 @@ export default async function ClinicalSupportDashboardPage() {
 
   return (
     <div className="p-6 md:p-8">
-      <ClinicalSupportDashboard clients={clients} view="overview" />
+      <ClinicalSupportDashboard clients={clients} />
     </div>
   );
 }

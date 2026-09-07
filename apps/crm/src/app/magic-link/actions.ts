@@ -3,91 +3,24 @@
 import { prisma } from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
 import { requireParentPacketAccess } from '@/lib/magicLinkGuard'
+import { notifyCaseTeam, notifyClient, notifyRoles } from '@/lib/notificationDispatcher'
+import { parsePacketFormData, safeParseJson } from '@/lib/safeParseJson'
+import {
+  isClinicalFamilyCorrectionLoop,
+  packetStatusAfterClinicalCorrectionResubmit,
+  preserveClinicalReviewApprovals,
+} from '@/lib/clinicalReviewApprovals'
+import {
+  evaluateClinicalCorrectionSubmit,
+  evaluatePacketFields,
+} from '@/lib/magicLinkPacketSubmit'
 
-/**
- * Server-side mirror of the ContinuousIntakeForm requirement rules.
- * Flags are derived from what the parent actually filled in / uploaded —
- * nothing is auto-completed (readiness Blocker 3).
- */
-function evaluatePacketFields(formData: Record<string, unknown>) {
-  const has = (key: string) => {
-    const v = formData[key]
-    return v !== undefined && v !== null && String(v).trim() !== ''
-  }
-
-  const form01Required = [
-    'childName', 'dob', 'sexAtBirth', 'primaryLang', 'elopement',
-    'g1Name', 'g1Phone', 'g1Email', 'g1ContactPref',
-    'custodyType', 'custodyDocAttached',
-    'priInsCompany', 'priInsMemberId', 'hasSecondPlan', 'hasMedicaid',
-    'hasDiagnosis', 'hasReferral', 'hasPriorABA', 'hasIEP',
-    'prefLocation', 'em1Name', 'em1Phone', 'emPermission',
-    'attestationAgree', 'attestationName', 'attestationDate',
-  ]
-  if (!has('childLivesWithParents')) form01Required.push('childAddress')
-  if (formData['hasMedicaid'] === 'Yes') form01Required.push('medicaidMCO')
-  if (formData['hasDiagnosis'] === 'Yes') {
-    form01Required.push('dxInitialDate', 'dxRecentDate', 'dxProviderName', 'dxPracticeName')
-  }
-  if (formData['hasReferral'] === 'Yes') {
-    form01Required.push('referralProvider', 'referralDate', 'referralExpires')
-    if (formData['referralExpires'] === 'Yes') form01Required.push('referralExpDate')
-  }
-  if (formData['prefLocation'] === 'Home') form01Required.push('quietSpace', 'hasPets', 'othersHome')
-
-  const form02Required = [
-    'sig1Name',
-    'cpt97151', 'cpt97153', 'cpt97155', 'cpt97156', 'cpt97154',
-    'locHome', 'locClinic', 'locCommunity', 'locSchool',
-    'mediaClinical', 'mediaTraining', 'mediaPhotos', 'mediaMarketing', 'mediaObservation',
-    'hipaaAck', 'phiInsurance', 'phiBilling', 'phiPcp', 'phiDiagnosing', 'phiSchool', 'phiOtherTherapies',
-    'aobInitial', 'attendanceInitial',
-    'commPhone', 'commSms', 'commEmail', 'commPortal',
-    'emergencyInitial', 'eSignInitial',
-  ]
-
-  const missingForm01 = form01Required.filter((f) => !has(f))
-  const missingForm02 = form02Required.filter((f) => !has(f))
-  if (!has('telehealthConsent') && !has('telehealthDecline')) {
-    missingForm02.push('telehealthConsent/telehealthDecline')
-  }
-
-  const hasMedicaid =
-    has('hasMedicaid') && formData['hasMedicaid'] !== 'No' && formData['hasMedicaid'] !== 'Not Sure'
-  const hasCustodyDoc =
-    formData['custodyDocAttached'] === 'Yes — Attached' ||
-    formData['custodyDocAttached'] === 'Yes — Will Provide'
-  const hasIEP = formData['hasIEP'] === 'Yes — Attached' || formData['hasIEP'] === 'Yes — Will Provide'
-  const hasPriorABA = formData['hasPriorABA'] === 'Yes'
-
-  const requiredDocs = ['docInsuranceFront', 'docInsuranceBack', 'docEval', 'docReferral']
-  if (hasMedicaid) requiredDocs.push('docMedicaidFront', 'docMedicaidBack')
-  if (hasIEP) requiredDocs.push('docIEP')
-  if (hasCustodyDoc) requiredDocs.push('docCustody')
-  if (hasPriorABA) requiredDocs.push('docPriorABA')
-
-  const missingDocs = requiredDocs.filter((d) => !has(d))
-
-  return {
-    complete: missingForm01.length === 0 && missingForm02.length === 0 && missingDocs.length === 0,
-    missingForm01,
-    missingForm02,
-    missingDocs,
-    // Per-document flags derived from actual uploads
-    docFlags: {
-      intakeFormComplete: missingForm01.length === 0,
-      consentFormComplete: missingForm02.length === 0,
-      insuranceCardFrontUploaded: has('docInsuranceFront'),
-      insuranceCardBackUploaded: has('docInsuranceBack'),
-      medicaidCardFrontUploaded: has('docMedicaidFront'),
-      medicaidCardBackUploaded: has('docMedicaidBack'),
-      diagnosticEvalUploaded: has('docEval'),
-      physicianRxUploaded: has('docReferral'),
-      iepUploaded: has('docIEP'),
-      custodyDocsUploaded: has('docCustody'),
-      priorAbaRecordsUploaded: has('docPriorABA'),
-    },
-  }
+function parseRejectionDetails(raw: unknown): Record<string, string> {
+  const parsed = safeParseJson<unknown>(raw, {})
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+  return Object.fromEntries(
+    Object.entries(parsed).filter(([, value]) => typeof value === 'string'),
+  )
 }
 
 export type SubmitMagicLinkPacketResult =
@@ -105,8 +38,10 @@ export type SubmitMagicLinkPacketResult =
  * to this device, and validates every required field/document server-side —
  * the old prototype that auto-checked all items is gone.
  *
- * On resubmit after staff rejections, rejectionDetails is wiped and the
- * packet returns to SUBMITTED (intake-workflow-map rejection loop step 3).
+ * On resubmit after Intake rejections, rejectionDetails is wiped and the
+ * packet returns to SUBMITTED. Clinical Support corrections stay APPROVED
+ * on the CSS desk — Intake is not notified and does not re-review.
+ * CSS correction submits only require the flagged document/field keys.
  */
 export async function submitMagicLinkPacket(
   packetId: string,
@@ -118,27 +53,38 @@ export async function submitMagicLinkPacket(
   const packet = await prisma.intakePacket.findUnique({
     where: { id: gate.packetId },
   })
-  if (!packet) return { success: false, error: 'Intake packet not found.' }
-  if (packet.status !== 'PENDING_CLIENT_SUBMISSION') {
+  if (!packet || packet.clientId !== gate.clientId) {
+    return { success: false, error: 'Intake packet not found.' }
+  }
+
+  const client = await prisma.client.findUnique({ where: { id: packet.clientId } })
+  const rejectionDetails = parseRejectionDetails(packet.rejectionDetails)
+  const clinicalCorrectionLoop = isClinicalFamilyCorrectionLoop({
+    clientStatus: client?.status ?? '',
+    packetStatus: packet.status,
+    rejectionDetails,
+  })
+
+  if (packet.status !== 'PENDING_CLIENT_SUBMISSION' && !clinicalCorrectionLoop) {
     return {
       success: false,
       error: 'This packet has already been submitted and is with our team for review.',
     }
   }
 
-  let parsed: Record<string, unknown> = {}
-  if (formData && typeof formData === 'object') {
-    parsed = formData
-  } else {
-    try {
-      const raw = typeof packet.formData === 'string' ? JSON.parse(packet.formData) : packet.formData || {}
-      parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
-    } catch {
-      parsed = {}
-    }
-  }
+  const existingFormData = parsePacketFormData(packet.formData)
+  const parsed: Record<string, unknown> =
+    formData && typeof formData === 'object' ? formData : existingFormData
+  const persistedFormData = formData
+    ? preserveClinicalReviewApprovals(
+        { ...existingFormData, ...parsed },
+        existingFormData,
+      )
+    : existingFormData
 
-  const evaluation = evaluatePacketFields(parsed)
+  const evaluation = clinicalCorrectionLoop
+    ? evaluateClinicalCorrectionSubmit(persistedFormData, rejectionDetails)
+    : evaluatePacketFields(parsed)
   if (!evaluation.complete) {
     const missingCount =
       evaluation.missingForm01.length +
@@ -146,7 +92,9 @@ export async function submitMagicLinkPacket(
       evaluation.missingDocs.length
     return {
       success: false,
-      error: `Almost there — ${missingCount} required item${missingCount === 1 ? ' is' : 's are'} still missing. Please finish the intake form, consents, and document uploads, then submit again.`,
+      error: clinicalCorrectionLoop
+        ? `Please upload the ${missingCount} document${missingCount === 1 ? '' : 's'} Clinical Support asked you to replace, then submit again.`
+        : `Almost there — ${missingCount} required item${missingCount === 1 ? ' is' : 's are'} still missing. Please finish the intake form, consents, and document uploads, then submit again.`,
       missingForm01: evaluation.missingForm01,
       missingForm02: evaluation.missingForm02,
       missingDocs: evaluation.missingDocs,
@@ -154,28 +102,92 @@ export async function submitMagicLinkPacket(
   }
 
   try {
-    await prisma.intakePacket.update({
-      where: { id: packet.id },
+    const nextPacketStatus = packetStatusAfterClinicalCorrectionResubmit(
+      client?.status ?? '',
+    )
+    const allowedPacketStatuses = clinicalCorrectionLoop
+      ? (['APPROVED', 'PENDING_CLIENT_SUBMISSION'] as const)
+      : (['PENDING_CLIENT_SUBMISSION'] as const)
+    const docFlagUpdates = clinicalCorrectionLoop
+      ? (evaluation.flaggedDocFlags ?? {})
+      : evaluation.docFlags
+
+    const updateRes = await prisma.intakePacket.updateMany({
+      where: {
+        id: packet.id,
+        clientId: gate.clientId,
+        status: { in: [...allowedPacketStatuses] },
+      },
       data: {
-        // Persist the exact snapshot that passed validation when provided.
-        ...(formData ? { formData: JSON.stringify(parsed) } : {}),
-        status: 'SUBMITTED',
-        rejectionDetails: {},
-        ...evaluation.docFlags,
+        ...(formData
+          ? { formData: JSON.stringify(persistedFormData) }
+          : {}),
+        status: nextPacketStatus,
+        // Intake resubmits clear flags so coordinators re-review the packet.
+        // Clinical corrections keep per-document rejection flags until CSS re-approves
+        // and only flip the re-uploaded document boolean(s) back to true.
+        ...(clinicalCorrectionLoop ? {} : { rejectionDetails: {} }),
+        ...docFlagUpdates,
       },
     })
 
-    const client = await prisma.client.findUnique({ where: { id: packet.clientId } })
-    if (client && (client.status === 'MAGIC_LINK_SENT' || client.status === 'INQUIRY')) {
-      await prisma.client.update({
-        where: { id: packet.clientId },
-        data: { status: 'DOCS_SUBMITTED' },
-      })
+    if (updateRes.count === 0) {
+      return {
+        success: false,
+        error: 'This packet has already been submitted and is with our team for review.',
+      }
+    }
+
+    if (client) {
+      if (client.status === 'MAGIC_LINK_SENT' || client.status === 'INQUIRY') {
+        await prisma.client.updateMany({
+          where: {
+            id: packet.clientId,
+            status: { in: ['MAGIC_LINK_SENT', 'INQUIRY'] },
+          },
+          data: { status: 'DOCS_SUBMITTED' },
+        })
+      }
+
+      if (clinicalCorrectionLoop) {
+        await notifyRoles(['CLINICAL_SUPPORT'], {
+          title: `Updated clinical document for ${client.firstName} ${client.lastName}`,
+          message:
+            'The family re-uploaded a document flagged by Clinical Support. Preview the new file and re-approve it — this case stayed on the Clinical Support queue.',
+          type: 'INFO',
+          linkUrl: `/client/${packet.clientId}?mode=clinical&tab=clinical`,
+        }).catch(() => {})
+
+        await notifyClient(packet.clientId, {
+          title: 'Updated document received',
+          message:
+            'We received your updated document. Clinical Support will review it next. You do not need to wait for Intake.',
+          type: 'ALERT',
+        }).catch(() => {})
+      } else {
+        await notifyCaseTeam(
+          packet.clientId,
+          {
+            title: `Intake packet submitted for ${client.firstName} ${client.lastName}`,
+            message: 'The family has submitted all required intake forms, consents, and insurance documents for verification.',
+            type: 'INFO',
+            linkUrl: `/client/${packet.clientId}?tab=intake`,
+          },
+          true
+        ).catch(() => {})
+
+        await notifyClient(packet.clientId, {
+          title: 'Intake packet received',
+          message: 'Your intake packet and documents have been successfully submitted. Our intake team is reviewing them now.',
+          type: 'ALERT',
+        }).catch(() => {})
+      }
     }
 
     revalidatePath('/', 'layout')
     revalidatePath(`/client/${packet.clientId}`)
     revalidatePath('/portal-case/clients')
+    revalidatePath('/clinical-support/clients')
   } catch (error) {
     console.error(
       'submitMagicLinkPacket failed:',

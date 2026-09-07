@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -21,6 +21,8 @@ import {
   clinicWallClockToUtc,
 } from '@/lib/clinicTimezone';
 import { statusIndex } from '@/lib/clientStatusGates';
+import { getClientAssessmentSchedule } from '@/app/actions/assessmentScheduleActions';
+import { AssessmentProgressPreview } from './AssessmentProgressPreview';
 
 type BcbaAssessmentClient = {
   id: string;
@@ -31,12 +33,20 @@ type BcbaAssessmentClient = {
 
 type AssessmentPhase = 'locked' | 'ready' | 'scheduled' | 'reconcile';
 
+export type AssessmentScheduleSources = {
+  sessionId?: string | null;
+  sessionScheduledStart?: string | null;
+  treatmentPlanScheduledAt?: string | null;
+  hasDurableSession?: boolean;
+};
+
 export type AssessmentState = {
   phase: AssessmentPhase;
   canSchedule: boolean;
   assessmentAt: Date | null;
-  dateIssue: 'missing' | 'invalid' | null;
+  dateIssue: 'missing' | 'invalid' | 'mismatch' | null;
   hasReachedAssessmentStage: boolean;
+  durableSessionId: string | null;
 };
 
 const ASSESSMENT_SCHEDULED_INDEX = statusIndex('ASSESSMENT_SCHEDULED');
@@ -70,44 +80,64 @@ function readTreatmentPlan(raw: unknown): Record<string, unknown> {
     : {};
 }
 
+function parseScheduleInstant(raw: unknown): Date | null {
+  if (raw == null || String(raw).trim() === '') return null;
+  if (raw instanceof Date) {
+    return Number.isNaN(raw.getTime()) ? null : new Date(raw.getTime());
+  }
+  const candidate = new Date(String(raw));
+  return Number.isNaN(candidate.getTime()) ? null : candidate;
+}
+
 export function deriveAssessmentState(
-  client: Pick<BcbaAssessmentClient, 'status' | 'treatmentPlan'>
+  client: Pick<BcbaAssessmentClient, 'status' | 'treatmentPlan'>,
+  sources?: AssessmentScheduleSources | null,
 ): AssessmentState {
   const plan = readTreatmentPlan(client.treatmentPlan);
-  const rawAssessmentAt = plan.assessmentScheduledAt;
-  const hasSavedDateValue =
-    rawAssessmentAt !== null &&
-    rawAssessmentAt !== undefined &&
-    String(rawAssessmentAt).trim().length > 0;
+  const rawPlanAt = plan.assessmentScheduledAt;
+  const hasRawPlanValue =
+    rawPlanAt != null && rawPlanAt !== undefined && String(rawPlanAt).trim().length > 0;
+  const planAt = parseScheduleInstant(rawPlanAt);
+  const sessionAt = parseScheduleInstant(sources?.sessionScheduledStart ?? null);
+  const hasSavedDateValue = hasRawPlanValue || sessionAt != null;
 
-  let assessmentAt: Date | null = null;
-  if (
-    hasSavedDateValue &&
-    (typeof rawAssessmentAt === 'string' || rawAssessmentAt instanceof Date)
-  ) {
-    const candidate =
-      rawAssessmentAt instanceof Date
-        ? new Date(rawAssessmentAt.getTime())
-        : new Date(rawAssessmentAt);
-    if (!Number.isNaN(candidate.getTime())) assessmentAt = candidate;
-  }
+  // Durable 97151 Session is SoT when present; treatmentPlan mirrors for display/legacy.
+  const assessmentAt = sessionAt ?? planAt;
 
   const currentStatusIndex = statusIndex(client.status);
   const hasReachedAssessmentStage =
     currentStatusIndex >= ASSESSMENT_SCHEDULED_INDEX;
-  const dateIssue = hasSavedDateValue && !assessmentAt
-    ? 'invalid'
-    : hasReachedAssessmentStage && !assessmentAt
-      ? 'missing'
-      : null;
 
-  if (dateIssue || (assessmentAt && !hasReachedAssessmentStage)) {
+  let dateIssue: AssessmentState['dateIssue'] = null;
+  if (hasRawPlanValue && planAt == null) {
+    dateIssue = 'invalid';
+  } else if (planAt == null && sessionAt == null && hasReachedAssessmentStage) {
+    dateIssue = 'missing';
+  } else if (
+    planAt &&
+    sessionAt &&
+    Math.abs(planAt.getTime() - sessionAt.getTime()) > 60_000
+  ) {
+    dateIssue = 'mismatch';
+  }
+
+  const durableSessionId = sources?.sessionId ?? null;
+
+  if (
+    dateIssue ||
+    (assessmentAt && !hasReachedAssessmentStage) ||
+    (hasReachedAssessmentStage && sources?.hasDurableSession === false)
+  ) {
     return {
       phase: 'reconcile',
       canSchedule: false,
       assessmentAt,
-      dateIssue,
+      dateIssue:
+        hasReachedAssessmentStage && sources?.hasDurableSession === false
+          ? 'missing'
+          : dateIssue,
       hasReachedAssessmentStage,
+      durableSessionId,
     };
   }
 
@@ -118,6 +148,7 @@ export function deriveAssessmentState(
       assessmentAt,
       dateIssue: null,
       hasReachedAssessmentStage,
+      durableSessionId,
     };
   }
 
@@ -128,6 +159,7 @@ export function deriveAssessmentState(
       assessmentAt: null,
       dateIssue: null,
       hasReachedAssessmentStage: false,
+      durableSessionId: null,
     };
   }
 
@@ -135,8 +167,9 @@ export function deriveAssessmentState(
     phase: 'locked',
     canSchedule: false,
     assessmentAt: null,
-    dateIssue: null,
+    dateIssue: hasSavedDateValue && !assessmentAt ? 'invalid' : null,
     hasReachedAssessmentStage,
+    durableSessionId: null,
   };
 }
 
@@ -198,7 +231,8 @@ export default function BcbaAssessmentTab({
   client: BcbaAssessmentClient;
 }) {
   const router = useRouter();
-  const assessmentState = deriveAssessmentState(client);
+  const [scheduleSources, setScheduleSources] = useState<AssessmentScheduleSources | null>(null);
+  const assessmentState = deriveAssessmentState(client, scheduleSources);
   const minimumDateTime = useMemo(() => minimumClinicDateTime(), []);
   const [scheduledDate, setScheduledDate] = useState('');
   const [materialsConfirmed, setMaterialsConfirmed] = useState(false);
@@ -209,6 +243,20 @@ export default function BcbaAssessmentTab({
     kind: 'error' | 'success';
     message: string;
   } | null>(null);
+
+  useEffect(() => {
+    if (!client.id) return;
+    void getClientAssessmentSchedule(client.id).then((res) => {
+      if (res.success) {
+        setScheduleSources({
+          sessionId: res.data.sessionId,
+          sessionScheduledStart: res.data.sessionScheduledStart,
+          treatmentPlanScheduledAt: res.data.treatmentPlanScheduledAt,
+          hasDurableSession: res.data.hasDurableSession,
+        });
+      }
+    });
+  }, [client.id, client.status, client.treatmentPlan]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -367,9 +415,9 @@ export default function BcbaAssessmentTab({
                       {formattedAssessmentAt}
                     </time>
                     <p className="mt-2 text-sm leading-6 text-zinc-400">
-                      This time comes from the persisted assessment schedule and is rendered in
-                      ET. Materials are not shown as complete because no separate checklist
-                      completion is stored.
+                      This time comes from the durable 97151 Session (when present) or persisted
+                      treatment-plan schedule, rendered in ET. Materials are not shown as complete
+                      because no separate checklist completion is stored.
                     </p>
                   </div>
                 </div>
@@ -392,13 +440,20 @@ export default function BcbaAssessmentTab({
                   >
                     Schedule data needs reconciliation
                   </h4>
-                  <p className="mt-2 text-sm leading-6 text-zinc-300">
+                    <p className="mt-2 text-sm leading-6 text-zinc-300">
                     {assessmentState.dateIssue === 'invalid'
                       ? 'The saved assessment date cannot be read as a valid instant.'
-                      : assessmentState.dateIssue === 'missing'
-                        ? `The pipeline is ${statusLabel}, but no persisted assessment date is available.`
+                      : assessmentState.dateIssue === 'mismatch'
+                        ? 'The durable 97151 Session start time and treatmentPlan.assessmentScheduledAt disagree — reconcile before continuing.'
+                        : assessmentState.dateIssue === 'missing'
+                        ? `The pipeline is ${statusLabel}, but no persisted assessment date or 97151 Session is available.`
                         : `A persisted assessment date exists, but the pipeline remains ${statusLabel}.`}
                   </p>
+                  {assessmentState.durableSessionId && (
+                    <p className="mt-2 font-mono text-[10px] text-zinc-500">
+                      97151 Session · {assessmentState.durableSessionId.slice(0, 8)}…
+                    </p>
+                  )}
                   {formattedAssessmentAt && assessmentState.assessmentAt && (
                     <p className="mt-3 font-mono text-xs text-amber-200">
                       Saved date:{' '}
@@ -603,6 +658,8 @@ export default function BcbaAssessmentTab({
           )}
         </CardContent>
       </Card>
+
+      <AssessmentProgressPreview clientId={client.id} />
     </div>
   );
 }

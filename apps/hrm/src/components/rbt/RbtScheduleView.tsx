@@ -701,21 +701,20 @@ export function RbtScheduleView({ mode = 'LIVE', onStartEvvClick }: RbtScheduleV
     <div className="max-w-5xl mx-auto space-y-8 pb-12 text-slate-900">
       {mode === 'SIMULATION' && (
         <div
-          className="relative overflow-hidden rounded-3xl border border-sky-300/30 bg-slate-950 p-5 text-white shadow-2xl"
+          className="relative overflow-hidden rounded-3xl border border-sky-300 bg-sky-50 p-5 text-slate-900 shadow-md"
           role="note"
           aria-label="Simulation schedule boundary"
         >
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(14,165,233,0.18),_transparent_48%)]" />
           <div className="relative flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
             <div>
-              <span className="font-mono text-[10px] font-black uppercase tracking-[0.18em] text-sky-300">
+              <span className="font-mono text-[10px] font-black uppercase tracking-[0.18em] text-sky-800">
                 Simulation schedule · fictional people
               </span>
-              <p className="mt-1 max-w-2xl text-xs font-semibold leading-relaxed text-slate-300">
+              <p className="mt-1 max-w-2xl text-xs font-semibold leading-relaxed text-sky-900">
                 Tabs, timers, fixes, and call-outs on this screen are practice-only. No staff are contacted and no clinical, billing, EVV, schedule, or payroll records are changed.
               </p>
             </div>
-            <span className="shrink-0 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1.5 font-mono text-[10px] font-black uppercase text-emerald-300">
+            <span className="shrink-0 rounded-full border border-emerald-300 bg-emerald-100 px-3 py-1.5 font-mono text-[10px] font-black uppercase text-emerald-800">
               No live writes
             </span>
           </div>

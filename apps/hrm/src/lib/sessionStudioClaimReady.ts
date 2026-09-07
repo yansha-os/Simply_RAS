@@ -198,43 +198,50 @@ function gapFromCheck(item: BillingCheckItem): ClaimReadyGap {
  * Incomplete / payroll-hold path should ignore `claimReady === false` and save unsigned.
  */
 export function evaluateClaimReady(input: ClaimReadyEvalInput): ClaimReadyEvaluation {
-  const documented = caregiverDocumented(input.caregiverPresent, input.caregiverName);
+  const safeTrials = Array.isArray(input?.trials) ? input.trials : [];
+  const safeProbes = Array.isArray(input?.probes) ? input.probes : [];
+  const safeFrequencies = Array.isArray(input?.frequencies) ? input.frequencies : [];
+  const safeDurations = Array.isArray(input?.durations) ? input.durations : [];
+  const safeTaskAnalyses = Array.isArray(input?.taskAnalyses) ? input.taskAnalyses : [];
+  const safeInterventions = Array.isArray(input?.interventions) ? input.interventions : [];
+
+  const documented = caregiverDocumented(input?.caregiverPresent || '', input?.caregiverName);
   const skillIds = [
-    ...input.trials.map((t) => t.targetId),
-    ...(input.probes || []).map((p) => p.targetId),
+    ...safeTrials.map((t) => t?.targetId),
+    ...safeProbes.map((p) => p?.targetId),
   ].filter((id): id is string => Boolean(id));
   const usesDemoTargetsOnly =
-    input.usesDemoTargetsOnly === true ||
+    input?.usesDemoTargetsOnly === true ||
     (skillIds.length > 0 && skillIds.every((id) => isDemoStudioTargetId(id)));
 
   const checklist = buildBillingChecklist({
-    clockedIn: input.clockedIn,
-    clockedOut: input.clockedOut,
-    cptCode: input.cptCode,
-    placeOfService: input.placeOfService,
+    clockedIn: input?.clockedIn ?? false,
+    clockedOut: input?.clockedOut ?? false,
+    cptCode: input?.cptCode ?? '',
+    placeOfService: input?.placeOfService ?? '',
     caregiverDocumented: documented,
-    caregiverPresent: input.caregiverPresent,
-    caregiverParticipation: input.caregiverParticipation,
+    caregiverPresent: input?.caregiverPresent ?? '',
+    caregiverParticipation: input?.caregiverParticipation,
     usesDemoTargetsOnly,
-    trials: input.trials,
-    frequencies: input.frequencies,
-    durations: input.durations,
-    taskAnalyses: input.taskAnalyses,
-    probes: input.probes,
-    objectiveData: input.objectiveData,
-    interventions: input.interventions,
-    clientResponse: input.clientResponse,
-    barriersSafety: input.barriersSafety,
-    planNext: input.planNext,
-    rbtSignature: input.rbtSignature,
-    caregiverSignature: input.caregiverSignature,
-    sessionSeconds: input.sessionSeconds,
+    trials: safeTrials,
+    frequencies: safeFrequencies,
+    durations: safeDurations,
+    taskAnalyses: safeTaskAnalyses,
+    probes: safeProbes,
+    objectiveData: input?.objectiveData ?? '',
+    interventions: safeInterventions,
+    clientResponse: input?.clientResponse ?? '',
+    barriersSafety: input?.barriersSafety ?? '',
+    planNext: input?.planNext ?? '',
+    rbtSignature: input?.rbtSignature ?? '',
+    caregiverSignature: input?.caregiverSignature ?? '',
+    sessionSeconds: Number.isFinite(input?.sessionSeconds) ? Math.max(0, input.sessionSeconds) : 0,
   });
 
   const blocks: ClaimReadyGap[] = checklist.filter((c) => !c.ok).map(gapFromCheck);
   const warnings: ClaimReadyGap[] = [];
 
-  const goals = (input.goalsAddressed || '').trim();
+  const goals = (input?.goalsAddressed || '').trim();
   if (!goals || goals.length < 3) {
     warnings.push({
       key: 'GOALS_LABEL',
@@ -267,11 +274,13 @@ export function assertClaimReadyForSubmit(input: ClaimReadyEvalInput): {
   error: string;
   missingKeys: string[];
 } {
+  const sessionSeconds = Number.isFinite(input?.sessionSeconds) ? Math.max(0, input.sessionSeconds) : 0;
   const evaluation = evaluateClaimReady({
     ...input,
     // Submit implies clocked out
     clockedOut: true,
-    clockedIn: input.clockedIn || input.sessionSeconds > 0,
+    clockedIn: input?.clockedIn || sessionSeconds > 0,
+    sessionSeconds,
   });
 
   if (evaluation.claimReady) {
@@ -303,7 +312,7 @@ export function claimReadyInputFromPayload(data: {
   planNext?: string;
   rbtSignature: string;
   parentSignature: string;
-  trials: Array<{
+  trials?: Array<{
     targetId?: string;
     targetGoal: string;
     response: 'CORRECT' | 'PROMPTED' | 'INCORRECT';
@@ -317,36 +326,41 @@ export function claimReadyInputFromPayload(data: {
   startedAt?: string | null;
   endedAt?: string | null;
 }): ClaimReadyEvalInput {
-  const trials: StudioTrial[] = data.trials.map((t, i) => ({
+  const safeTrialsList = Array.isArray(data?.trials) ? data.trials : [];
+  const trials: StudioTrial[] = safeTrialsList.map((t, i) => ({
     id: `t-${i}`,
-    targetId: t.targetId || `unknown-${i}`,
-    targetLabel: t.targetGoal,
-    response: t.response,
-    promptLevel: t.promptLevel,
-    at: t.timestamp,
+    targetId: t?.targetId || `unknown-${i}`,
+    targetLabel: t?.targetGoal || '',
+    response: t?.response === 'PROMPTED' || t?.response === 'INCORRECT' || t?.response === 'CORRECT'
+      ? t.response
+      : 'INCORRECT',
+    promptLevel: t?.promptLevel,
+    at: t?.timestamp || new Date().toISOString(),
   }));
 
+  const sessionSeconds = Number.isFinite(data?.sessionSeconds) ? Math.max(0, data.sessionSeconds) : 0;
+
   return {
-    clockedIn: Boolean(data.startedAt) || data.sessionSeconds > 0,
-    clockedOut: Boolean(data.endedAt) || data.sessionSeconds > 0,
-    cptCode: data.cptCode || '',
-    placeOfService: data.locationCode || '',
-    caregiverPresent: data.caregiverPresent || '',
-    caregiverName: data.caregiverName,
-    caregiverParticipation: data.caregiverParticipation,
-    goalsAddressed: data.goalsAddressed,
+    clockedIn: Boolean(data?.startedAt) || sessionSeconds > 0,
+    clockedOut: Boolean(data?.endedAt) || sessionSeconds > 0,
+    cptCode: data?.cptCode || '',
+    placeOfService: data?.locationCode || '',
+    caregiverPresent: data?.caregiverPresent || '',
+    caregiverName: data?.caregiverName,
+    caregiverParticipation: data?.caregiverParticipation,
+    goalsAddressed: data?.goalsAddressed,
     trials,
-    frequencies: data.frequencies,
-    durations: data.durations,
-    taskAnalyses: data.taskAnalyses,
-    probes: data.probes,
-    objectiveData: data.objectiveData || '',
-    interventions: data.interventions || [],
-    clientResponse: data.clientResponse || '',
-    barriersSafety: data.barriersSafety || '',
-    planNext: data.planNext || '',
-    rbtSignature: data.rbtSignature || '',
-    caregiverSignature: data.parentSignature || '',
-    sessionSeconds: data.sessionSeconds || 0,
+    frequencies: Array.isArray(data?.frequencies) ? data.frequencies : [],
+    durations: Array.isArray(data?.durations) ? data.durations : [],
+    taskAnalyses: Array.isArray(data?.taskAnalyses) ? data.taskAnalyses : [],
+    probes: Array.isArray(data?.probes) ? data.probes : [],
+    objectiveData: data?.objectiveData || '',
+    interventions: Array.isArray(data?.interventions) ? data.interventions : [],
+    clientResponse: data?.clientResponse || '',
+    barriersSafety: data?.barriersSafety || '',
+    planNext: data?.planNext || '',
+    rbtSignature: data?.rbtSignature || '',
+    caregiverSignature: data?.parentSignature || '',
+    sessionSeconds,
   };
 }

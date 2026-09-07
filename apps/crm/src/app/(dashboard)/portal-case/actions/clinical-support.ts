@@ -10,7 +10,12 @@ import {
   requireStaff,
   CLINICAL_ROLES,
 } from '@/lib/auth-guard';
-import { clinicWallClockToUtc } from '@/lib/clinicTimezone';
+import {
+  clinicWallClockToUtc,
+  endOfClinicDayForDateOnly,
+  startOfClinicDayForDateOnly,
+} from '@/lib/clinicTimezone';
+import { summarizeStaffCredentials } from '@/lib/staffCredentials';
 import {
   ASSESSMENT_SCHEDULER_ROLES,
   buildAssignmentAuditRow,
@@ -18,12 +23,15 @@ import {
   validateAssignmentRequest,
 } from '@/lib/assignmentSecurity';
 import { writeAuditLog } from '@/lib/auditLog';
+import { notifyAssessmentScheduledHandoff } from '@/lib/intakeWorkflowNotifications';
 import {
   runTreatmentPlanSave,
   type TreatmentPlanSessionUser,
 } from './treatment-plan-save';
 
 const ASSESSMENT_SCHEDULE_STALE = 'ASSESSMENT_SCHEDULE_STALE';
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function parseTreatmentPlan(raw: unknown): Record<string, unknown> {
   if (!raw) return {};
@@ -54,6 +62,16 @@ export async function scheduleAssessment(input: {
   if (!auth.ok) return { success: false as const, error: auth.error };
 
   try {
+    if (
+      !UUID_RE.test(input.clientId) ||
+      !input.expectedBcbaId ||
+      !UUID_RE.test(input.expectedBcbaId) ||
+      !['PA_APPROVED', 'ASSESSMENT_SCHEDULED'].includes(input.expectedClientStatus) ||
+      (input.reason?.trim().length ?? 0) > 1_000
+    ) {
+      return { success: false as const, error: 'Valid assessment scheduling details are required.' };
+    }
+
     // datetime-local strings carry no TZ — interpret as clinic wall-clock
     // (America/New_York), not the scheduler's machine TZ. Date instances and
     // zoned ISO strings pass through unchanged.
@@ -81,6 +99,8 @@ export async function scheduleAssessment(input: {
             bcbaId: true,
             caseCoordinatorId: true,
             treatmentPlan: true,
+            firstName: true,
+            lastName: true,
           },
         });
         if (!client) throw new Error('CLIENT_NOT_FOUND');
@@ -88,7 +108,20 @@ export async function scheduleAssessment(input: {
         const target = client.bcbaId
           ? await tx.user.findUnique({
               where: { id: client.bcbaId },
-              select: { id: true, role: true, isActive: true },
+              select: {
+                id: true,
+                role: true,
+                isActive: true,
+                firstName: true,
+                lastName: true,
+                credentials: {
+                  select: {
+                    credentialType: true,
+                    isCredentialed: true,
+                    expirationDate: true,
+                  },
+                },
+              },
             })
           : null;
         const policy = validateAssignmentRequest({
@@ -109,10 +142,56 @@ export async function scheduleAssessment(input: {
           allowedClientStatuses: ['PA_APPROVED', 'ASSESSMENT_SCHEDULED'],
         });
         if (!policy.ok) return { policyError: policy.error } as const;
+        if (!target) return { policyError: 'Select an active BCBA.' } as const;
+        const credentialStatus = summarizeStaffCredentials({
+          userId: target.id,
+          displayName: `${target.firstName} ${target.lastName}`.trim(),
+          role: String(target.role),
+          credentials: target.credentials,
+        });
+        if (credentialStatus.overall !== 'ACTIVE') {
+          return {
+            policyError: `BCBA credential hard stop: ${credentialStatus.warnings.join(', ') || 'required credential evidence is missing'}.`,
+          } as const;
+        }
         if (client.status !== input.expectedClientStatus) {
           return {
             policyError:
               'This client moved to another workflow stage. Refresh and try again.',
+          } as const;
+        }
+
+        const approvedPa = await tx.pARequest.findFirst({
+          where: {
+            clientId: client.id,
+            type: 'ASSESSMENT',
+            status: 'APPROVED',
+          },
+          orderBy: [{ effectiveDate: 'desc' }, { createdAt: 'desc' }],
+          select: {
+            authNumber: true,
+            approvedUnits: true,
+            effectiveDate: true,
+            expirationDate: true,
+          },
+        });
+        if (
+          !approvedPa?.authNumber?.trim() ||
+          !Number.isInteger(approvedPa.approvedUnits) ||
+          (approvedPa.approvedUnits ?? 0) <= 0 ||
+          !approvedPa.effectiveDate ||
+          !approvedPa.expirationDate
+        ) {
+          return {
+            policyError:
+              'Assessment scheduling requires a complete approved PA with authorization number, units, and effective dates.',
+          } as const;
+        }
+        const authorizationStart = startOfClinicDayForDateOnly(approvedPa.effectiveDate);
+        const authorizationEnd = endOfClinicDayForDateOnly(approvedPa.expirationDate);
+        if (parsed < authorizationStart || scheduledEnd > authorizationEnd) {
+          return {
+            policyError: 'The assessment appointment must fall within the approved PA effective window.',
           } as const;
         }
 
@@ -178,12 +257,26 @@ export async function scheduleAssessment(input: {
           }),
         });
 
-        return { alreadyScheduled: false, sessionId: session.id } as const;
+        return {
+          alreadyScheduled: false,
+          sessionId: session.id,
+          bcbaId: client.bcbaId,
+          scheduledStart: parsed,
+        } as const;
       },
       { isolationLevel: 'Serializable' }
     );
     if ('policyError' in result) {
       return { success: false as const, error: result.policyError };
+    }
+
+    if (!result.alreadyScheduled) {
+      await notifyAssessmentScheduledHandoff({
+        clientId: input.clientId,
+        scheduledStart: result.scheduledStart,
+        bcbaId: result.bcbaId,
+        actorUserId: auth.user.id,
+      });
     }
 
     revalidatePath(`/client/${input.clientId}`);
@@ -215,6 +308,12 @@ export async function assembleReport(clientId: string) {
   try {
     const auth = await requireStaff(CLINICAL_ROLES);
     if (!auth.ok) return { success: false, error: auth.error };
+    if (!UUID_RE.test(clientId)) {
+      return { success: false, error: 'Client not found.' };
+    }
+
+    const access = await requireClientAccess(clientId);
+    if (!access.ok) return { success: false, error: access.error };
 
     const client = await prisma.client.findUnique({
       where: { id: clientId },
@@ -242,10 +341,24 @@ export async function assembleReport(clientId: string) {
       return { success: false, error: 'Parent typed-name signature is required before assembling the report.' };
     }
 
-    await prisma.client.update({
-      where: { id: clientId },
+    const assembled = await prisma.client.updateMany({
+      where: {
+        id: clientId,
+        status: client.status,
+        treatmentPlan: {
+          equals: client.treatmentPlan === null
+            ? Prisma.AnyNull
+            : client.treatmentPlan as Prisma.InputJsonValue,
+        },
+      },
       data: { status: 'REPORT_ASSEMBLED' },
     });
+    if (assembled.count !== 1) {
+      return {
+        success: false,
+        error: 'The treatment plan or client status changed. Refresh and try again.',
+      };
+    }
 
     revalidatePath(`/client/${clientId}`);
     revalidatePath('/clinical-support');

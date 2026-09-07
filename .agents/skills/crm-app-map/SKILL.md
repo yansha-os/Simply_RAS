@@ -15,7 +15,7 @@ Also see:
 - `docs/superpowers/specs/2026-08-11-aba-crm-hrm-spine-roadmap.md` — spine sequencing & bridge freeze notes
 - `docs/superpowers/specs/2026-08-11-aba-session-note-data-collection-spec.md` — BCBA co-sign / claim-eligible note fields (clinical SoT)
 - `docs/superpowers/specs/2026-08-11-aba-emr-artemis-replacement-roadmap.md` — Enclosed EMR / Artemis clinical replacement (chart modules, phases)
-- `docs/superpowers/specs/2026-08-11-artemis-dual-run-cutover-checklist.md` — Cohort dual-run → RAS-only notes → freeze Artemis writes
+- `docs/superpowers/specs/2026-08-11-ras-sandbox-cutover-checklist.md` — Sandbox QA → cold cutover (no dual-run)
 - `docs/superpowers/specs/2026-08-11-bridge-efg-manual-qa-checklist.md` — Manual QA for first-session ACTIVE, e-sign, Plutus convert
 
 ---

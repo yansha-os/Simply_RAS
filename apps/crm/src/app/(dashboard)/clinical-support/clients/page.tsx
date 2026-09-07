@@ -1,7 +1,8 @@
 import React from 'react';
 import { prisma } from '@/lib/prisma';
-import ClinicalSupportDashboard from '@/components/clinical-support/ClinicalSupportDashboard';
+import ClinicalSupportClient from '@/components/clinical-support/ClinicalSupportClient';
 import {
+  buildClinicalSupportQueues,
   CLINICAL_SUPPORT_QUEUE_STATUSES,
 } from '@/components/clinical-support/clinicalSupportWorkflow';
 import { CLINICAL_ROLES, requireStaff } from '@/lib/auth-guard';
@@ -44,23 +45,22 @@ export default async function ClinicalSupportClientsPage() {
     orderBy: { updatedAt: 'asc' },
   });
 
+  const queues = buildClinicalSupportQueues(clients);
+
   return (
-    <div className="flex-1 overflow-y-auto p-6 md:p-8">
-      <div className="mx-auto max-w-7xl space-y-6">
+    <div className="p-8">
+      <div className="space-y-4 animate-fade-in-up">
         <div>
-          <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-cyan-500/20 bg-cyan-500/10 px-3 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-cyan-300">
-            Live operational queue
-          </div>
-          <h1 className="font-heading text-3xl font-bold tracking-tight text-white">
+          <h2 className="font-heading text-2xl font-bold text-white">
             Clinical Support Queue
-          </h1>
-          <p className="mt-1 text-sm text-zinc-400">
-            Verify intake handoffs, schedule 97151 assessments in ET, assemble signed
-            reports, and route treatment packets to Billing.
+          </h2>
+          <p className="mt-0.5 text-xs text-zinc-400">
+            Triage lanes only — open each client profile to complete handoffs. Cards never
+            mutate workflow state.
           </p>
         </div>
 
-        <ClinicalSupportDashboard clients={clients} view="queue" />
+        <ClinicalSupportClient queues={queues} />
       </div>
     </div>
   );

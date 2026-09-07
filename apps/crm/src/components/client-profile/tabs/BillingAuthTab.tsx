@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useTransition } from 'react';
+import React, { useEffect, useState, useSyncExternalStore, useTransition } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import {
@@ -31,11 +31,20 @@ import {
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import AuthUnitsPanel from '@/components/client-profile/tabs/AuthUnitsPanel';
+import AuthUnitsLedgerPanel from '@/components/client-profile/tabs/AuthUnitsLedgerPanel';
+import ReAuthT45Banner from '@/components/client-profile/tabs/ReAuthT45Banner';
 import WeeklyBillableUnitGrid from '@/components/client-profile/tabs/WeeklyBillableUnitGrid';
 import { canonicalDocumentReference } from '@/lib/documentReference';
+import { DocumentPreviewModal } from '@/components/client-profile/DocumentPreviewModal';
+
+const subscribeToHydration = () => () => undefined;
+const getClientSnapshot = () => true;
+const getServerSnapshot = () => false;
 
 type BillingActionResult = { success: boolean; error?: string };
 type ApprovalKind = 'ASSESSMENT' | 'TREATMENT';
+
+export type BillingAuthSection = 'vob' | 'assessment_pa' | 'treatment_pa' | 'auth_units';
 
 type PaRequestView = {
   id: string;
@@ -54,7 +63,13 @@ type PaRequestView = {
 type BillingClient = {
   id: string;
   status: string;
-  intakePacket?: { formData?: unknown } | null;
+  firstName?: string;
+  lastName?: string;
+  intakePacket?: {
+    formData?: unknown;
+    diagnosticEvalUploaded?: boolean | null;
+    physicianRxUploaded?: boolean | null;
+  } | null;
   paRequests?: PaRequestView[] | null;
 };
 
@@ -126,7 +141,13 @@ function StepCircle({
   );
 }
 
-export default function BillingAuthTab({ client }: { client: BillingClient }) {
+export default function BillingAuthTab({
+  client,
+  section,
+}: {
+  client: BillingClient;
+  section?: BillingAuthSection;
+}) {
   const paRequest = client.paRequests?.find((pa) => pa.type === 'ASSESSMENT');
   const hasVob = Boolean(paRequest?.vobCompleted);
   const hasCred = Boolean(paRequest?.providerCredentialed);
@@ -143,16 +164,17 @@ export default function BillingAuthTab({ client }: { client: BillingClient }) {
   const [actionError, setActionError] = useState<string | null>(null);
   const [authRefreshKey, setAuthRefreshKey] = useState(0);
   
-  // PA Submission confirmation states
-  const [evalDownloaded, setEvalDownloaded] = useState(false);
-  const [referralDownloaded, setReferralDownloaded] = useState(false);
   const [paSubmittedConfirm, setPaSubmittedConfirm] = useState(false);
   
   const [isPending, startTransition] = useTransition();
+  const mounted = useSyncExternalStore(
+    subscribeToHydration,
+    getClientSnapshot,
+    getServerSnapshot
+  );
 
   const txPaRequest = client.paRequests?.find((pa) => pa.type === 'TREATMENT');
   const txPaStatus = txPaRequest?.status || 'NOT_STARTED';
-  // Manual Plutus tracker UI — Assessment PA + Treatment PA (no EDI). Canonical actions: portal-case/actions/billing.ts
   const showTxPa = [
     'REPORT_ASSEMBLED',
     'TX_PA_SUBMITTED',
@@ -190,6 +212,45 @@ export default function BillingAuthTab({ client }: { client: BillingClient }) {
   const previewUrl = canonicalDocumentReference(previewValue, client.id);
 
   const isPaSubmitted = ['SUBMITTED', 'DENIED_CLERICAL', 'DENIED_CLINICAL', 'APPROVED'].includes(paStatus);
+
+  const showAll = !section;
+  const vobOnly = section === 'vob';
+  const assessmentOnly = section === 'assessment_pa';
+  const showVobSection = showAll || vobOnly;
+  const showAssessmentPaSection = showAll || assessmentOnly;
+  const showTreatmentPaSection = showAll || section === 'treatment_pa';
+  const showAuthUnitsSection = showAll || section === 'auth_units';
+  const showInsuranceSnapshot = showVobSection;
+  const showAssessmentVobStep = showVobSection;
+  const showAssessmentSubmitSteps = showAssessmentPaSection;
+  const evalOnFile =
+    Boolean(evalUrl) || Boolean(client.intakePacket?.diagnosticEvalUploaded);
+  const referralOnFile =
+    Boolean(referralUrl) || Boolean(client.intakePacket?.physicianRxUploaded);
+  const documentsPresent = evalOnFile && referralOnFile;
+
+  useEffect(() => {
+    if (!mounted) return;
+    const open =
+      showDenyModal || showTxDenyModal || showApproveModal || showTxApproveModal;
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || isPending) return;
+      setShowDenyModal(false);
+      setShowTxDenyModal(false);
+      setShowApproveModal(false);
+      setShowTxApproveModal(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [
+    mounted,
+    showDenyModal,
+    showTxDenyModal,
+    showApproveModal,
+    showTxApproveModal,
+    isPending,
+  ]);
 
   const showActionError = (message: string) => {
     setActionError(message);
@@ -315,12 +376,12 @@ export default function BillingAuthTab({ client }: { client: BillingClient }) {
     }
     runBillingAction(
       () => completeVobAndCreds(client.id),
-      'Pre-checks marked as complete.',
+      'VOB and credentialing recorded. Open Assessment PA to submit 97151.',
     );
   };
 
   return (
-    <div className="space-y-6 max-w-4xl [&_button:not(:disabled)]:cursor-pointer [&_button:disabled]:cursor-not-allowed">
+    <div className="space-y-10 [&_button:not(:disabled)]:cursor-pointer [&_button:disabled]:cursor-not-allowed">
 
       {actionError && (
         <div
@@ -335,20 +396,75 @@ export default function BillingAuthTab({ client }: { client: BillingClient }) {
             type="button"
             onClick={() => setActionError(null)}
             aria-label="Dismiss billing error"
-            className="shrink-0 rounded-md p-1 text-red-300 transition hover:bg-red-500/10 hover:text-white"
+            className="shrink-0 rounded-md p-1 text-red-300 transition hover:bg-red-500/10 hover:text-white cursor-pointer"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
       )}
 
-      {/* Authorized vs remaining units (read-only; existing PA / Authorization / Session) */}
-      <AuthUnitsPanel clientId={client.id} refreshKey={authRefreshKey} />
+      {showAuthUnitsSection && (
+      <>
+      <ReAuthT45Banner
+        clientId={client.id}
+        clientName={[client.firstName, client.lastName].filter(Boolean).join(' ') || 'Client'}
+      />
 
-      {/* Weekly CPT / units from BCBA-signed SessionNotes */}
-      <WeeklyBillableUnitGrid clientId={client.id} />
-      
+      <section className="space-y-6">
+        <div className="flex flex-wrap items-end justify-between gap-3 border-b border-white/10 pb-3">
+          <div>
+            <p className="font-mono text-[10px] font-bold uppercase tracking-[0.16em] text-brand-orange-400">
+              Authorization intelligence
+            </p>
+            <h2 className="mt-1 font-heading text-lg font-semibold text-white">
+              Units, ledgers &amp; weekly billables
+            </h2>
+          </div>
+        </div>
+
+        <AuthUnitsPanel clientId={client.id} refreshKey={authRefreshKey} />
+
+        <WeeklyBillableUnitGrid clientId={client.id} />
+
+        <AuthUnitsLedgerPanel clientId={client.id} />
+      </section>
+      </>
+      )}
+
+      {(showVobSection || showAssessmentPaSection || showTreatmentPaSection) && (
+      <section className="space-y-6">
+        <div className="flex flex-wrap items-end justify-between gap-3 border-b border-white/10 pb-3">
+          <div>
+            <p className="font-mono text-[10px] font-bold uppercase tracking-[0.16em] text-brand-blue-400">
+              {vobOnly
+                ? 'Billing · VOB'
+                : assessmentOnly
+                  ? 'Billing · Assessment PA'
+                  : 'Prior authorization'}
+            </p>
+            <h2 className="mt-1 font-heading text-lg font-semibold text-white">
+              {vobOnly
+                ? 'Verification of Benefits'
+                : assessmentOnly
+                  ? 'CPT 97151 authorization'
+                  : 'Insurance snapshot & PA tracker'}
+            </h2>
+            {vobOnly && (
+              <p className="mt-1 max-w-xl text-sm text-zinc-400">
+                Confirm eligibility in RAS, then mark VOB complete. Assessment PA is the next tab
+                — Clinical Support schedules 97151 only after that PA is approved.
+              </p>
+            )}
+            {assessmentOnly && (
+              <p className="mt-1 max-w-xl text-sm text-zinc-400">
+                Submit and record the 97151 payer decision here. VOB must already be complete.
+              </p>
+            )}
+          </div>
+        </div>
+
       {/* Insurance Snapshot */}
+      {showInsuranceSnapshot && (
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Card className="border-white/10 bg-zinc-900/50 shadow-sm transition-all duration-300 hover:border-brand-orange-500/30 hover:shadow-2xl">
           <CardContent className="p-4 flex flex-col justify-between h-full">
@@ -426,7 +542,9 @@ export default function BillingAuthTab({ client }: { client: BillingClient }) {
           </Card>
         )}
       </div>
+      )}
 
+      {(showAssessmentVobStep || showAssessmentSubmitSteps) && (
       <Card className="border-white/10 shadow-sm w-full relative overflow-hidden">
         {paStatus === 'APPROVED' && (
           <div className="absolute top-0 left-0 w-1 bg-green-500 h-full z-20"></div>
@@ -454,14 +572,21 @@ export default function BillingAuthTab({ client }: { client: BillingClient }) {
           <div className="flex items-center justify-between">
             <div>
               <CardTitle className="text-lg text-white flex items-center gap-3">
-                <DollarSign className="w-5 h-5 text-brand-blue-500" /> Prior Authorization — Assessment
+                <DollarSign className="w-5 h-5 text-brand-blue-500" />
+                {vobOnly
+                  ? 'Eligibility & credentialing'
+                  : 'Assessment PA — CPT 97151'}
                 {paStatus === 'APPROVED' && (
                   <span className="text-[10px] font-bold border px-2.5 py-1 rounded-md tracking-wider uppercase bg-green-500/10 border-green-500/30 text-green-400">
                     APPROVED
                   </span>
                 )}
               </CardTitle>
-              <p className="text-sm text-zinc-400 mt-1">Verify eligibility, check credentialing, and submit CPT 97151.</p>
+              <p className="text-sm text-zinc-400 mt-1">
+                {vobOnly
+                  ? 'Call the payer, confirm coverage and PA requirements, then record VOB in RAS.'
+                  : 'Submit 97151 to the payer, then log approval or denial in this tab.'}
+              </p>
             </div>
             {paStatus === 'APPROVED' && (
               <Button variant="ghost" size="sm" className="text-zinc-400 hover:text-white pointer-events-none">
@@ -479,6 +604,7 @@ export default function BillingAuthTab({ client }: { client: BillingClient }) {
           <div className="relative border-l-2 border-white/10 ml-4 space-y-12">
             
             {/* STEP 1: VOB & Credentialing */}
+            {showAssessmentVobStep && (
             <div className="relative pl-8">
               <div className="absolute -left-[17px] top-0 bg-zinc-950 py-2">
                 <StepCircle number={1} active={!preChecksComplete} completed={preChecksComplete} />
@@ -536,18 +662,34 @@ export default function BillingAuthTab({ client }: { client: BillingClient }) {
                         }`}
                       >
                         {isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
-                        Mark Pre-Checks Complete
+                        Record VOB &amp; credentialing
                       </Button>
                     </div>
+                  )}
+                  {preChecksComplete && vobOnly && (
+                    <p className="mt-4 rounded-lg border border-green-500/20 bg-green-500/10 px-3 py-2 text-xs text-green-300">
+                      VOB is recorded. Switch to the Assessment PA tab to submit CPT 97151.
+                    </p>
                   )}
                 </div>
               </div>
             </div>
+            )}
 
             {/* STEP 2: Submit PA */}
+            {showAssessmentSubmitSteps && !preChecksComplete && assessmentOnly && (
+              <div className="relative pl-8">
+                <div className="rounded-xl border border-amber-500/25 bg-amber-500/10 p-4 text-sm text-amber-100">
+                  Complete the VOB / Benefits tab first. Assessment PA submit unlocks after VOB
+                  is recorded.
+                </div>
+              </div>
+            )}
+
+            {showAssessmentSubmitSteps && (
             <div className={`relative pl-8 transition-opacity duration-300 ${!preChecksComplete ? 'opacity-40 pointer-events-none' : 'opacity-100'}`}>
               <div className="absolute -left-[17px] top-0 bg-zinc-950 py-2">
-                <StepCircle number={2} active={preChecksComplete && !isPaSubmitted} completed={paStatus === 'APPROVED'} />
+                <StepCircle number={assessmentOnly ? 1 : 2} active={preChecksComplete && !isPaSubmitted} completed={paStatus === 'APPROVED'} />
               </div>
               
               <div className={`bg-zinc-900 border ${paStatus === 'DENIED_CLERICAL' || paStatus === 'DENIED_CLINICAL' ? 'border-red-500/50 bg-red-500/5' : 'border-white/10'} p-5 rounded-xl`}>
@@ -567,10 +709,9 @@ export default function BillingAuthTab({ client }: { client: BillingClient }) {
                           href={evalUrl}
                           target="_blank" 
                           rel="noopener noreferrer"
-                          onClick={() => setEvalDownloaded(true)}
-                          className={`inline-flex cursor-pointer items-center rounded-md border px-3 py-1.5 text-xs transition-colors ${evalDownloaded ? 'bg-green-500/10 border-green-500/30 text-green-400' : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border-zinc-700'}`}
+                          className="inline-flex cursor-pointer items-center rounded-md border px-3 py-1.5 text-xs transition-colors bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border-zinc-700"
                         >
-                          <DownloadCloud className="w-3.5 h-3.5 mr-1.5" /> Diagnostic Eval {evalDownloaded && <Check className="w-3 h-3 ml-1" />}
+                          <DownloadCloud className="w-3.5 h-3.5 mr-1.5" /> Diagnostic Eval
                         </a>
                       ) : (
                         <span className="inline-flex items-center text-xs bg-zinc-800/50 text-zinc-500 px-3 py-1.5 rounded-md border border-zinc-700/50 cursor-not-allowed">
@@ -583,10 +724,9 @@ export default function BillingAuthTab({ client }: { client: BillingClient }) {
                           href={referralUrl}
                           target="_blank" 
                           rel="noopener noreferrer"
-                          onClick={() => setReferralDownloaded(true)}
-                          className={`inline-flex cursor-pointer items-center rounded-md border px-3 py-1.5 text-xs transition-colors ${referralDownloaded ? 'bg-green-500/10 border-green-500/30 text-green-400' : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border-zinc-700'}`}
+                          className="inline-flex cursor-pointer items-center rounded-md border px-3 py-1.5 text-xs transition-colors bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border-zinc-700"
                         >
-                          <DownloadCloud className="w-3.5 h-3.5 mr-1.5" /> Physician Referral {referralDownloaded && <Check className="w-3 h-3 ml-1" />}
+                          <DownloadCloud className="w-3.5 h-3.5 mr-1.5" /> Physician Referral
                         </a>
                       ) : (
                         <span className="inline-flex items-center text-xs bg-zinc-800/50 text-zinc-500 px-3 py-1.5 rounded-md border border-zinc-700/50 cursor-not-allowed">
@@ -622,12 +762,7 @@ export default function BillingAuthTab({ client }: { client: BillingClient }) {
                 )}
 
                 {(!isPaSubmitted || paStatus.includes('DENIED')) && paStatus !== 'APPROVED' && (() => {
-                  const needsEval = Boolean(evalUrl);
-                  const needsReferral = Boolean(referralUrl);
-                  const documentsPresent = needsEval && needsReferral;
-                  const evalReady = needsEval && evalDownloaded;
-                  const referralReady = needsReferral && referralDownloaded;
-                  const isSubmitReady = evalReady && referralReady && paSubmittedConfirm;
+                  const isSubmitReady = paSubmittedConfirm;
 
                   return (
                     <div className="mt-4 border-t border-white/5 pt-4">
@@ -637,14 +772,13 @@ export default function BillingAuthTab({ client }: { client: BillingClient }) {
                           className="mb-4 flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-200"
                         >
                           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                          Upload both the diagnostic evaluation and physician referral before
-                          marking this request submitted.
+                          Diagnostic eval or physician referral is missing from the packet preview.
+                          You can still mark submitted if you already sent 97151 to the payer.
                         </p>
                       )}
                       <label
                         className={`mb-4 flex items-start space-x-3 group ${
-                          !documentsPresent ||
-                          (paStatus === 'DENIED_CLINICAL' && !paRequest?.p2pResolved)
+                          paStatus === 'DENIED_CLINICAL' && !paRequest?.p2pResolved
                             ? 'cursor-not-allowed'
                             : 'cursor-pointer'
                         }`}
@@ -655,13 +789,12 @@ export default function BillingAuthTab({ client }: { client: BillingClient }) {
                           checked={paSubmittedConfirm}
                           onChange={(e) => setPaSubmittedConfirm(e.target.checked)}
                           disabled={
-                            !documentsPresent ||
-                            (paStatus === 'DENIED_CLINICAL' && !paRequest?.p2pResolved)
+                            paStatus === 'DENIED_CLINICAL' && !paRequest?.p2pResolved
                           }
                         />
                         <div>
                           <p className={`text-sm font-medium ${paSubmittedConfirm ? 'text-zinc-300' : 'text-zinc-400'} group-hover:text-white transition-colors`}>
-                            I confirm the Authorization Request has been submitted to the payer portal with these documents.
+                            I confirm the 97151 authorization request has been submitted to the payer.
                           </p>
                         </div>
                       </label>
@@ -699,11 +832,13 @@ export default function BillingAuthTab({ client }: { client: BillingClient }) {
                 )}
               </div>
             </div>
+            )}
 
             {/* STEP 3: Decision & Finalize */}
+            {showAssessmentSubmitSteps && (
             <div className={`relative pl-8 transition-opacity duration-300 ${paStatus !== 'SUBMITTED' && paStatus !== 'APPROVED' ? 'opacity-40 pointer-events-none' : 'opacity-100'}`}>
               <div className="absolute -left-[17px] top-0 bg-zinc-950 py-2">
-                <StepCircle number={3} active={paStatus === 'SUBMITTED'} completed={paStatus === 'APPROVED'} />
+                <StepCircle number={assessmentOnly ? 2 : 3} active={paStatus === 'SUBMITTED'} completed={paStatus === 'APPROVED'} />
               </div>
               
               <div className={`bg-zinc-900 border ${paStatus === 'APPROVED' ? 'border-green-500/30 bg-green-500/5' : 'border-white/10'} p-5 rounded-xl`}>
@@ -771,24 +906,49 @@ export default function BillingAuthTab({ client }: { client: BillingClient }) {
                 
               </div>
             </div>
+            )}
 
           </div>
         </CardContent>
         )}
       </Card>
+      )}
 
       {/* Denial Modal */}
-      {showDenyModal && createPortal(
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+      {showAssessmentSubmitSteps && showDenyModal && mounted && createPortal(
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in"
+          onClick={() => {
+            if (!isPending) {
+              setShowDenyModal(false);
+              setActionError(null);
+            }
+          }}
+        >
           <div
             role="dialog"
             aria-modal="true"
             aria-labelledby="assessment-denial-title"
-            className="bg-zinc-900 border border-white/10 rounded-xl w-full max-w-md shadow-2xl overflow-hidden p-6 space-y-4"
+            className="bg-zinc-900 border border-white/10 rounded-xl w-full max-w-md shadow-2xl overflow-hidden p-6 space-y-4 my-auto"
+            onClick={(e) => e.stopPropagation()}
           >
+            <div className="flex items-start justify-between gap-3">
             <h3 id="assessment-denial-title" className="text-lg font-semibold text-white flex items-center">
               <AlertTriangle className="w-5 h-5 text-red-500 mr-2" /> Log Authorization Denial
             </h3>
+            <button
+              type="button"
+              aria-label="Close"
+              disabled={isPending}
+              className="shrink-0 rounded-md p-1 text-zinc-400 transition hover:bg-white/5 hover:text-white cursor-pointer disabled:cursor-not-allowed"
+              onClick={() => {
+                setShowDenyModal(false);
+                setActionError(null);
+              }}
+            >
+              <X className="h-4 w-4" />
+            </button>
+            </div>
             <p className="text-sm text-zinc-400">What type of denial did the payer issue? This will reset the PA to require resubmission.</p>
             {actionError && (
               <p aria-live="polite" className="rounded-lg border border-red-500/25 bg-red-500/10 px-3 py-2 text-sm text-red-300">
@@ -839,7 +999,7 @@ export default function BillingAuthTab({ client }: { client: BillingClient }) {
         document.body
       )}
 
-      {showTxDenyModal && createPortal(
+      {showTreatmentPaSection && showTxDenyModal && createPortal(
         <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
           <div
             role="dialog"
@@ -901,7 +1061,7 @@ export default function BillingAuthTab({ client }: { client: BillingClient }) {
       )}
 
       {/* ---------------- TREATMENT PA SECTION ---------------- */}
-      {showTxPa && (
+      {showTreatmentPaSection && showTxPa && (
         <Card className="border-white/10 shadow-sm w-full relative overflow-hidden mt-6">
           {txPaStatus === 'APPROVED' && (
             <div className="absolute top-0 left-0 w-1 bg-brand-green-500 h-full z-20"></div>
@@ -1097,18 +1257,38 @@ export default function BillingAuthTab({ client }: { client: BillingClient }) {
         </Card>
       )}
 
+      </section>
+      )}
+
       {/* Assessment approval modal */}
-      {showApproveModal && createPortal(
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+      {showAssessmentSubmitSteps && showApproveModal && mounted && createPortal(
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in"
+          onClick={() => {
+            if (!isPending) closeApproval('ASSESSMENT');
+          }}
+        >
           <div
             role="dialog"
             aria-modal="true"
             aria-labelledby="assessment-approval-title"
-            className="bg-zinc-900 border border-white/10 rounded-xl w-full max-w-md shadow-2xl overflow-hidden p-6 space-y-4"
+            className="bg-zinc-900 border border-white/10 rounded-xl w-full max-w-md shadow-2xl overflow-hidden p-6 space-y-4 my-auto"
+            onClick={(e) => e.stopPropagation()}
           >
+            <div className="flex items-start justify-between gap-3">
             <h3 id="assessment-approval-title" className="text-lg font-semibold text-white flex items-center">
               <CheckCircle className="w-5 h-5 text-green-500 mr-2" /> Log Authorization Approval
             </h3>
+            <button
+              type="button"
+              aria-label="Close"
+              disabled={isPending}
+              className="shrink-0 rounded-md p-1 text-zinc-400 transition hover:bg-white/5 hover:text-white cursor-pointer disabled:cursor-not-allowed"
+              onClick={() => closeApproval('ASSESSMENT')}
+            >
+              <X className="h-4 w-4" />
+            </button>
+            </div>
             <p className="text-sm text-zinc-400 mb-4">Enter the authorization details provided by the payer.</p>
             {actionError && (
               <p aria-live="polite" className="rounded-lg border border-red-500/25 bg-red-500/10 px-3 py-2 text-sm text-red-300">
@@ -1214,7 +1394,7 @@ export default function BillingAuthTab({ client }: { client: BillingClient }) {
       )}
 
       {/* TX Approval Modal */}
-      {showTxApproveModal && createPortal(
+      {showTreatmentPaSection && showTxApproveModal && createPortal(
         <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
           <div
             role="dialog"
@@ -1329,46 +1509,14 @@ export default function BillingAuthTab({ client }: { client: BillingClient }) {
         document.body
       )}
 
-      {/* Preview Modal */}
-      {previewDoc && createPortal(
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-200">
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="document-preview-title"
-            className="bg-zinc-900 border border-white/10 rounded-2xl w-full max-w-4xl shadow-2xl overflow-hidden flex flex-col h-[80vh]"
-          >
-            <div className="flex justify-between items-center p-4 border-b border-white/10 bg-zinc-950">
-              <h3 id="document-preview-title" className="font-semibold text-white flex items-center">
-                <Eye className="w-5 h-5 mr-2 text-brand-blue-500"/> Preview: {previewDoc.name}
-              </h3>
-              <button
-                type="button"
-                onClick={() => setPreviewDoc(null)}
-                aria-label="Close document preview"
-                className="cursor-pointer rounded-md p-1 text-zinc-400 transition-colors hover:bg-white/5 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue-400"
-              >
-                <X className="w-6 h-6"/>
-              </button>
-            </div>
-            <div className="flex-1 p-8 flex items-center justify-center bg-zinc-900/50 overflow-y-auto">
-              {previewUrl ? (
-                <iframe
-                  src={previewUrl}
-                  title={`${previewDoc.name} preview`}
-                  className="h-full w-full rounded-lg border border-white/10 bg-white shadow-lg"
-                />
-              ) : (
-                <p className="text-zinc-500 flex flex-col items-center">
-                  <FileCheck className="w-12 h-12 mb-3 opacity-20" />
-                  No image uploaded
-                </p>
-              )}
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
+      <DocumentPreviewModal
+        isOpen={Boolean(showInsuranceSnapshot && previewDoc)}
+        onClose={() => setPreviewDoc(null)}
+        title={previewDoc?.name ?? ''}
+        titleId="document-preview-title"
+        breadcrumbLabel="Insurance Snapshot"
+        url={previewUrl}
+      />
     </div>
   );
 }

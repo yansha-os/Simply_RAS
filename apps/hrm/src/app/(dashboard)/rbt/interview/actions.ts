@@ -13,6 +13,7 @@ import {
   readProgressFromPacket,
 } from '@/lib/atsStage';
 import { canUseApplicantDeviceSession } from '@/lib/applicantAccessPolicy';
+import { isCandidateDeviceSessionCurrent } from '@/lib/candidateDeviceSession';
 import {
   INTERVIEW_TIME_SLOTS_ET,
   deriveInterviewView,
@@ -60,6 +61,7 @@ async function resolveApplicantAccess(): Promise<ApplicantAccess> {
           },
           select: {
             revokedAt: true,
+            boundAt: true,
             candidate: {
               select: {
                 stage: true,
@@ -70,7 +72,7 @@ async function resolveApplicantAccess(): Promise<ApplicantAccess> {
         });
         if (
           session &&
-          !session.revokedAt &&
+          isCandidateDeviceSessionCurrent(session) &&
           canUseApplicantDeviceSession(session.candidate)
         ) {
           return { ok: true, candidateId: sessionCandidateId };
@@ -79,7 +81,7 @@ async function resolveApplicantAccess(): Promise<ApplicantAccess> {
     }
 
     const user = await getCurrentUser();
-    if (user?.role === 'RBT' && isUuid(user.id)) {
+    if (user?.role === 'RBT' && user.isActive !== false && isUuid(user.id)) {
       const candidate = await prisma.atsCandidate.findFirst({
         where: { userId: user.id },
         select: { id: true },
@@ -132,7 +134,6 @@ async function loadSnapshot(candidateId: string): Promise<InterviewPortalResult>
         select: {
           id: true,
           status: true,
-          recommendation: true,
           interviewerUserId: true,
           scheduledDate: true,
           scheduledTime: true,
@@ -163,7 +164,6 @@ async function loadSnapshot(candidateId: string): Promise<InterviewPortalResult>
     ? {
         id: candidate.interview.id,
         status: candidate.interview.status,
-        recommendation: candidate.interview.recommendation,
         interviewerUserId: candidate.interview.interviewerUserId,
         scheduledDate: candidate.interview.scheduledDate,
         scheduledTime: candidate.interview.scheduledTime,
@@ -360,10 +360,19 @@ export async function bookOwnInterview(input: {
     });
     const meetingCode = `RiseAndShine_HR_Interview_${candidate.id}`;
     const meetingLink = `https://meet.jit.si/${meetingCode}`;
+    const interviewWhere = candidate.interview
+      ? {
+          candidateId: candidate.id,
+          status: candidate.interview.status,
+          recommendation: candidate.interview.recommendation,
+          scheduledDate: candidate.interview.scheduledDate,
+          scheduledTime: candidate.interview.scheduledTime,
+        }
+      : { candidateId: candidate.id };
 
     await prisma.$transaction([
       prisma.atsInterview.upsert({
-        where: { candidateId: candidate.id },
+        where: interviewWhere,
         create: {
           candidateId: candidate.id,
           interviewerUserId: interviewer.id,
@@ -388,7 +397,11 @@ export async function bookOwnInterview(input: {
         },
       }),
       prisma.atsCandidate.update({
-        where: { id: candidate.id },
+        where: {
+          id: candidate.id,
+          stage: candidate.stage,
+          activationStatus: candidate.activationStatus,
+        },
         data: {
           stage: nextStage,
           dossier: {

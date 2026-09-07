@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   headerGet: vi.fn(() => null),
   revalidatePath: vi.fn(),
   requireRole: vi.fn(),
+  resolveFingerprintValidCandidate: vi.fn(),
   prisma: {
     $transaction: vi.fn(),
     candidateOnboardingPacket: {
@@ -36,6 +37,9 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/prisma', () => ({ prisma: mocks.prisma }));
 vi.mock('@/lib/auth-guard', () => ({ requireRole: mocks.requireRole }));
+vi.mock('@/lib/candidateDeviceSession', () => ({
+  resolveFingerprintValidCandidate: mocks.resolveFingerprintValidCandidate,
+}));
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }));
 vi.mock('next/headers', () => ({
   cookies: vi.fn(async () => ({
@@ -46,7 +50,10 @@ vi.mock('next/headers', () => ({
   headers: vi.fn(async () => ({ get: mocks.headerGet })),
 }));
 
-import { bindMagicLinkSession } from './applicantSessionActions';
+import {
+  bindMagicLinkSession,
+  promoteHiredSessionToRbt,
+} from './applicantSessionActions';
 
 function packet(stage: string, activationStatus: string) {
   return {
@@ -71,12 +78,66 @@ function packet(stage: string, activationStatus: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.resolveFingerprintValidCandidate.mockResolvedValue(null);
   mocks.prisma.$transaction.mockImplementation(
     async (operation: (tx: typeof mocks.prisma) => unknown) => operation(mocks.prisma)
   );
   mocks.prisma.applicantDeviceSession.upsert.mockResolvedValue({});
   mocks.prisma.candidateOnboardingPacket.update.mockResolvedValue({});
   mocks.prisma.atsCandidate.update.mockResolvedValue({});
+});
+
+describe('promoteHiredSessionToRbt device binding', () => {
+  it('does not trust a raw hired-candidate UUID cookie without fingerprint validation', async () => {
+    mocks.cookieGet.mockImplementation((name: string) => {
+      if (name === 'ras_device_session_token') return { value: CANDIDATE_ID };
+      if (name === 'device_fingerprint') return { value: FINGERPRINT };
+      return undefined;
+    });
+
+    const result = await promoteHiredSessionToRbt();
+
+    expect(result).toMatchObject({ success: false });
+    expect(mocks.resolveFingerprintValidCandidate).toHaveBeenCalledWith(
+      CANDIDATE_ID,
+      FINGERPRINT
+    );
+    expect(mocks.prisma.atsCandidate.findUnique).not.toHaveBeenCalled();
+    expect(mocks.cookieSet).not.toHaveBeenCalled();
+  });
+
+  it('promotes only the fingerprint-validated hired candidate', async () => {
+    mocks.cookieGet.mockImplementation((name: string) => {
+      if (name === 'ras_device_session_token') return { value: CANDIDATE_ID };
+      if (name === 'device_fingerprint') return { value: FINGERPRINT };
+      return undefined;
+    });
+    mocks.resolveFingerprintValidCandidate.mockResolvedValue({
+      id: CANDIDATE_ID,
+      userId: '55555555-5555-4555-8555-555555555555',
+      stage: 'HIRED',
+      activationStatus: 'ACTIVE',
+    });
+    mocks.prisma.atsCandidate.findUnique.mockResolvedValue({
+      id: CANDIDATE_ID,
+      firstName: 'Hired',
+      lastName: 'RBT',
+      email: 'hired@example.test',
+      stage: 'HIRED',
+    });
+
+    const result = await promoteHiredSessionToRbt();
+
+    expect(result).toMatchObject({
+      success: true,
+      data: { candidateId: CANDIDATE_ID, stage: 'HIRED', isHired: true },
+    });
+    expect(mocks.cookieSet).toHaveBeenCalledWith(
+      'ras_hrm_role',
+      'RBT',
+      expect.any(Object)
+    );
+  });
 });
 
 describe('bindMagicLinkSession applicant-access separation', () => {

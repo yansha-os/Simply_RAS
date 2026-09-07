@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
 import {
   Users,
@@ -90,7 +91,14 @@ export default function RbtPublicLanding() {
         <header className="bg-white border-b border-orange-200/80 px-4 sm:px-8 py-3.5 flex items-center justify-between transition-all">
           <Link href="/" className="flex items-center gap-3.5 group">
             <div className="w-12 h-12 rounded-full bg-orange-100 border-2 border-orange-300 shadow-md shadow-orange-500/15 flex items-center justify-center p-1.5 overflow-hidden group-hover:scale-105 transition-transform shrink-0">
-              <img src="/logo.png" alt="Rise & Shine ABA Logo" className="w-full h-full object-contain rounded-full" />
+              <Image
+                src="/logo.png"
+                alt="Rise & Shine ABA Logo"
+                width={48}
+                height={48}
+                className="h-full w-full rounded-full object-contain"
+                priority
+              />
             </div>
             <div>
               <span className="font-extrabold text-slate-900 text-xl tracking-tight font-heading group-hover:text-[#F97316] transition-colors block leading-snug">
@@ -466,7 +474,13 @@ export default function RbtPublicLanding() {
           <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6 pb-10 border-b border-white/20">
             <div className="flex items-center gap-4">
               <div className="w-14 h-14 rounded-full bg-white border-2 border-orange-200 shadow-xl flex items-center justify-center p-1.5 overflow-hidden shrink-0">
-                <img src="/logo.png" alt="Rise & Shine ABA Logo" className="w-full h-full object-contain rounded-full" />
+                <Image
+                  src="/logo.png"
+                  alt="Rise & Shine ABA Logo"
+                  width={56}
+                  height={56}
+                  className="h-full w-full rounded-full object-contain"
+                />
               </div>
               <div>
                 <span className="font-black text-white text-xl tracking-tight font-heading block">

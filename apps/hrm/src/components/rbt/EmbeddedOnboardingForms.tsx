@@ -2,6 +2,7 @@
 
 import { useState, useSyncExternalStore } from 'react';
 import { toast } from 'sonner';
+import { Eye, EyeOff } from 'lucide-react';
 import {
   computeW4Step3Total,
   emptyBackgroundCheck,
@@ -20,6 +21,13 @@ import { submitOnboardingEmbeddedForm } from '@/app/actions/onboardingSignatureA
 import { OfficialPdfBar } from '@/components/rbt/OnboardingStepPanels';
 import { OnboardingConfirmModal } from '@/components/rbt/OnboardingConfirmModal';
 import { getActiveApplicantId, getActiveApplicantName } from '@/lib/syncAtsProgress';
+
+export function formatSsn(raw: string): string {
+  const digits = raw.replace(/\D/g, '').slice(0, 9);
+  if (digits.length <= 3) return digits;
+  if (digits.length <= 5) return `${digits.slice(0, 3)}-${digits.slice(3)}`;
+  return `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5)}`;
+}
 
 function Field({
   label,
@@ -94,6 +102,8 @@ function W4Fields({
   const otherDollars = otherN * 500;
   const step3Total = computeW4Step3Total(values);
 
+  const [showSsn, setShowSsn] = useState(false);
+
   return (
     <div className="space-y-4">
       <p className="text-[12px] leading-relaxed text-slate-600">
@@ -118,15 +128,27 @@ function W4Fields({
             <input className={inputClass} value={values.lastName} onChange={(e) => set('lastName', e.target.value)} />
           </Field>
         </div>
-        <Field label="Social security number (1b)" hint="Must match your Social Security card. Audit trail shows last 4 only.">
-          <input
-            className={inputClass}
-            inputMode="numeric"
-            autoComplete="off"
-            placeholder="XXX-XX-XXXX"
-            value={values.ssn}
-            onChange={(e) => set('ssn', e.target.value)}
-          />
+        <Field label="Social security number (1b)" hint="Must match your Social Security card. Auto-formats as XXX-XX-XXXX.">
+          <div className="relative">
+            <input
+              className={inputClass}
+              type={showSsn ? 'text' : 'password'}
+              inputMode="numeric"
+              autoComplete="off"
+              maxLength={11}
+              placeholder="XXX-XX-XXXX"
+              value={values.ssn}
+              onChange={(e) => set('ssn', formatSsn(e.target.value))}
+            />
+            <button
+              type="button"
+              onClick={() => setShowSsn(!showSsn)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+              title={showSsn ? 'Hide SSN' : 'Show SSN'}
+            >
+              {showSsn ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+          </div>
         </Field>
         <Field label="Address">
           <input
@@ -358,6 +380,8 @@ function It2104Fields({
   const set = <K extends keyof It2104FormValues>(key: K, val: It2104FormValues[K]) =>
     setValues({ ...values, [key]: val });
 
+  const [showSsn, setShowSsn] = useState(false);
+
   return (
     <div className="space-y-4">
       <p className="text-[12px] leading-relaxed text-slate-600">
@@ -382,15 +406,27 @@ function It2104Fields({
             <input className={inputClass} value={values.lastName} onChange={(e) => set('lastName', e.target.value)} />
           </Field>
         </div>
-        <Field label="Your Social Security number">
-          <input
-            className={inputClass}
-            inputMode="numeric"
-            autoComplete="off"
-            placeholder="XXX-XX-XXXX"
-            value={values.ssn}
-            onChange={(e) => set('ssn', e.target.value)}
-          />
+        <Field label="Your Social Security number" hint="Auto-formats as XXX-XX-XXXX. Masked on-screen for privacy.">
+          <div className="relative">
+            <input
+              className={inputClass}
+              type={showSsn ? 'text' : 'password'}
+              inputMode="numeric"
+              autoComplete="off"
+              maxLength={11}
+              placeholder="XXX-XX-XXXX"
+              value={values.ssn}
+              onChange={(e) => set('ssn', formatSsn(e.target.value))}
+            />
+            <button
+              type="button"
+              onClick={() => setShowSsn(!showSsn)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+              title={showSsn ? 'Hide SSN' : 'Show SSN'}
+            >
+              {showSsn ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+          </div>
         </Field>
         <div className="grid gap-3 sm:grid-cols-4">
           <div className="sm:col-span-3">

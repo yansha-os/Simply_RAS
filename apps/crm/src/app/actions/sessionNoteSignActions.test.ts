@@ -43,6 +43,7 @@ const mocks = vi.hoisted(() => {
     requireClientAccess: vi.fn(),
     notifyUsers: vi.fn(),
     getCredentialStatus: vi.fn(),
+    assertNoteCredentialHardStop: vi.fn(),
     revalidatePath: vi.fn(),
   };
 });
@@ -55,6 +56,7 @@ vi.mock('@/lib/auth-guard', () => ({
 vi.mock('@/app/actions/notifications', () => ({ notifyUsers: mocks.notifyUsers }));
 vi.mock('@/lib/staffCredentials.server', () => ({
   getCredentialStatus: mocks.getCredentialStatus,
+  assertNoteCredentialHardStop: mocks.assertNoteCredentialHardStop,
 }));
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }));
 
@@ -104,7 +106,7 @@ function note(overrides: Record<string, unknown> = {}) {
       clientId: CLIENT_ID,
       bcbaId: BCBA_ID,
       status: 'COMPLETED',
-      client: { id: CLIENT_ID, bcbaId: BCBA_ID },
+      client: { id: CLIENT_ID, bcbaId: BCBA_ID, status: 'STAFFING_PENDING' },
       rbt: { id: RBT_ID },
     },
     ...overrides,
@@ -153,6 +155,7 @@ beforeEach(() => {
   mocks.prisma.$transaction.mockImplementation(
     async (callback: (tx: typeof mocks.tx) => unknown) => callback(mocks.tx),
   );
+  mocks.assertNoteCredentialHardStop.mockResolvedValue({ ok: true, warnings: [] });
 });
 
 describe('BCBA SessionNote signing action', () => {

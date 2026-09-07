@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   summarizeStaffCredentials,
+  evaluateCredentialHardStop,
   REQUIRED_CREDENTIALS_BY_ROLE,
   type CredentialRow,
 } from '../staffCredentials';
@@ -110,5 +111,37 @@ describe('summarizeStaffCredentials (P2 credential soft gate)', () => {
     expect(REQUIRED_CREDENTIALS_BY_ROLE.BCBA).toContain('BACB_LICENSE');
     expect(REQUIRED_CREDENTIALS_BY_ROLE.RBT).toContain('BACB_LICENSE');
     expect(REQUIRED_CREDENTIALS_BY_ROLE.BILLING).toBeUndefined();
+  });
+});
+
+describe('evaluateCredentialHardStop (Phase 3 ACTIVE hard gate)', () => {
+  it('blocks ACTIVE clients when RBT license expired', () => {
+    const rbt = summarize('RBT', [
+      bacb({ expirationDate: new Date('2026-05-01T00:00:00Z') }),
+    ]);
+    const bcba = summarize('BCBA', [bacb()]);
+    const verdict = evaluateCredentialHardStop({
+      clientStatus: 'ACTIVE',
+      rbtStatus: rbt,
+      bcbaStatus: bcba,
+    });
+    expect(verdict.ok).toBe(false);
+    if (!verdict.ok) {
+      expect(verdict.code).toBe('CREDENTIAL_HARD_STOP');
+      expect(verdict.blockers.join(' ')).toContain('Session RBT');
+    }
+  });
+
+  it('warns only on non-ACTIVE sandbox clients', () => {
+    const rbt = summarize('RBT', [
+      bacb({ expirationDate: new Date('2026-05-01T00:00:00Z') }),
+    ]);
+    const verdict = evaluateCredentialHardStop({
+      clientStatus: 'STAFFING_PENDING',
+      rbtStatus: rbt,
+      bcbaStatus: null,
+    });
+    expect(verdict.ok).toBe(true);
+    if (verdict.ok) expect(verdict.warnings.length).toBeGreaterThan(0);
   });
 });

@@ -6,7 +6,8 @@ import FlowMap from '@/components/client-profile/FlowMap';
 import ClientActiveCommandCenter from '@/components/client-profile/ClientActiveCommandCenter';
 import BackButton from '@/components/ui/BackButton';
 import { AlertTriangle } from 'lucide-react';
-import { requireClientAccess, requireStaff } from '@/lib/auth-guard';
+import { requireClientAccess, requireStaff, SESSION_NOTES_CONVERSION_ROLES, SESSION_NOTES_ROLES } from '@/lib/auth-guard';
+import type { Role } from '@repo/db';
 
 /**
  * PHI over-fetch guard (audit H9): messages and sessions are capped to the
@@ -126,6 +127,11 @@ export default async function ClientProfilePage(props: {
   }
 
   const isActive = client.status === 'ACTIVE';
+  const viewerRole = staff.user.role as Role;
+  const sessionNotesAccess = {
+    canView: SESSION_NOTES_ROLES.includes(viewerRole),
+    canConvert: SESSION_NOTES_CONVERSION_ROLES.includes(viewerRole),
+  };
 
   return (
     <div className="flex flex-col h-full animate-slide-up">
@@ -168,6 +174,7 @@ export default async function ClientProfilePage(props: {
         mode={searchParams?.mode}
         tab={searchParams?.tab}
         bcbas={allBcbas}
+        sessionNotesAccess={sessionNotesAccess}
       />
       
       </div>

@@ -19,10 +19,10 @@ export function parseX12_835_ERA(rawEdi835Text: string): RemittanceClaimResult[]
 
   let currentClaim: RemittanceClaimResult | null = null;
 
-  lines.forEach((line) => {
+  for (const line of lines) {
     // CLP Segment: Claim Payment Information (CLP*ClaimID*Status*Billed*Paid...)
     if (line.startsWith('CLP*')) {
-      if (currentClaim && (currentClaim as any).claimId) {
+      if (currentClaim?.claimId) {
         results.push(currentClaim);
       }
       const parts = line.split('*');
@@ -66,9 +66,9 @@ export function parseX12_835_ERA(rawEdi835Text: string): RemittanceClaimResult[]
           currentClaim.denialDescription = `Claim adjustment reason code: ${reasonCode}`;
       }
     }
-  });
+  }
 
-  if (currentClaim && (currentClaim as any).claimId) {
+  if (currentClaim?.claimId) {
     results.push(currentClaim);
   }
 

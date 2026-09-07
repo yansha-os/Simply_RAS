@@ -6,12 +6,13 @@ import {
   extractSubmissionFingerprint,
   isSubmissionFingerprint,
 } from '@repo/db/session-note-attestation';
+import { evaluateActiveClientDemoHygiene } from '@repo/db/pilot-cohort-hygiene';
 import { revalidatePath } from 'next/cache';
 
 import { notifyUsers } from '@/app/actions/notifications';
 import { requireClientAccess, requireStaff } from '@/lib/auth-guard';
 import { prisma } from '@/lib/prisma';
-import { getCredentialStatus } from '@/lib/staffCredentials.server';
+import { getCredentialStatus, assertNoteCredentialHardStop } from '@/lib/staffCredentials.server';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -131,7 +132,7 @@ export async function signSessionNotesAsBcba(expectations: BcbaSignExpectation[]
         },
         session: {
           include: {
-            client: { select: { id: true, bcbaId: true } },
+            client: { select: { id: true, bcbaId: true, status: true } },
             rbt: { select: { id: true } },
           },
         },
@@ -183,6 +184,30 @@ export async function signSessionNotesAsBcba(expectations: BcbaSignExpectation[]
           code: policy.code,
           manualReviewRequired: policy.manualReviewRequired,
           error: policy.reason,
+        };
+      }
+
+      const demoHygiene = evaluateActiveClientDemoHygiene(note.session.client.status, {
+        structuredContent: note.structuredContent,
+      });
+      if (!demoHygiene.ok) {
+        return {
+          success: false as const,
+          code: demoHygiene.code,
+          error: demoHygiene.reason,
+        };
+      }
+
+      const credentialGate = await assertNoteCredentialHardStop({
+        clientStatus: note.session.client.status,
+        bcbaUserId: actorGate.user.id,
+        rbtUserId: note.session.rbt?.id,
+      });
+      if (!credentialGate.ok) {
+        return {
+          success: false as const,
+          code: credentialGate.code,
+          error: credentialGate.error,
         };
       }
     }
@@ -345,10 +370,10 @@ export async function signSessionNotesAsBcba(expectations: BcbaSignExpectation[]
         .filter((id): id is string => Boolean(id));
       await notifyUsers({
         userIds: [...billers.map((biller) => biller.id), ...caseCoordinatorIds],
-        title: 'Notes ready for Plutus tracker',
+        title: 'Notes ready to bill',
         message: `${notes.length} session note(s) BCBA-signed — eligible for manual claims handoff.`,
         type: 'NOTE_READY_FOR_PLUTUS',
-        linkUrl: '/notes?queue=ready',
+        linkUrl: '/portal-billing/claims?queue=ready',
         dedupeHours: 4,
       });
 
@@ -379,6 +404,7 @@ export async function signSessionNotesAsBcba(expectations: BcbaSignExpectation[]
 
     revalidatePath('/', 'layout');
     revalidatePath('/notes');
+    revalidatePath('/portal-billing/claims');
     revalidatePath('/portal-clinical/daily');
     revalidatePath('/portal-clinical/notes');
     revalidatePath('/portal-clinical');

@@ -3,18 +3,33 @@
 import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { AlertTriangle, PhoneCall, CheckCircle, Loader2, FileText, DownloadCloud } from 'lucide-react';
+import { AlertTriangle, PhoneCall, CheckCircle, Loader2, DownloadCloud } from 'lucide-react';
 import { useTransition } from 'react';
 import { toast } from 'sonner';
 import { resolveP2PDenial } from '@/app/(dashboard)/portal-case/actions/clinical';
+import { canonicalDocumentReference } from '@/lib/documentReference';
+import { parsePacketFormData } from '@/lib/safeParseJson';
 
-export default function PeerToPeerTab({ client }: { client: any }) {
+type PeerToPeerClient = {
+  id: string;
+  intakePacket: { formData: unknown } | null;
+  paRequests: Array<{
+    id: string;
+    type: string;
+    status: string;
+    p2pResolved: boolean;
+  }>;
+};
+
+export default function PeerToPeerTab({ client }: { client: PeerToPeerClient }) {
   const [isPending, startTransition] = useTransition();
   const [notes, setNotes] = useState('');
   const [evalDownloaded, setEvalDownloaded] = useState(false);
   const [referralDownloaded, setReferralDownloaded] = useState(false);
 
-  const p2pRequests = client.paRequests?.filter((pa: any) => pa.status === 'DENIED_CLINICAL' && !pa.p2pResolved) || [];
+  const p2pRequests = client.paRequests.filter(
+    (pa) => pa.status === 'DENIED_CLINICAL' && !pa.p2pResolved
+  );
 
   if (p2pRequests.length === 0) {
     return (
@@ -24,20 +39,14 @@ export default function PeerToPeerTab({ client }: { client: any }) {
     );
   }
 
-  let parsedFormData: any = {};
-  if (client.intakePacket?.formData) {
-    try {
-      let parsed = typeof client.intakePacket.formData === 'string' ? JSON.parse(client.intakePacket.formData) : client.intakePacket.formData;
-      if (typeof parsed === 'string') parsed = JSON.parse(parsed);
-      parsedFormData = parsed || {};
-    } catch (e) {}
-  }
+  const formData = parsePacketFormData(client.intakePacket?.formData);
+  const evalUrl = canonicalDocumentReference(formData.docEval, client.id);
+  const referralUrl = canonicalDocumentReference(formData.docReferral, client.id);
+  const hasEval = evalUrl !== null;
+  const hasReferral = referralUrl !== null;
 
-  const hasEval = !!parsedFormData?.docEval?.url;
-  const hasReferral = !!parsedFormData?.docReferral?.url;
-
-  const canResolve = notes.trim().length > 0 && 
-                     (!hasEval || evalDownloaded) && 
+  const canResolve = notes.trim().length > 0 &&
+                     (!hasEval || evalDownloaded) &&
                      (!hasReferral || referralDownloaded);
 
   const handleResolve = (paId: string) => {
@@ -46,7 +55,7 @@ export default function PeerToPeerTab({ client }: { client: any }) {
       else toast.error('You must download and review all available clinical documents first.');
       return;
     }
-    
+
     startTransition(async () => {
       const res = await resolveP2PDenial(paId, notes);
       if (res?.success) {
@@ -66,11 +75,11 @@ export default function PeerToPeerTab({ client }: { client: any }) {
           Clinical Denial - Peer-to-Peer Required
         </h2>
         <p className="text-red-400 text-sm">
-          The payer's medical review board has denied the authorization based on lack of medical necessity. You must schedule and conduct a Peer-to-Peer phone call with the medical director to overturn this decision.
+          The payer&apos;s medical review board has denied the authorization based on lack of medical necessity. You must schedule and conduct a Peer-to-Peer phone call with the medical director to overturn this decision.
         </p>
       </div>
 
-      {p2pRequests.map((pa: any) => (
+      {p2pRequests.map((pa) => (
         <Card key={pa.id} className="bg-zinc-950 border border-white/5">
           <CardHeader className="border-b border-white/5 pb-4 bg-zinc-900/50">
             <div className="flex justify-between items-start">
@@ -80,24 +89,24 @@ export default function PeerToPeerTab({ client }: { client: any }) {
               </CardTitle>
               <div className="flex gap-2">
                 {hasEval && (
-                  <a 
-                    href={parsedFormData.docEval.url} 
-                    target="_blank" 
+                  <a
+                    href={evalUrl ?? undefined}
+                    target="_blank"
                     rel="noopener noreferrer"
                     onClick={() => setEvalDownloaded(true)}
-                    className={`inline-flex items-center text-xs px-3 py-1.5 rounded-md border transition-colors ${evalDownloaded ? 'bg-green-500/10 text-green-400 border-green-500/30' : 'bg-brand-blue-500 hover:bg-brand-blue-600 text-white border-brand-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.3)]'}`}
+                    className={`inline-flex cursor-pointer items-center text-xs px-3 py-1.5 rounded-md border transition-colors ${evalDownloaded ? 'bg-green-500/10 text-green-400 border-green-500/30' : 'bg-brand-blue-500 hover:bg-brand-blue-600 text-white border-brand-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.3)]'}`}
                   >
                     {evalDownloaded ? <CheckCircle className="w-3.5 h-3.5 mr-1.5" /> : <DownloadCloud className="w-3.5 h-3.5 mr-1.5" />}
                     Diagnostic Eval
                   </a>
                 )}
                 {hasReferral && (
-                  <a 
-                    href={parsedFormData.docReferral.url} 
-                    target="_blank" 
+                  <a
+                    href={referralUrl ?? undefined}
+                    target="_blank"
                     rel="noopener noreferrer"
                     onClick={() => setReferralDownloaded(true)}
-                    className={`inline-flex items-center text-xs px-3 py-1.5 rounded-md border transition-colors ${referralDownloaded ? 'bg-green-500/10 text-green-400 border-green-500/30' : 'bg-brand-blue-500 hover:bg-brand-blue-600 text-white border-brand-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.3)]'}`}
+                    className={`inline-flex cursor-pointer items-center text-xs px-3 py-1.5 rounded-md border transition-colors ${referralDownloaded ? 'bg-green-500/10 text-green-400 border-green-500/30' : 'bg-brand-blue-500 hover:bg-brand-blue-600 text-white border-brand-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.3)]'}`}
                   >
                     {referralDownloaded ? <CheckCircle className="w-3.5 h-3.5 mr-1.5" /> : <DownloadCloud className="w-3.5 h-3.5 mr-1.5" />}
                     Physician Referral
@@ -121,13 +130,13 @@ export default function PeerToPeerTab({ client }: { client: any }) {
               </div>
 
               <div className="flex justify-end">
-                <Button 
-                  variant="primary" 
+                <Button
+                  variant="primary"
                   disabled={isPending || !canResolve}
                   onClick={() => handleResolve(pa.id)}
                   className={`font-bold tracking-wide transition-all ${
-                    canResolve 
-                      ? 'bg-green-600 hover:bg-green-700 text-white shadow-[0_0_15px_rgba(34,197,94,0.3)]' 
+                    canResolve
+                      ? 'bg-green-600 hover:bg-green-700 text-white shadow-[0_0_15px_rgba(34,197,94,0.3)] cursor-pointer'
                       : 'bg-zinc-800 text-zinc-500 cursor-not-allowed border border-zinc-700'
                   }`}
                 >

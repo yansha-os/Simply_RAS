@@ -1,6 +1,9 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import Image from 'next/image';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { submitRbtApplication } from '@/app/actions/publicRbt';
 import { attachApplicantDocuments } from '@/app/actions/candidateDocumentActions';
 import { toast } from 'sonner';
@@ -41,6 +44,7 @@ const NYC_BOROUGHS = [
 ] as const;
 
 export default function RbtApplicationForm() {
+  const router = useRouter();
   const [currentStep, setCurrentStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
@@ -209,7 +213,7 @@ export default function RbtApplicationForm() {
   const clearDraft = () => {
     try {
       localStorage.removeItem(DRAFT_KEY);
-    } catch (e) {}
+    } catch {}
     setFormData({
       firstName: '',
       lastName: '',
@@ -265,7 +269,7 @@ export default function RbtApplicationForm() {
         : [...current, item];
       try {
         localStorage.setItem(DRAFT_KEY, JSON.stringify({ formData: { ...prev, [field]: updated }, currentStep }));
-      } catch (e) {}
+      } catch {}
       return { ...prev, [field]: updated };
     });
   };
@@ -348,7 +352,7 @@ export default function RbtApplicationForm() {
     setCurrentStep(nextStep);
     try {
       localStorage.setItem(DRAFT_KEY, JSON.stringify({ formData, currentStep: nextStep }));
-    } catch (e) {}
+    } catch {}
   };
 
   const handlePrevStep = () => {
@@ -356,7 +360,7 @@ export default function RbtApplicationForm() {
     setCurrentStep(prevStep);
     try {
       localStorage.setItem(DRAFT_KEY, JSON.stringify({ formData, currentStep: prevStep }));
-    } catch (e) {}
+    } catch {}
   };
 
   const handleSubmit = async () => {
@@ -471,7 +475,7 @@ export default function RbtApplicationForm() {
           };
           localStorage.setItem(`ras_submitted_app_${res.applicantId}`, JSON.stringify(submittedAppPayload));
           localStorage.setItem('ras_latest_submitted_app', JSON.stringify(submittedAppPayload));
-        } catch (e) {}
+        } catch {}
         setIsSubmitted(true);
         if (uploadIssue) {
           toast.warning('Application saved, but your documents still need attention.');
@@ -531,13 +535,16 @@ export default function RbtApplicationForm() {
               Contact HR for next steps
             </a>
             {/* A full navigation intentionally clears any in-memory application state. */}
-            {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
-            <a
+            <Link
               href="/"
+              onClick={(event) => {
+                event.preventDefault();
+                router.push('/');
+              }}
               className="inline-flex cursor-pointer items-center justify-center rounded-xl border border-white/10 bg-white/5 px-5 py-3 text-xs font-black text-zinc-100 transition-all hover:border-white/20 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-400"
             >
               Return home
-            </a>
+            </Link>
           </div>
         </div>
       </section>
@@ -619,7 +626,7 @@ export default function RbtApplicationForm() {
           ) : null}
           <button
             type="button"
-            onClick={() => (window.location.href = '/')}
+            onClick={() => router.push('/')}
             className="cursor-pointer rounded-2xl border border-slate-300 bg-white px-6 py-3.5 text-sm font-extrabold text-slate-700 shadow-sm transition-all hover:scale-105 hover:border-orange-300 hover:text-[#F97316] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2"
           >
             Return to Home Page
@@ -1648,9 +1655,12 @@ export default function RbtApplicationForm() {
             </div>
             <div className="flex-1 overflow-hidden p-0 bg-zinc-950 flex items-center justify-center min-h-[400px]">
               {previewModal.mimeType.startsWith('image/') ? (
-                <img
+                <Image
                   src={previewModal.url}
                   alt={`Preview of ${previewModal.name}`}
+                  width={1200}
+                  height={800}
+                  unoptimized
                   className="max-w-full max-h-[600px] object-contain rounded-xl border border-white/10 shadow-lg"
                 />
               ) : (

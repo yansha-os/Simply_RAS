@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/Button';
+import { exportPlutusHandoffCsv } from '@/app/(dashboard)/notes/actions';
 import {
   Download,
   AlertTriangle,
@@ -23,7 +24,37 @@ import {
 import { isDevToolsEnabled } from '@/lib/devToolsGate';
 import { toast } from 'sonner';
 
-function durationMinutes(note: any): number {
+type PlutusPerson = {
+  firstName: string;
+  lastName: string;
+};
+
+type PlutusClient = PlutusPerson & {
+  id: string;
+  memberId?: string | null;
+  medicaidId?: string | null;
+  insurancePayer?: string | null;
+  authorizations?: Array<{ authNumber?: string | null }>;
+};
+
+type PlutusHandoffNote = {
+  id: string;
+  billableUnits?: number | null;
+  isConverted?: boolean;
+  plutusClaimRef?: string | null;
+  session?: {
+    actualStart?: string | Date | null;
+    scheduledStart?: string | Date | null;
+    actualEnd?: string | Date | null;
+    scheduledEnd?: string | Date | null;
+    cptCode?: string | null;
+    client?: PlutusClient | null;
+    bcba?: PlutusPerson | null;
+    rbt?: PlutusPerson | null;
+  } | null;
+};
+
+function durationMinutes(note: PlutusHandoffNote): number {
   const start = note.session?.actualStart || note.session?.scheduledStart;
   const end = note.session?.actualEnd || note.session?.scheduledEnd;
   if (!start || !end) return 0;
@@ -31,7 +62,7 @@ function durationMinutes(note: any): number {
 }
 
 /** Map a durable SessionNote → optional 837 preview header (display-only P3 stub). */
-function noteToClaimInput(note: any): ClaimHeaderInput | null {
+function noteToClaimInput(note: PlutusHandoffNote): ClaimHeaderInput | null {
   const client = note?.session?.client;
   if (!client) return null;
 
@@ -47,7 +78,8 @@ function noteToClaimInput(note: any): ClaimHeaderInput | null {
 
   const bcba = note.session?.bcba;
   const auth =
-    client.authorizations?.find((a: any) => a.authNumber)?.authNumber || undefined;
+    client.authorizations?.find((authorization) => authorization.authNumber)?.authNumber ||
+    undefined;
 
   return {
     claimId: (note.plutusClaimRef || note.id.slice(0, 8)).replace(/[^a-zA-Z0-9]/g, ''),
@@ -74,7 +106,7 @@ function noteToClaimInput(note: any): ClaimHeaderInput | null {
   };
 }
 
-function formatServiceDate(note: any): string {
+function formatServiceDate(note: PlutusHandoffNote): string {
   const start = note.session?.actualStart || note.session?.scheduledStart;
   if (!start) return '—';
   return new Date(start).toLocaleDateString();
@@ -84,12 +116,13 @@ export default function PlutusHandoffQueue({
   readyNotes = [],
   convertedNotes = [],
 }: {
-  readyNotes?: any[];
-  convertedNotes?: any[];
+  readyNotes?: PlutusHandoffNote[];
+  convertedNotes?: PlutusHandoffNote[];
 }) {
   const [filter, setFilter] = useState<'all' | 'ready' | 'converted'>('all');
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
   const [showEdiPreview, setShowEdiPreview] = useState(false);
+  const [isExporting, startExport] = useTransition();
   // Gap 27: EDI 837 preview is a P3 stub — dev-flagged, never shown in production.
   const ediPreviewEnabled = isDevToolsEnabled();
 
@@ -125,6 +158,23 @@ export default function PlutusHandoffQueue({
     });
   };
 
+  const downloadPlutusCsv = () => {
+    startExport(async () => {
+      const result = await exportPlutusHandoffCsv();
+      if (!result.success) {
+        toast.error(result.error);
+        return;
+      }
+      const blob = new Blob([result.csv], { type: 'text/csv;charset=utf-8' });
+      const anchor = document.createElement('a');
+      anchor.href = URL.createObjectURL(blob);
+      anchor.download = result.filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      toast.success(`Exported ${result.rowCount} converted note(s) for Plutus filing.`);
+    });
+  };
+
   const readyCount = readyNotes.length;
   const convertedCount = convertedNotes.length;
   const totalCount = readyCount + convertedCount;
@@ -147,6 +197,14 @@ export default function PlutusHandoffQueue({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            onClick={downloadPlutusCsv}
+            isLoading={isExporting}
+            className="bg-emerald-600/90 hover:bg-emerald-600 text-white font-bold text-xs px-4 py-2.5 rounded-xl flex items-center gap-2 cursor-pointer disabled:cursor-not-allowed border border-emerald-500/30"
+          >
+            <Download className="w-4 h-4" /> Export Plutus CSV
+          </Button>
           <div className="flex bg-zinc-900/80 p-1 rounded-2xl border border-white/10 backdrop-blur-xl">
             {(
               [

@@ -1,4 +1,6 @@
 import React from 'react';
+import Link from 'next/link';
+
 import BillingQueueTabs from '@/components/portal-billing/BillingQueueTabs';
 import { BILLING_ROLES, requirePersistedStaff } from '@/lib/auth-guard';
 import { loadBillingQueue } from '../loader';
@@ -13,15 +15,22 @@ export default async function BillingClientsPage() {
   const { assessmentClients, treatmentClients } = await loadBillingQueue();
 
   return (
-    <div className="flex-1 p-8 overflow-y-auto">
-      <div className="max-w-7xl mx-auto space-y-6">
+    <div className="p-8">
+      <div className="space-y-4 animate-fade-in-up">
         <div>
-          <h1 className="text-2xl font-bold text-white font-heading tracking-wide">
+          <h2 className="font-heading text-2xl font-bold text-white">
             Billing &amp; PA Queue
-          </h1>
-          <p className="text-zinc-400 mt-1 text-sm">
-            Manual Plutus tracker — Assessment and Treatment Prior Authorizations from live{' '}
-            <span className="font-mono text-zinc-300">PARequest</span> rows. No EDI in this phase.
+          </h2>
+          <p className="mt-0.5 text-xs text-zinc-400">
+            Triage only — open a client to record VOB and Assessment PA (97151) in the profile.
+            Session claims live on{' '}
+            <Link
+              href="/portal-billing/claims"
+              className="font-semibold text-brand-orange-400 hover:text-brand-orange-300 cursor-pointer"
+            >
+              Session Claims
+            </Link>
+            .
           </p>
         </div>
 

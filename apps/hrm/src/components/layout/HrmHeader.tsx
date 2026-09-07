@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
 import NotificationBell from '@/components/layout/NotificationBell';
 import { Search, LogOut, ShieldCheck, Palette, Lock } from 'lucide-react';
 import { useHrmRole } from '@/lib/useHrmRole';
@@ -14,6 +15,8 @@ import {
 } from '@/lib/syncAtsProgress';
 
 export function HrmHeader() {
+  const pathname = usePathname();
+  const router = useRouter();
   const { role } = useHrmRole();
   const [showDropdown, setShowDropdown] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -42,7 +45,7 @@ export function HrmHeader() {
             return;
           }
         }
-      } catch (e) {}
+      } catch {}
       setApplicantProfile(null);
     }
 
@@ -58,7 +61,8 @@ export function HrmHeader() {
     };
   }, []);
 
-  const isRbtLightMode = (role === 'RBT' || role === 'APPLICANT') && colorMode === 'light';
+  const isRbtRoute = pathname?.startsWith('/rbt') ?? false;
+  const isRbtLightMode = isRbtRoute || ((role === 'RBT' || role === 'APPLICANT') && colorMode === 'light');
 
   const userProfiles = {
     HEAD_HR: { name: 'Eleanor Vance', title: 'Head of HR & Dispatch Lead', badge: 'HEAD HR', email: 'eleanor.vance@riseandshine.com' },
@@ -200,7 +204,7 @@ export function HrmHeader() {
                       localStorage.removeItem('hrm_active_user');
                       window.dispatchEvent(new Event('hrm_role_changed'));
                       toast.success('Signed out successfully! Redirecting to login...');
-                      window.location.href = '/login';
+                      router.push('/login');
                     }}
                   >
                     <LogOut className="w-4 h-4 text-rose-600" />

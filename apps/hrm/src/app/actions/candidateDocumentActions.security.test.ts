@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const CANDIDATE_ID = '11111111-1111-4111-8111-111111111111';
 const CURRENT_TOKEN = 'current-candidate-upload-token';
+const PDF_BYTES = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31]);
 
 const mocks = vi.hoisted(() => {
   const upload = vi.fn();
@@ -26,7 +27,7 @@ const mocks = vi.hoisted(() => {
     prisma: {
       candidateOnboardingPacket: {
         findFirst: vi.fn(),
-        update: vi.fn(),
+        updateMany: vi.fn(),
       },
       atsCandidate: {
         findUnique: vi.fn(),
@@ -68,7 +69,7 @@ function resumeFormData() {
   const formData = new FormData();
   formData.append(
     'resume',
-    new File([new Uint8Array([1, 2, 3])], 'resume.pdf', {
+    new File([PDF_BYTES], 'resume.pdf', {
       type: 'application/pdf',
     })
   );
@@ -82,7 +83,7 @@ beforeEach(() => {
     error: null,
   }));
   mocks.remove.mockResolvedValue({ data: [], error: null });
-  mocks.prisma.candidateOnboardingPacket.update.mockResolvedValue({});
+  mocks.prisma.candidateOnboardingPacket.updateMany.mockResolvedValue({ count: 1 });
   mocks.prisma.atsCandidate.findUnique.mockResolvedValue({ dossier: {} });
   mocks.prisma.atsCandidate.update.mockResolvedValue({});
 });
@@ -101,7 +102,7 @@ describe('attachApplicantDocuments authoritative candidate state', () => {
 
     expect(result).toEqual({ success: true });
     expect(mocks.upload).toHaveBeenCalledTimes(1);
-    expect(mocks.prisma.candidateOnboardingPacket.update).toHaveBeenCalledWith(
+    expect(mocks.prisma.candidateOnboardingPacket.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           resumeFileName: 'resume.pdf',
@@ -133,7 +134,7 @@ describe('attachApplicantDocuments authoritative candidate state', () => {
     const formData = new FormData();
     formData.append(
       'fortyHourCert',
-      new File([new Uint8Array([1, 2, 3])], 'certificate.pdf', {
+      new File([PDF_BYTES], 'certificate.pdf', {
         type: 'application/pdf',
       })
     );
@@ -146,7 +147,7 @@ describe('attachApplicantDocuments authoritative candidate state', () => {
 
     expect(result).toEqual({ success: true });
     const packetUpdate =
-      mocks.prisma.candidateOnboardingPacket.update.mock.calls[0]?.[0];
+      mocks.prisma.candidateOnboardingPacket.updateMany.mock.calls[0]?.[0];
     expect(packetUpdate?.data).toMatchObject({
       certUploaded: true,
       formData: {
@@ -183,7 +184,7 @@ describe('attachApplicantDocuments authoritative candidate state', () => {
 
     expect(result).toMatchObject({ success: false });
     expect(mocks.upload).not.toHaveBeenCalled();
-    expect(mocks.prisma.candidateOnboardingPacket.update).not.toHaveBeenCalled();
+    expect(mocks.prisma.candidateOnboardingPacket.updateMany).not.toHaveBeenCalled();
     expect(mocks.prisma.atsCandidate.update).not.toHaveBeenCalled();
   });
 
@@ -207,7 +208,85 @@ describe('attachApplicantDocuments authoritative candidate state', () => {
 
     expect(result).toEqual({ success: false, error: 'No documents provided.' });
     expect(mocks.upload).not.toHaveBeenCalled();
-    expect(mocks.prisma.candidateOnboardingPacket.update).not.toHaveBeenCalled();
+    expect(mocks.prisma.candidateOnboardingPacket.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects forged document content before touching Storage', async () => {
+    mocks.prisma.candidateOnboardingPacket.findFirst.mockResolvedValue(
+      authorizedPacket('APPLIED', 'PENDING_HR_REVIEW')
+    );
+    const formData = new FormData();
+    formData.append(
+      'resume',
+      new File([new TextEncoder().encode('<script>alert(1)</script>')], 'resume.pdf', {
+        type: 'application/pdf',
+      })
+    );
+
+    const result = await attachApplicantDocuments(
+      CANDIDATE_ID,
+      CURRENT_TOKEN,
+      formData
+    );
+
+    expect(result).toEqual({
+      success: false,
+      error: 'resume: file content does not match its declared type.',
+    });
+    expect(mocks.upload).not.toHaveBeenCalled();
+    expect(mocks.prisma.candidateOnboardingPacket.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('removes an earlier new object when a later document is invalid', async () => {
+    mocks.prisma.candidateOnboardingPacket.findFirst.mockResolvedValue(
+      authorizedPacket('APPLIED', 'PENDING_HR_REVIEW')
+    );
+    const formData = new FormData();
+    formData.append(
+      'resume',
+      new File([PDF_BYTES], 'resume.pdf', { type: 'application/pdf' })
+    );
+    formData.append(
+      'govtId',
+      new File([new TextEncoder().encode('not a PDF')], 'id.pdf', {
+        type: 'application/pdf',
+      })
+    );
+
+    const result = await attachApplicantDocuments(
+      CANDIDATE_ID,
+      CURRENT_TOKEN,
+      formData
+    );
+
+    expect(result).toMatchObject({ success: false });
+    expect(mocks.upload).toHaveBeenCalledTimes(1);
+    expect(mocks.remove).toHaveBeenCalledWith([
+      expect.stringContaining(`${CANDIDATE_ID}/resume-`),
+    ]);
+    expect(mocks.prisma.candidateOnboardingPacket.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('removes new objects when upload authorization changes before commit', async () => {
+    mocks.prisma.candidateOnboardingPacket.findFirst.mockResolvedValue(
+      authorizedPacket('APPLIED', 'PENDING_HR_REVIEW')
+    );
+    mocks.prisma.candidateOnboardingPacket.updateMany.mockResolvedValue({ count: 0 });
+
+    const result = await attachApplicantDocuments(
+      CANDIDATE_ID,
+      CURRENT_TOKEN,
+      resumeFormData()
+    );
+
+    expect(result).toEqual({
+      success: false,
+      error: 'Upload authorization changed. Open the current link and try again.',
+    });
+    expect(mocks.remove).toHaveBeenCalledWith([
+      expect.stringContaining(`${CANDIDATE_ID}/resume-`),
+    ]);
+    expect(mocks.prisma.atsCandidate.update).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -230,7 +309,7 @@ describe('attachApplicantDocuments authoritative candidate state', () => {
       expect(result).toMatchObject({ success: false });
       expect(result.error).toMatch(/not authorized|inactive|closed|status/i);
       expect(mocks.upload).not.toHaveBeenCalled();
-      expect(mocks.prisma.candidateOnboardingPacket.update).not.toHaveBeenCalled();
+      expect(mocks.prisma.candidateOnboardingPacket.updateMany).not.toHaveBeenCalled();
       expect(mocks.prisma.atsCandidate.findUnique).not.toHaveBeenCalled();
       expect(mocks.prisma.atsCandidate.update).not.toHaveBeenCalled();
       expect(mocks.revalidatePath).not.toHaveBeenCalled();

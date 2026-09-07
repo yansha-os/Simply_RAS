@@ -28,7 +28,12 @@ export async function approveClinicalDocs(formData: FormData) {
     if (!auth.ok) return { success: false, error: auth.error };
 
     const clientId = String(formData.get('clientId'));
-    if (!clientId) return { success: false, error: 'Missing clientId.' };
+    if (!UUID_PATTERN.test(clientId)) {
+      return { success: false, error: 'Missing or invalid clientId.' };
+    }
+
+    const access = await requireClientAccess(clientId);
+    if (!access.ok) return { success: false, error: access.error };
 
     const client = await prisma.client.findUnique({
       where: { id: clientId },
@@ -49,10 +54,19 @@ export async function approveClinicalDocs(formData: FormData) {
       return { success: true };
     }
 
-    await prisma.client.update({
-      where: { id: clientId },
+    const approved = await prisma.client.updateMany({
+      where: {
+        id: clientId,
+        status: client.status,
+      },
       data: { status: 'CLINICAL_REVIEW_APPROVED' }
     });
+    if (approved.count !== 1) {
+      return {
+        success: false,
+        error: 'The client status changed in another session. Refresh and try again.',
+      };
+    }
 
     revalidatePath('/portal-clinical');
     revalidatePath(`/client/${clientId}`);
@@ -68,41 +82,16 @@ export async function rejectClinicalDocs(formData: FormData) {
     const auth = await requireStaff(CLINICAL_ROLES);
     if (!auth.ok) return { success: false, error: auth.error };
 
-    const packetId = String(formData.get('packetId'));
-    const clientId = String(formData.get('clientId'));
-    const notes = String(formData.get('notes'));
-
-    const client = await prisma.client.findUnique({
-      where: { id: clientId },
-      select: { status: true },
-    });
-    if (!client) return { success: false, error: 'Client not found.' };
-
-    // Only bounce from clinical-review stage (not mid-billing / staffing)
-    const bounceable = ['DOCS_APPROVED_INTAKE', 'CLINICAL_REVIEW_APPROVED'];
-    if (!bounceable.includes(client.status)) {
-      return {
-        success: false,
-        error: `Pipeline gate: clinical reject only from DOCS_APPROVED_INTAKE | CLINICAL_REVIEW_APPROVED (got ${client.status}).`,
-      };
+    const clientId = String(formData.get('clientId') || '');
+    if (!clientId) {
+      return { success: false, error: 'Missing client.' };
     }
 
-    await prisma.intakePacket.update({
-      where: { id: packetId },
-      data: {
-        status: 'REJECTED_BY_CLINICAL',
-        rejectionNotes: notes
-      }
-    });
-
-    await prisma.client.update({
-      where: { id: clientId },
-      data: { status: 'DOCS_SUBMITTED' } // Back to Intake review
-    });
-
-    revalidatePath('/portal-clinical');
-    revalidatePath(`/client/${clientId}`);
-    return { success: true };
+    return {
+      success: false,
+      error:
+        'Full packet bounce to Intake is disabled. Request a correction on the specific document from Clinical Document Verification. The family re-uploads that file and Clinical Support re-reviews it.',
+    };
   } catch (error: unknown) {
     console.error('rejectClinicalDocs failed:', error instanceof Error ? error.message : error);
     return { success: false, error: 'Failed to reject clinical docs.' };

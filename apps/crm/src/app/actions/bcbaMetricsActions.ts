@@ -1,9 +1,15 @@
 'use server';
 
 import { prisma } from '@/lib/prisma';
-import { getCurrentUser } from '@/lib/auth';
+import { CLINICAL_ROLES, requirePersistedStaff } from '@/lib/auth-guard';
 
 const DIRECTOR_ROLES = new Set(['CLINICAL_DIRECTOR', 'CEO', 'OPS_DIRECTOR']);
+const GLOBAL_METRICS_ROLES = new Set([
+  'CLINICAL_DIRECTOR',
+  'CEO',
+  'OPS_DIRECTOR',
+  'CLINICAL_SUPPORT',
+]);
 
 export type BcbaOpsClientRow = {
   id: string;
@@ -78,15 +84,20 @@ export async function getBcbaOpsMetrics(): Promise<
   { success: true; metrics: BcbaOpsMetrics } | { success: false; error: string; metrics: BcbaOpsMetrics }
 > {
   try {
-    const user = await getCurrentUser();
-    if (!user) {
-      return { success: false, error: 'Authentication required.', metrics: EMPTY_METRICS };
+    const access = await requirePersistedStaff(CLINICAL_ROLES);
+    if (!access.ok) {
+      return { success: false, error: access.error, metrics: EMPTY_METRICS };
     }
+    const user = access.user;
 
     const isDirector = DIRECTOR_ROLES.has(String(user.role));
-    const isMockImpersonation = user.id === 'mock-user-id';
-    const scopeToBcba = !isDirector && !isMockImpersonation;
+    const hasGlobalScope = GLOBAL_METRICS_ROLES.has(String(user.role));
+    const scopeToBcba = user.role === 'BCBA';
     const bcbaId = scopeToBcba ? user.id : null;
+
+    if (!scopeToBcba && !hasGlobalScope) {
+      return { success: false, error: 'Not found.', metrics: EMPTY_METRICS };
+    }
 
     const clientWhere = bcbaId ? { bcbaId } : {};
     const noteSessionScope = bcbaId
@@ -182,7 +193,7 @@ export async function getBcbaOpsMetrics(): Promise<
         select: { id: true, firstName: true, lastName: true, email: true },
         orderBy: { lastName: 'asc' },
       }),
-      isDirector
+      hasGlobalScope
         ? prisma.client.findMany({
             where: { bcbaId: { not: null } },
             select: { id: true, bcbaId: true, status: true },
@@ -241,7 +252,7 @@ export async function getBcbaOpsMetrics(): Promise<
       };
     });
 
-    if (!isDirector && bcbaId && !isMockImpersonation) {
+    if (bcbaId) {
       const self = bcbas.find((b) => b.id === bcbaId);
       bcbaLoads = self
         ? [

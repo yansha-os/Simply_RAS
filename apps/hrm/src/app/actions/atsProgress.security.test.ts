@@ -41,7 +41,7 @@ vi.mock('@/lib/resolveActingRbt', () => ({
 vi.mock('@/lib/devToolsGate', () => ({ isDevToolsEnabled: () => false }));
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }));
 
-import { updateCandidateProgress } from './atsActions';
+import { getOnboardingProgress, updateCandidateProgress } from './atsActions';
 
 function candidate(options?: {
   callerSuppliedReadiness?: boolean;
@@ -135,6 +135,33 @@ beforeEach(() => {
 });
 
 describe('updateCandidateProgress applicant progress integrity', () => {
+  it('accepts the candidate device session when no Supabase User exists', async () => {
+    mocks.getCurrentUser.mockResolvedValue(null);
+
+    const result = await updateCandidateProgress(CANDIDATE_ID, validAvailability);
+
+    expect(result).toMatchObject({ success: true });
+    expect(mocks.resolveActingRbtContext).toHaveBeenCalled();
+    expect(mocks.prisma.atsCandidate.update).toHaveBeenCalled();
+  });
+
+  it('denies an inactive staff account without matching applicant ownership', async () => {
+    mocks.getCurrentUser.mockResolvedValue({
+      id: APPLICANT_ID,
+      role: 'HEAD_HR',
+      isActive: false,
+    });
+    mocks.resolveActingRbtContext.mockResolvedValue({
+      candidateId: null,
+      rbtUserId: null,
+    });
+
+    const result = await updateCandidateProgress(CANDIDATE_ID, {});
+
+    expect(result).toMatchObject({ success: false });
+    expect(mocks.prisma.atsCandidate.findUnique).not.toHaveBeenCalled();
+    expect(mocks.prisma.atsCandidate.update).not.toHaveBeenCalled();
+  });
   it.each([
     ['task completion', { tasksDone: true }],
     ['interview decision', { interviewPassed: true }],
@@ -338,5 +365,32 @@ describe('updateCandidateProgress applicant progress integrity', () => {
         }),
       })
     );
+  });
+});
+
+describe('getOnboardingProgress applicant access', () => {
+  it('loads the owned record for a device-only applicant session', async () => {
+    mocks.getCurrentUser.mockResolvedValue(null);
+
+    const result = await getOnboardingProgress(CANDIDATE_ID);
+
+    expect(result).toMatchObject({
+      success: true,
+      stage: 'PHONE_SCREEN',
+      activationStatus: 'INVITATION_SENT',
+    });
+  });
+
+  it('does not expose another candidate progress record', async () => {
+    mocks.getCurrentUser.mockResolvedValue(null);
+    mocks.resolveActingRbtContext.mockResolvedValue({
+      candidateId: '33333333-3333-4333-8333-333333333333',
+      rbtUserId: null,
+    });
+
+    const result = await getOnboardingProgress(CANDIDATE_ID);
+
+    expect(result).toMatchObject({ success: false });
+    expect(mocks.prisma.atsCandidate.findUnique).not.toHaveBeenCalled();
   });
 });

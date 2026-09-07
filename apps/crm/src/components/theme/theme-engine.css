@@ -30,9 +30,19 @@
     rgb(4 6 12 / calc(0.58 - 0.22 * var(--ti, 1)));
 }
 
+html[data-color-mode="light"] .theme-bg-scrim {
+  background:
+    radial-gradient(ellipse 120% 90% at 50% 38%, transparent 0%, rgb(255 255 255 / 0.35) 100%),
+    rgb(255 255 255 / calc(0.65 - 0.20 * var(--ti, 1)));
+}
+
 .theme-bg-static {
   position: absolute;
   inset: 0;
+}
+
+html[data-color-mode="light"] .theme-engine-base {
+  background-color: #FFFDF8 !important;
 }
 
 /* While a v2 engine theme is active, silence the legacy fog + stars. */
@@ -41,6 +51,14 @@
   filter: none !important;
   animation: none !important;
 }
+
+html[data-color-mode="light"][data-engine="v2"] body::before,
+html[data-color-mode="light"] body::before {
+  background: #FFFDF8 !important;
+  filter: none !important;
+  animation: none !important;
+}
+
 [data-engine="v2"] .star-layer,
 [data-engine="v2"] .shooting-star-container {
   display: none !important;

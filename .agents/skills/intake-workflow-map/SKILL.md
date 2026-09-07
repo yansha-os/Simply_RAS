@@ -106,11 +106,30 @@ Client (one-to-one) → IntakePacket
 
 ---
 
-## Rejection Flow
+## Clinical Rejection Flow
 
-When the admin rejects a form field or document:
+When Clinical Support requests correction on a verification document (`rejectClinicalReview`):
 
-1. `rejectFormFieldsBulk()` or `rejectDocument()` in `portal-case/actions.ts`:
+1. Persist `rejectionDetails[documentKey]` and clear **that** upload from `formData`.
+2. Remove **only** that key from `_clinicalReviewApprovals` — other CSS approvals stay.
+3. Keep `packet.status = APPROVED` and `client.status = DOCS_APPROVED_INTAKE` (if the client was already `CLINICAL_REVIEW_APPROVED`, step back to `DOCS_APPROVED_INTAKE` so CSS re-signs after the corrected upload).
+4. **Never** set `client.status = DOCS_SUBMITTED`, **never** set `packet.status = PENDING_CLIENT_SUBMISSION`, and **never** notify Intake as if the packet was returned.
+5. Notify the parent/client to re-upload **that specific document** on the magic link.
+6. Parent re-upload (`submitMagicLinkPacket`): packet stays `APPROVED` on the CSS desk; Intake does **not** re-approve Form 01/02 or send to clinical again. Submit validates **only flagged correction keys** (mapped via `CLINICAL_VERIFICATION_DB_TO_FORM_KEY`) — not Form 01/02 or unrelated docs. CSS approvals for other docs are preserved. The flagged key stays in `rejectionDetails` until CSS re-approves the new file. The re-uploaded document boolean is set `true` so CSS can preview (Needs review).
+7. Per flagged document, three UI states (file/value presence — not the mere existence of `rejectionDetails`):
+   1. **Awaiting family** — flagged, no new upload yet
+   2. **Needs CSS review** — flagged + new file uploaded/submitted
+   3. **Approved** — CSS re-approved (flag cleared)
+   Waiting-for-family banner only if **any** item is state 1. Parent “Changes requested” only for state 1. After submit, parent sees waiting for Clinical Support; CSS shows Needs review. Keep the rejection note until re-approve, labeled “new upload received — review again”.
+8. `isClinicalFamilyCorrectionLoop` remains true while flags exist (so parent submit is still allowed after autosave). Do **not** use it alone for banners.
+
+The legacy `rejectClinicalDocs` full-bounce path is disabled.
+
+Intake coordinator `rejectDocument()` still does **not** change `client.status` (stays `DOCS_SUBMITTED`) and only flags that document.
+
+## Intake Rejection Flow
+
+When the intake coordinator rejects a form field or document:
    - Sets `packet.status = 'PENDING_CLIENT_SUBMISSION'`
    - Adds to `packet.rejectionDetails` JSON: `{ fieldId: reason }` or `{ documentKey: reason }`
    - Clears the uploaded URL from `formData` (so client re-uploads)

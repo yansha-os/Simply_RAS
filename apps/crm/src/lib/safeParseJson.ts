@@ -20,10 +20,10 @@ export function safeParseJson<T = unknown>(raw: unknown, fallback: T): T {
 }
 
 /** IntakePacket.formData as a plain record — `{}` when missing/malformed. */
-export function parsePacketFormData(raw: unknown): Record<string, any> {
+export function parsePacketFormData(raw: unknown): Record<string, unknown> {
   const parsed = safeParseJson<unknown>(raw, {});
   return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
-    ? (parsed as Record<string, any>)
+    ? (parsed as Record<string, unknown>)
     : {};
 }
 

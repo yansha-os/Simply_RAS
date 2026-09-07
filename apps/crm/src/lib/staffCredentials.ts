@@ -1,8 +1,8 @@
 /**
- * StaffCredential soft gate (P2 credential enforcement, gap-analysis Phase 2).
+ * StaffCredential gate (Phase 3 billing enclosed).
  * Pure summarizer only — DB-backed helpers live in staffCredentials.server.ts.
- * WARN-ONLY by contract: callers surface `warnings` next to sign/convert but
- * never block on them — the hard gate stays signatures + checklist + auth units.
+ * On ACTIVE clients, expired/missing BACB_LICENSE hard-stops claim-ready submit,
+ * BCBA co-sign, and Plutus convert. Non-ACTIVE sandbox clients warn only.
  */
 
 import { endOfClinicDayForDateOnly } from '@/lib/clinicTimezone';
@@ -146,4 +146,41 @@ export function summarizeStaffCredentials(input: {
     items,
     warnings,
   };
+}
+
+export type CredentialHardStopResult =
+  | { ok: true; warnings: string[] }
+  | { ok: false; code: 'CREDENTIAL_HARD_STOP'; blockers: string[]; warnings: string[] };
+
+/**
+ * Phase 3 — fail closed on ACTIVE caseload when required BACB license is
+ * expired, inactive, or missing. Non-ACTIVE clients return warn-only lines.
+ */
+export function evaluateCredentialHardStop(input: {
+  clientStatus: string;
+  rbtStatus: StaffCredentialStatus | null;
+  bcbaStatus: StaffCredentialStatus | null;
+}): CredentialHardStopResult {
+  const warnings: string[] = [];
+  const blockers: string[] = [];
+  const activeOnly = input.clientStatus === 'ACTIVE';
+
+  const roles: Array<{ label: string; status: StaffCredentialStatus | null }> = [
+    { label: 'Session RBT', status: input.rbtStatus },
+    { label: 'Supervising BCBA', status: input.bcbaStatus },
+  ];
+
+  for (const { label, status } of roles) {
+    if (!status || status.overall === 'NOT_TRACKED') continue;
+    if (status.overall === 'ACTIVE') continue;
+    const who = status.displayName ? `${label} ${status.displayName}` : label;
+    const line = `${who}: ${status.warnings.join(', ') || 'credential issue on file'}`;
+    if (activeOnly) blockers.push(line);
+    else warnings.push(line);
+  }
+
+  if (activeOnly && blockers.length > 0) {
+    return { ok: false, code: 'CREDENTIAL_HARD_STOP', blockers, warnings };
+  }
+  return { ok: true, warnings };
 }

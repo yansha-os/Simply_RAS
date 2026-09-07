@@ -105,7 +105,19 @@ export function clinicWallClockToUtc(dateTimeLocal: string): Date | null {
   if (month < 1 || month > 12 || day < 1 || day > 31) return null;
   if (hour > 23 || minute > 59 || second > 59) return null;
   const date = clinicWallTimeToDate(Number(y), month, day, hour, minute, second);
-  return Number.isNaN(date.getTime()) ? null : date;
+  if (Number.isNaN(date.getTime())) return null;
+  const reconstructed = clinicWallClock(date);
+  if (
+    reconstructed.year !== Number(y) ||
+    reconstructed.month !== month ||
+    reconstructed.day !== day ||
+    reconstructed.hour !== hour ||
+    reconstructed.minute !== minute ||
+    reconstructed.second !== second
+  ) {
+    return null;
+  }
+  return date;
 }
 
 /** YYYY-MM-DD of the instant in the clinic timezone. */

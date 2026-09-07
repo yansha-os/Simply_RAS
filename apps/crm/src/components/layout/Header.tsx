@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Search, User, LogOut, Settings, ShieldCheck, Palette, Lock } from 'lucide-react';
+import { Search, LogOut, Palette, Lock } from 'lucide-react';
 import NotificationBell from './NotificationBell';
 import { useTheme } from './ThemeContext';
 import ThemeSettingsModal from './ThemeSettingsModal';
@@ -24,17 +24,17 @@ export function Header() {
 
   return (
     <>
-      <header className="flex h-[72px] shrink-0 items-center justify-between px-[30px] border-b border-[var(--line)] bg-[rgba(8,10,18,0.2)] hover:bg-[rgba(8,10,18,0.3)] transition-colors duration-300 backdrop-blur-[18px] relative z-10">
+      <header className="flex h-[72px] shrink-0 items-center justify-between px-[30px] border-b border-[#E2D5B7] dark:border-[var(--line)] bg-[#FFFDF8]/90 dark:bg-[rgba(8,10,18,0.2)] hover:bg-[#FFFDF8] dark:hover:bg-[rgba(8,10,18,0.3)] transition-colors duration-300 backdrop-blur-[18px] relative z-10">
         <div className="absolute bottom-[-1px] left-0 right-0 h-[1px] bg-[var(--grad-scan)] opacity-50 z-20"></div>
 
         {/* Search Bar */}
-        <div className="flex-1 max-w-[440px] bg-[var(--glass)] border border-[var(--line)] rounded-[10px] px-[14px] py-[9px] text-[var(--ink-500)] text-[13px] flex items-center gap-[8px] font-mono">
-          <Search className="w-4 h-4 text-[var(--ink-500)]" />
+        <div className="flex-1 max-w-[440px] bg-white dark:bg-[var(--glass)] border border-[#E2D5B7] dark:border-[var(--line)] rounded-[10px] px-[14px] py-[9px] text-slate-500 dark:text-[var(--ink-500)] text-[13px] flex items-center gap-[8px] font-mono shadow-sm">
+          <Search className="w-4 h-4 text-slate-400 dark:text-[var(--ink-500)]" />
           <input
             suppressHydrationWarning
             type="text"
             placeholder="search clients, auths, action_items…"
-            className="bg-transparent border-none outline-none w-full text-[var(--ink-300)] placeholder:text-[var(--ink-500)]"
+            className="bg-transparent border-none outline-none w-full text-slate-800 dark:text-[var(--ink-300)] placeholder:text-slate-400 dark:placeholder:text-[var(--ink-500)]"
           />
         </div>
 
@@ -45,19 +45,19 @@ export function Header() {
           {/* Profile & Dropdown */}
           <div className="relative" ref={dropdownRef}>
             <div
-              className="w-[36px] h-[36px] rounded-[11px] bg-brand-orange-500/20 border border-brand-orange-500/30 flex items-center justify-center text-brand-orange-400 font-bold text-xs shadow-md cursor-pointer hover:border-brand-orange-500/60 transition-all"
+              className="w-[36px] h-[36px] rounded-[11px] bg-brand-orange-500/20 border border-brand-orange-500/30 flex items-center justify-center text-brand-orange-600 dark:text-brand-orange-400 font-bold text-xs shadow-md cursor-pointer hover:border-brand-orange-500/60 transition-all"
               onClick={() => setShowDropdown(!showDropdown)}
             >
               JD
             </div>
 
             {showDropdown && (
-              <div className="profile-dropdown absolute right-0 mt-2 w-64 bg-zinc-950/95 backdrop-blur-2xl border border-white/15 rounded-2xl shadow-2xl py-2 z-50 animate-fade-in space-y-1">
+              <div className="profile-dropdown absolute right-0 mt-2 w-64 bg-white dark:bg-zinc-950/95 backdrop-blur-2xl border border-[#E2D5B7] dark:border-white/15 rounded-2xl shadow-2xl py-2 z-50 animate-fade-in space-y-1">
                 {/* User Profile Header */}
-                <div className="px-4 py-2.5 border-b border-white/10">
-                  <p className="text-xs font-bold text-white font-sans">Jane Doe, BCBA</p>
-                  <p className="text-[10px] text-zinc-400 font-mono">jane.doe@riseandshine.com</p>
-                  <span className="text-[9px] font-mono font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded mt-1 inline-block uppercase">
+                <div className="px-4 py-2.5 border-b border-[#E2D5B7] dark:border-white/10">
+                  <p className="text-xs font-bold text-slate-900 dark:text-white font-sans">Jane Doe, BCBA</p>
+                  <p className="text-[10px] text-slate-500 dark:text-zinc-400 font-mono">jane.doe@riseandshine.com</p>
+                  <span className="text-[9px] font-mono font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded mt-1 inline-block uppercase">
                     Clinical Lead Active
                   </span>
                 </div>

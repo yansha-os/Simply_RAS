@@ -363,7 +363,7 @@ export function RbtPayrollView({
       <div className="relative flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
           <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-2xl bg-zinc-950/80 backdrop-blur-xl border border-white/10 flex items-center justify-center shadow-lg shadow-orange-500/10">
+            <div className="w-10 h-10 rounded-2xl bg-orange-100 border border-orange-200 flex items-center justify-center shadow-sm">
               <CreditCard className="w-5 h-5 text-[#F97316]" />
             </div>
             <h1 className="text-3xl font-black text-slate-900 font-heading tracking-tight">
@@ -384,7 +384,7 @@ export function RbtPayrollView({
             type="button"
             onClick={softRefresh}
             disabled={refreshing || pending}
-            className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-zinc-950/80 backdrop-blur-xl text-zinc-200 hover:border-[#F97316]/50 text-[10px] font-black px-3 py-1.5 uppercase tracking-wide cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-300"
+            className="inline-flex items-center gap-1.5 rounded-full border border-[#E2D5B7] bg-[#FFFDF8] text-slate-800 hover:border-[#F97316]/50 text-[10px] font-black px-3 py-1.5 uppercase tracking-wide cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-300"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
             {refreshing ? 'Refreshing…' : 'Refresh DB'}
@@ -392,13 +392,13 @@ export function RbtPayrollView({
           <span
             className={`inline-flex items-center gap-1.5 rounded-full border text-[10px] font-black px-3 py-1.5 uppercase tracking-wide ${
               hasSuccessfulSnapshot
-                ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-400'
-                : 'border-amber-500/25 bg-amber-500/10 text-amber-300'
+                ? 'border-emerald-300 bg-emerald-100 text-emerald-800'
+                : 'border-amber-300 bg-amber-100 text-amber-900'
             }`}
           >
             <span
               className={`w-2 h-2 rounded-full ${
-                hasSuccessfulSnapshot ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'
+                hasSuccessfulSnapshot ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
               }`}
             />
             Bridge G · {hasSuccessfulSnapshot ? 'DB snapshot' : 'Unavailable'}
@@ -409,27 +409,26 @@ export function RbtPayrollView({
       {loadError && (
         <div
           role="alert"
-          className={`relative overflow-hidden rounded-3xl border p-5 shadow-2xl backdrop-blur-xl ${
+          className={`relative overflow-hidden rounded-3xl border p-5 shadow-md ${
             hasSuccessfulSnapshot
-              ? 'border-amber-500/25 bg-zinc-950/90'
-              : 'border-rose-500/30 bg-zinc-950/95'
+              ? 'border-amber-300 bg-amber-50'
+              : 'border-rose-300 bg-rose-50'
           }`}
         >
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,_rgba(244,63,94,0.14),_transparent_55%)]" />
           <div className="relative flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-start gap-3">
-              <div className="rounded-2xl border border-rose-500/25 bg-rose-500/10 p-2.5">
-                <AlertTriangle className="h-5 w-5 text-rose-400" />
+              <div className="rounded-2xl border border-rose-300 bg-white p-2.5">
+                <AlertTriangle className="h-5 w-5 text-rose-600" />
               </div>
               <div>
-                <h2 className="text-sm font-black font-heading text-white">
+                <h2 className="text-sm font-black font-heading text-slate-900">
                   {hasSuccessfulSnapshot
                     ? 'Refresh failed — showing the last successful snapshot'
                     : 'Payroll data is unavailable'}
                 </h2>
-                <p className="mt-1 text-xs font-medium text-zinc-300">{loadError}</p>
+                <p className="mt-1 text-xs font-medium text-slate-700">{loadError}</p>
                 {hasSuccessfulSnapshot && (
-                  <p className="mt-1 text-[10px] font-mono text-zinc-500">{windowLabel}</p>
+                  <p className="mt-1 text-[10px] font-mono text-slate-500">{windowLabel}</p>
                 )}
               </div>
             </div>
@@ -437,7 +436,7 @@ export function RbtPayrollView({
               type="button"
               onClick={softRefresh}
               disabled={refreshing || pending}
-              className="inline-flex shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-2 text-[11px] font-black text-rose-300 transition-all hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-rose-300 bg-white px-4 py-2 text-[11px] font-black text-rose-900 transition-all hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
               Retry DB load
@@ -447,19 +446,18 @@ export function RbtPayrollView({
       )}
 
       {!dataUnavailable && !hasDbActivity && (
-        <div className="relative rounded-3xl border border-white/10 bg-zinc-950/80 backdrop-blur-xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xl overflow-hidden">
-          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,_rgba(249,115,22,0.12),_transparent_55%)] pointer-events-none" />
+        <div className="relative rounded-3xl border border-[#E2D5B7] bg-[#FFFDF8] p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xl overflow-hidden">
           <div className="relative flex items-start gap-3">
             <Briefcase className="w-5 h-5 text-[#F97316] shrink-0 mt-0.5" />
             <div>
-              <h3 className="text-sm font-black text-white">
+              <h3 className="text-sm font-black text-slate-900">
                 No payroll activity in this rolling window
               </h3>
-              <p className="text-xs text-zinc-400 font-medium mt-0.5">
+              <p className="text-xs text-slate-600 font-medium mt-0.5">
                 The shared DB returned no scheduled, in-progress, or completed therapy sessions for
                 this RBT during the last {PAYROLL_WINDOW_DAYS} days. No demo payroll rows are shown.
               </p>
-              <p className="mt-1.5 text-[10px] font-mono text-zinc-600">{windowLabel}</p>
+              <p className="mt-1.5 text-[10px] font-mono text-slate-500">{windowLabel}</p>
             </div>
           </div>
           <div className="relative flex flex-wrap gap-2">
@@ -467,7 +465,7 @@ export function RbtPayrollView({
               type="button"
               onClick={softRefresh}
               disabled={refreshing}
-              className="shrink-0 rounded-xl border border-white/10 bg-white/5 hover:border-[#F97316]/40 text-zinc-200 text-[11px] font-black px-4 py-2 cursor-pointer disabled:cursor-not-allowed transition-all"
+              className="shrink-0 rounded-xl border border-[#E2D5B7] bg-[#F9F5EC] hover:bg-white text-slate-800 text-[11px] font-black px-4 py-2 cursor-pointer disabled:cursor-not-allowed transition-all"
             >
               Refresh DB
             </button>
@@ -483,15 +481,14 @@ export function RbtPayrollView({
 
       {!dataUnavailable && hasDbActivity && (
         <>
-          <div className="relative overflow-hidden rounded-3xl border border-sky-500/20 bg-zinc-950/85 p-4 shadow-xl backdrop-blur-xl">
-            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_rgba(14,165,233,0.12),_transparent_55%)]" />
+          <div className="relative overflow-hidden rounded-3xl border border-sky-300 bg-sky-50 p-4 shadow-sm">
             <div className="relative flex items-start gap-3">
-              <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-sky-400" />
+              <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-sky-700" />
               <div>
-                <h2 className="text-xs font-black font-heading text-white">
+                <h2 className="text-xs font-black font-heading text-sky-900">
                   Dollar values are estimates, not wage promises
                 </h2>
-                <p className="mt-1 text-[11px] font-medium leading-relaxed text-zinc-400">
+                <p className="mt-1 text-[11px] font-medium leading-relaxed text-sky-800">
                   The payroll bridge does not provide an employee-specific contracted rate,
                   deductions, pay date, or deposit status. Dollar values are illustrative only;
                   Finance and the issued paystub remain authoritative.
@@ -529,48 +526,47 @@ export function RbtPayrollView({
             ].map((card) => (
               <div
                 key={card.label}
-                className="rounded-3xl border border-white/10 bg-zinc-950/80 backdrop-blur-xl p-4 shadow-xl transition-all duration-300 hover:scale-[1.01] hover:shadow-2xl hover:border-[#F97316]/40"
+                className="rounded-3xl border border-[#E2D5B7] bg-[#FFFDF8] p-4 shadow-sm transition-all duration-300 hover:scale-[1.01] hover:shadow-md hover:border-[#F97316]/40"
               >
-                <p className="text-[10px] font-mono font-black uppercase tracking-wider text-zinc-500">
+                <p className="text-[10px] font-mono font-black uppercase tracking-wider text-slate-500">
                   {card.label}
                 </p>
                 <p
                   className={`text-2xl font-black font-heading mt-1 ${
                     card.tone === 'rose'
-                      ? 'text-rose-400'
+                      ? 'text-rose-600'
                       : card.tone === 'emerald'
-                        ? 'text-emerald-400'
+                        ? 'text-emerald-700'
                         : card.tone === 'sky'
-                          ? 'text-sky-400'
+                          ? 'text-sky-700'
                           : 'text-[#F97316]'
                   }`}
                 >
                   {card.value}
                 </p>
-                <p className="text-[10px] text-zinc-500 font-medium mt-1">{card.hint}</p>
+                <p className="text-[10px] text-slate-500 font-medium mt-1">{card.hint}</p>
               </div>
             ))}
           </div>
 
           {/* Eligible sessions from DB */}
-          <div className="rounded-3xl border border-emerald-500/20 bg-zinc-950/80 backdrop-blur-xl p-5 shadow-2xl space-y-3 relative overflow-hidden">
-            <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_rgba(16,185,129,0.12),_transparent_50%)] pointer-events-none" />
-            <div className="relative flex flex-col gap-2 border-b border-white/10 pb-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="rounded-3xl border border-emerald-300 bg-[#FFFDF8] p-5 shadow-xl space-y-3 relative overflow-hidden">
+            <div className="relative flex flex-col gap-2 border-b border-[#E2D5B7] pb-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                <h2 className="text-sm font-black font-heading text-white">
+                <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                <h2 className="text-sm font-black font-heading text-slate-900">
                   Eligible sessions (BCBA signed or converted)
                 </h2>
               </div>
-              <span className="w-fit text-[10px] font-mono font-black text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full">
+              <span className="w-fit text-[10px] font-mono font-black text-emerald-800 bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded-full">
                 {pay.positiveUnitPayableCount} with units · {pay.zeroUnitCount} zero-unit
               </span>
             </div>
             {dbPayable.length === 0 ? (
-              <div className="relative rounded-2xl border border-dashed border-white/10 bg-white/[0.03] p-6 text-center">
-                <BadgeCheck className="mx-auto h-8 w-8 text-zinc-600" />
-                <p className="mt-2 text-sm font-black text-white">No eligible sessions yet</p>
-                <p className="mt-1 text-xs font-medium text-zinc-500">
+              <div className="relative rounded-2xl border border-dashed border-[#E2D5B7] bg-[#F9F5EC] p-6 text-center">
+                <BadgeCheck className="mx-auto h-8 w-8 text-slate-400" />
+                <p className="mt-2 text-sm font-black text-slate-900">No eligible sessions yet</p>
+                <p className="mt-1 text-xs font-medium text-slate-500">
                   A row becomes eligible only when it has a note and is BCBA-signed or converted.
                 </p>
               </div>
@@ -584,24 +580,24 @@ export function RbtPayrollView({
                       key={row.sessionId}
                       className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl border px-4 py-3 transition-all duration-300 hover:scale-[1.01] ${
                         zeroUnits
-                          ? 'border-amber-500/25 bg-amber-500/[0.06] hover:border-amber-500/40'
-                          : 'border-emerald-500/20 bg-emerald-500/5 hover:border-emerald-500/40'
+                          ? 'border-amber-300 bg-amber-50 hover:border-amber-400'
+                          : 'border-emerald-200 bg-emerald-50/50 hover:border-emerald-300'
                       }`}
                     >
                       <div className="min-w-0 space-y-1.5">
                         <div className="flex flex-wrap items-center gap-2">
-                          <p className="text-xs font-black text-white">{row.clientName}</p>
+                          <p className="text-xs font-black text-slate-900">{row.clientName}</p>
                           <span
                             className={`inline-flex items-center gap-1 rounded-full border text-[9px] font-black uppercase tracking-wide px-2 py-0.5 ${
                               zeroUnits
-                                ? 'border-amber-500/30 bg-amber-500/10 text-amber-300'
-                                : 'border-emerald-500/30 bg-emerald-500/15 text-emerald-300'
+                                ? 'border-amber-300 bg-amber-100 text-amber-900'
+                                : 'border-emerald-300 bg-emerald-100 text-emerald-800'
                             }`}
                           >
                             <BadgeCheck className="w-3 h-3" />
                             {zeroUnits ? 'Eligible · zero units' : 'Eligible'}
                           </span>
-                          <span className="rounded-full border border-sky-500/20 bg-sky-500/10 text-sky-300 text-[9px] font-black uppercase px-2 py-0.5">
+                          <span className="rounded-full border border-sky-300 bg-sky-100 text-sky-800 text-[9px] font-black uppercase px-2 py-0.5">
                             {row.bcbaSigned && row.isConverted
                               ? 'Signed + converted'
                               : row.isConverted
@@ -609,12 +605,12 @@ export function RbtPayrollView({
                                 : 'BCBA-signed path'}
                           </span>
                         </div>
-                        <p className="text-[10px] font-mono text-zinc-500">
+                        <p className="text-[10px] font-mono text-slate-500">
                           {formatEtDateTime(row.scheduledStart)} · CPT {row.cptCode} ·{' '}
                           {row.location || 'Location unavailable'}
                         </p>
                         <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="text-[10px] font-mono font-black text-zinc-300">
+                          <span className="text-[10px] font-mono font-black text-slate-800">
                             {units} {units === 1 ? 'unit' : 'units'}
                           </span>
                           <UnitsSourceBadge source={row.unitsSource} />
@@ -628,12 +624,12 @@ export function RbtPayrollView({
                       <div className="shrink-0 text-left sm:text-right">
                         <p
                           className={`text-sm font-black font-mono ${
-                            zeroUnits ? 'text-amber-300' : 'text-emerald-400'
+                            zeroUnits ? 'text-amber-800' : 'text-emerald-700'
                           }`}
                         >
                           {zeroUnits ? '$0 estimate' : `Est. ${money(row.estimatedPay)}`}
                         </p>
-                        <p className="mt-0.5 text-[9px] font-bold uppercase tracking-wide text-zinc-600">
+                        <p className="mt-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-500">
                           Not a paystub
                         </p>
                       </div>
@@ -641,7 +637,7 @@ export function RbtPayrollView({
                   );
                 })}
                 {zeroUnitEligible.length > 0 && (
-                  <div className="rounded-2xl border border-amber-500/20 bg-amber-500/[0.06] px-4 py-3 text-[11px] font-medium leading-relaxed text-amber-200/80">
+                  <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-[11px] font-medium leading-relaxed text-amber-900">
                     Zero-unit sessions stay visible because they meet signed/converted eligibility,
                     but they produce no estimated pay and are not classified as documentation holds.
                   </div>
@@ -651,11 +647,10 @@ export function RbtPayrollView({
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-            <div className="lg:col-span-2 rounded-3xl border border-white/10 bg-zinc-950/80 backdrop-blur-xl p-5 shadow-2xl space-y-4 relative overflow-hidden">
-              <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_left,_rgba(249,115,22,0.1),_transparent_55%)] pointer-events-none" />
-              <div className="relative flex items-center gap-2 border-b border-white/10 pb-3">
+            <div className="lg:col-span-2 rounded-3xl border border-[#E2D5B7] bg-[#FFFDF8] p-5 shadow-xl space-y-4 relative overflow-hidden">
+              <div className="relative flex items-center gap-2 border-b border-[#E2D5B7] pb-3">
                 <DollarSign className="w-5 h-5 text-[#F97316]" />
-                <h2 className="text-sm font-black font-heading text-white">
+                <h2 className="text-sm font-black font-heading text-slate-900">
                   Rolling window audit
                 </h2>
               </div>
@@ -669,39 +664,38 @@ export function RbtPayrollView({
                 ].map(([key, value]) => (
                   <div
                     key={key}
-                    className="flex items-center justify-between gap-3 rounded-xl bg-white/5 border border-white/10 px-3 py-2"
+                    className="flex items-center justify-between gap-3 rounded-xl bg-[#F9F5EC] border border-[#E2D5B7] px-3 py-2"
                   >
-                    <dt className="font-bold text-zinc-400">{key}</dt>
-                    <dd className="text-right font-mono font-black text-white">{value}</dd>
+                    <dt className="font-bold text-slate-600">{key}</dt>
+                    <dd className="text-right font-mono font-black text-slate-900">{value}</dd>
                   </div>
                 ))}
               </dl>
-              <p className="relative text-[10px] text-zinc-500 leading-relaxed flex items-start gap-1.5">
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+              <p className="relative text-[10px] text-slate-500 leading-relaxed flex items-start gap-1.5">
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
                 NOTE means persisted SessionNote units. ESTIMATE is the duration fallback. Invalid
                 numbers and negative values render as zero instead of contaminating totals.
               </p>
             </div>
 
-            <div className="lg:col-span-3 rounded-3xl border border-white/10 bg-zinc-950/80 backdrop-blur-xl p-5 shadow-2xl space-y-4 relative overflow-hidden">
-              <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_rgba(244,63,94,0.1),_transparent_50%)] pointer-events-none" />
-              <div className="relative flex items-center justify-between border-b border-white/10 pb-3 gap-2">
+            <div className="lg:col-span-3 rounded-3xl border border-rose-300 bg-[#FFFDF8] p-5 shadow-xl space-y-4 relative overflow-hidden">
+              <div className="relative flex items-center justify-between border-b border-[#E2D5B7] pb-3 gap-2">
                 <div className="flex items-center gap-2">
-                  <AlertTriangle className="w-5 h-5 text-amber-400" />
-                  <h2 className="text-sm font-black font-heading text-white">
+                  <AlertTriangle className="w-5 h-5 text-amber-600" />
+                  <h2 className="text-sm font-black font-heading text-slate-900">
                     DB-backed documentation holds
                   </h2>
                 </div>
-                <span className="text-[10px] font-mono font-black text-rose-400 bg-rose-500/10 border border-rose-500/20 px-2 py-0.5 rounded-full">
+                <span className="text-[10px] font-mono font-black text-rose-800 bg-rose-100 border border-rose-300 px-2 py-0.5 rounded-full">
                   Est. {money(pay.estimatedHeldValue)}
                 </span>
               </div>
 
               {blockers.length === 0 ? (
-                <div className="relative rounded-2xl border border-dashed border-emerald-500/30 bg-emerald-500/5 p-6 text-center space-y-2">
-                  <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto" />
-                  <p className="text-sm font-black text-white">No DB-backed holds in this snapshot</p>
-                  <p className="text-xs text-zinc-400 font-medium">
+                <div className="relative rounded-2xl border border-dashed border-emerald-300 bg-emerald-50 p-6 text-center space-y-2">
+                  <CheckCircle2 className="w-8 h-8 text-emerald-600 mx-auto" />
+                  <p className="text-sm font-black text-slate-900">No DB-backed holds in this snapshot</p>
+                  <p className="text-xs text-slate-600 font-medium">
                     Every returned session currently meets the note plus signed/converted
                     eligibility rule.
                   </p>
@@ -713,32 +707,32 @@ export function RbtPayrollView({
                       key={blocker.id}
                       className={`rounded-2xl border p-4 space-y-2.5 transition-all duration-300 hover:scale-[1.01] ${
                         blocker.severity === 'BLOCKING'
-                          ? 'border-rose-500/25 bg-rose-500/10'
-                          : 'border-amber-500/25 bg-amber-500/10'
+                          ? 'border-rose-300 bg-rose-50'
+                          : 'border-amber-300 bg-amber-50'
                       }`}
                     >
                       <div className="flex flex-wrap items-start justify-between gap-2">
                         <div className="flex items-start gap-2 min-w-0">
                           {blocker.severity === 'BLOCKING' ? (
-                            <Ban className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                            <Ban className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
                           ) : (
-                            <FileWarning className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                            <FileWarning className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
                           )}
                           <div>
-                            <p className="text-xs font-black text-white">{blocker.title}</p>
-                            <p className="text-[10px] font-mono text-zinc-500 mt-0.5">
+                            <p className="text-xs font-black text-slate-900">{blocker.title}</p>
+                            <p className="text-[10px] font-mono text-slate-500 mt-0.5">
                               {blocker.sessionRef}
                             </p>
                           </div>
                         </div>
-                        <span className="text-[11px] font-mono font-black text-rose-300 bg-zinc-950/60 border border-rose-500/20 px-2 py-0.5 rounded-lg">
+                        <span className="text-[11px] font-mono font-black text-rose-800 bg-rose-100 border border-rose-300 px-2 py-0.5 rounded-lg">
                           {blocker.amountHeld > 0
                             ? `Est. −${money(blocker.amountHeld)}`
                             : '$0 estimate'}
                         </span>
                       </div>
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="text-[10px] font-mono font-black text-zinc-300">
+                        <span className="text-[10px] font-mono font-black text-slate-800">
                           {blocker.units} {blocker.units === 1 ? 'unit' : 'units'}
                         </span>
                         <UnitsSourceBadge source={blocker.unitsSource} />
@@ -751,13 +745,13 @@ export function RbtPayrollView({
                           <FlagChip ok={blocker.flags.isConverted} label="Converted" />
                         </div>
                       )}
-                      <p className="text-[11px] text-zinc-300 font-medium leading-relaxed">
+                      <p className="text-[11px] text-slate-700 font-medium leading-relaxed">
                         {blocker.detail}
                       </p>
                       <div className="flex flex-wrap gap-2 pt-1">
                         <Link
                           href={blocker.fixHref}
-                          className="inline-flex items-center gap-1 rounded-xl bg-white text-zinc-950 hover:bg-zinc-200 text-[10px] font-black px-3 py-1.5 cursor-pointer transition-all"
+                          className="inline-flex items-center gap-1 rounded-xl bg-slate-900 text-white hover:bg-black text-[10px] font-black px-3 py-1.5 cursor-pointer transition-all"
                         >
                           {blocker.fixLabel}
                           <ArrowRight className="w-3 h-3" />
@@ -765,7 +759,7 @@ export function RbtPayrollView({
                         <button
                           type="button"
                           onClick={() => openTicketForBlocker(blocker)}
-                          className="inline-flex items-center gap-1 rounded-xl border border-[#F97316]/40 bg-[#F97316]/10 text-[#F97316] hover:bg-[#F97316]/20 text-[10px] font-black px-3 py-1.5 cursor-pointer transition-all"
+                          className="inline-flex items-center gap-1 rounded-xl border border-orange-300 bg-orange-100 text-[#C2410C] hover:bg-orange-200 text-[10px] font-black px-3 py-1.5 cursor-pointer transition-all"
                         >
                           <MessageSquare className="w-3 h-3" />
                           Ask Finance about this
@@ -782,24 +776,23 @@ export function RbtPayrollView({
 
       <div
         id="rbt-finance-ticket"
-        className="rounded-3xl border border-white/10 bg-zinc-950/90 backdrop-blur-xl text-white p-5 sm:p-6 shadow-2xl space-y-4 relative overflow-hidden"
+        className="rounded-3xl border border-[#E2D5B7] bg-[#FFFDF8] text-slate-900 p-5 sm:p-6 shadow-xl space-y-4 relative overflow-hidden"
       >
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_rgba(249,115,22,0.18),_transparent_50%)] pointer-events-none" />
         <div className="relative flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-2xl bg-[#F97316]/20 border border-[#F97316]/40 flex items-center justify-center">
+            <div className="w-11 h-11 rounded-2xl bg-orange-100 border border-orange-200 flex items-center justify-center">
               <Send className="w-5 h-5 text-[#F97316]" />
             </div>
             <div>
-              <h2 className="text-base font-black font-heading">Talk to the Finance team</h2>
-              <p className="text-[11px] text-zinc-400 font-medium">
+              <h2 className="text-base font-black font-heading text-slate-900">Talk to the Finance team</h2>
+              <p className="text-[11px] text-slate-600 font-medium">
                 Send a payroll ticket about a DB-backed hold or missing pay. If delivery fails, this
                 screen labels the copy as a device-only draft.
               </p>
             </div>
           </div>
           {blockerId && (
-            <span className="text-[10px] font-mono font-bold text-amber-300 bg-amber-500/10 border border-amber-500/30 px-2.5 py-1 rounded-full">
+            <span className="text-[10px] font-mono font-bold text-amber-900 bg-amber-100 border border-amber-300 px-2.5 py-1 rounded-full">
               Linked to roadblock
             </span>
           )}
@@ -810,20 +803,20 @@ export function RbtPayrollView({
             value={subject}
             onChange={(e) => setSubject(e.target.value)}
             placeholder="Subject (e.g. Pay hold on Aug 3 ET session)"
-            className="w-full rounded-2xl bg-zinc-900/80 border border-white/10 px-4 py-2.5 text-xs text-white placeholder:text-zinc-500 outline-none focus:border-[#F97316]/50"
+            className="w-full rounded-2xl bg-[#F9F5EC] border border-[#E2D5B7] px-4 py-2.5 text-xs text-slate-900 placeholder:text-slate-400 outline-none focus:bg-white focus:border-[#F97316]/50"
           />
           <textarea
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             rows={5}
             placeholder="Explain what you need Finance to review…"
-            className="w-full rounded-2xl bg-zinc-900/80 border border-white/10 px-4 py-2.5 text-xs text-white placeholder:text-zinc-500 outline-none focus:border-[#F97316]/50 resize-y"
+            className="w-full rounded-2xl bg-[#F9F5EC] border border-[#E2D5B7] px-4 py-2.5 text-xs text-slate-900 placeholder:text-slate-400 outline-none focus:bg-white focus:border-[#F97316]/50 resize-y"
           />
           <button
             type="button"
             disabled={pending}
             onClick={submitFinanceTicket}
-            className="w-full sm:w-auto sm:self-end inline-flex items-center justify-center gap-2 rounded-2xl bg-[#F97316] hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-black px-5 py-3 cursor-pointer shadow-lg shadow-orange-500/20 transition-all"
+            className="w-full sm:w-auto sm:self-end inline-flex items-center justify-center gap-2 rounded-2xl bg-[#F97316] hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-black px-5 py-3 cursor-pointer shadow-md transition-all"
           >
             <Sparkles className="w-4 h-4" />
             {pending ? 'Sending…' : 'Send ticket to Finance'}
@@ -831,26 +824,26 @@ export function RbtPayrollView({
         </div>
 
         {localTickets.length > 0 && (
-          <div className="relative pt-3 border-t border-white/10 space-y-2">
-            <p className="text-[10px] font-mono font-black uppercase tracking-wider text-zinc-500">
+          <div className="relative pt-3 border-t border-[#E2D5B7] space-y-2">
+            <p className="text-[10px] font-mono font-black uppercase tracking-wider text-slate-500">
               Device-only Finance drafts
             </p>
-            <p className="text-[10px] font-medium text-amber-300/80">
+            <p className="text-[10px] font-medium text-amber-900">
               These copies are not visible to Finance. Re-submit through the form when connectivity
               and your applicant identity are available.
             </p>
             {localTickets.slice(0, 3).map((t) => (
               <div
                 key={t.id}
-                className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 flex items-center justify-between gap-2"
+                className="rounded-xl border border-[#E2D5B7] bg-[#F9F5EC] px-3 py-2 flex items-center justify-between gap-2"
               >
                 <div className="min-w-0">
-                  <p className="text-xs font-bold truncate">{t.subject}</p>
-                  <p className="text-[10px] text-zinc-500 font-mono">
+                  <p className="text-xs font-bold text-slate-900 truncate">{t.subject}</p>
+                  <p className="text-[10px] text-slate-500 font-mono">
                     {formatEtDateTime(t.createdAt)}
                   </p>
                 </div>
-                <span className="text-[9px] font-black uppercase tracking-wide text-amber-300 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full shrink-0 flex items-center gap-1">
+                <span className="text-[9px] font-black uppercase tracking-wide text-amber-900 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded-full shrink-0 flex items-center gap-1">
                   <Clock className="w-3 h-3" />
                   Device only
                 </span>

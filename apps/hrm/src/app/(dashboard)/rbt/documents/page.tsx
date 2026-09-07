@@ -35,6 +35,7 @@ import {
   validateDocumentFile,
   type PhaseId,
 } from '@/components/rbt/documentUx';
+import { OnboardingNextStepsPrompt } from '@/components/rbt/OnboardingNextStepsPrompt';
 
 const APF_REGISTER =
   'https://courses.autismpartnershipfoundation.org/offers/it285gs6/checkout';
@@ -61,6 +62,19 @@ export default function RbtDocumentsPage() {
   const [uploadWarning, setUploadWarning] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [signedOffer, setSignedOffer] = useState<import('@/app/actions/wageOfferActions').WageOfferDto | null>(null);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const { getMyWageOffer } = await import('@/app/actions/wageOfferActions');
+        const res = await getMyWageOffer();
+        if (res.success && res.data && res.data.status === 'SIGNED') {
+          setSignedOffer(res.data);
+        }
+      } catch {}
+    })();
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -204,15 +218,15 @@ export default function RbtDocumentsPage() {
         aria-busy="true"
         aria-label="Loading document status"
       >
-        <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-zinc-950 p-8 text-white shadow-2xl">
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(249,115,22,0.18),transparent_42%)]" />
+        <div className="relative overflow-hidden rounded-3xl border border-[#E2D5B7] bg-[#FFFDF8] p-8 text-slate-900 shadow-2xl">
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(249,115,22,0.08),transparent_42%)]" />
           <div className="relative flex min-h-64 flex-col items-center justify-center gap-4 text-center">
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-orange-400/20 bg-orange-500/10 shadow-[0_0_30px_rgba(249,115,22,0.12)]">
-              <Loader2 className="h-7 w-7 animate-spin text-orange-400" aria-hidden="true" />
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-orange-400/30 bg-orange-400/10 shadow-[0_0_30px_rgba(249,115,22,0.12)]">
+              <Loader2 className="h-7 w-7 animate-spin text-[#F97316]" aria-hidden="true" />
             </div>
             <div>
-              <h1 className="font-heading text-xl font-black">Opening your document vault</h1>
-              <p className="mt-1 text-sm font-medium text-zinc-400">
+              <h1 className="font-heading text-xl font-black text-slate-900">Opening your document vault</h1>
+              <p className="mt-1 text-sm font-medium text-slate-600">
                 Confirming this device and loading your certificate status…
               </p>
             </div>
@@ -231,7 +245,7 @@ export default function RbtDocumentsPage() {
         <section
           role="alert"
           aria-live="assertive"
-          className="relative overflow-hidden rounded-3xl border border-rose-400/20 bg-zinc-950 p-6 text-white shadow-2xl sm:p-8"
+          className="relative overflow-hidden rounded-3xl border border-rose-300 bg-[#FFFDF8] p-6 text-slate-900 shadow-2xl sm:p-8"
         >
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(244,63,94,0.16),transparent_46%),radial-gradient(circle_at_bottom_right,rgba(249,115,22,0.12),transparent_42%)]" />
           <div className="relative space-y-6">
@@ -250,7 +264,7 @@ export default function RbtDocumentsPage() {
               </div>
             </div>
 
-            <div className="flex flex-col gap-3 border-t border-white/10 pt-5 sm:flex-row">
+            <div className="flex flex-col gap-3 border-t border-slate-200 pt-5 sm:flex-row">
               {access.retryable && (
                 <button
                   type="button"
@@ -259,7 +273,7 @@ export default function RbtDocumentsPage() {
                     setAccessError(null);
                     setLoadAttempt((attempt) => attempt + 1);
                   }}
-                  className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-orange-400/30 bg-orange-500/15 px-4 py-3 text-xs font-black text-orange-200 transition-all hover:border-orange-300/60 hover:bg-orange-500/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-400"
+                  className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-orange-300 bg-orange-100 px-4 py-3 text-xs font-black text-[#C2410C] transition-all hover:bg-orange-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-400"
                 >
                   <RefreshCw className="h-4 w-4" aria-hidden="true" />
                   Try again
@@ -267,9 +281,9 @@ export default function RbtDocumentsPage() {
               )}
               <a
                 href="mailto:info@riseandshine.nyc?subject=Applicant%20document%20access"
-                className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-xs font-black text-zinc-100 transition-all hover:border-orange-400/40 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-400"
+                className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-[#E2D5B7] bg-[#F9F5EC] px-4 py-3 text-xs font-black text-slate-800 transition-all hover:border-orange-400/40 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-400"
               >
-                <Mail className="h-4 w-4 text-orange-300" aria-hidden="true" />
+                <Mail className="h-4 w-4 text-[#F97316]" aria-hidden="true" />
                 Contact HR
               </a>
             </div>
@@ -281,6 +295,31 @@ export default function RbtDocumentsPage() {
 
   return (
     <div className="max-w-3xl mx-auto space-y-6 pb-16 text-slate-900">
+      {signedOffer && (
+        <div className="rounded-3xl border-2 border-emerald-400 bg-emerald-50/90 p-5 shadow-lg space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5 text-emerald-950">
+              <FileText className="h-6 w-6 text-emerald-600 shrink-0" />
+              <div>
+                <h2 className="font-heading text-lg font-black text-emerald-950">
+                  Executed Agreements &amp; Signed Contracts
+                </h2>
+                <p className="text-xs font-mono font-bold text-emerald-800">
+                  NYS LS-54 Wage Notice · Signed {signedOffer.signedAt ? new Date(signedOffer.signedAt).toLocaleDateString() : 'On File'}
+                </p>
+              </div>
+            </div>
+            <span className="bg-emerald-200 text-emerald-950 border border-emerald-300 text-xs font-black px-3 py-1 rounded-full uppercase tracking-wider">
+              ✓ EXECUTED ON FILE
+            </span>
+          </div>
+
+          <p className="text-xs font-medium text-emerald-900 leading-relaxed">
+            Your signed wage notice, rate agreement, and electronic signature disclosures have been transferred to your active RBT account profile for your permanent records.
+          </p>
+        </div>
+      )}
+
       {/* Header */}
       <div className="space-y-3">
         <div className="flex items-start gap-3">
@@ -789,6 +828,10 @@ export default function RbtDocumentsPage() {
           </div>
         ))}
       </div>
+
+      {allDone && (
+        <OnboardingNextStepsPrompt currentTab="DOCUMENTS" className="mt-2" />
+      )}
 
       {/* Help desk */}
       <div className="bg-[#F0F7FF] border-2 border-[#BFDBFE] rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">

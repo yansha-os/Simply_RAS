@@ -8,6 +8,11 @@ import {
   resolveActingRbtUserId,
 } from '@/lib/resolveActingRbt';
 
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const MAX_APPLICATION_MESSAGE_LENGTH = 2_000;
+const OPENING_UNAVAILABLE = 'OPENING_UNAVAILABLE';
+
 function normalizeZip(raw: unknown): string | null {
   if (raw == null) return null;
   const zip = String(raw).replace(/\D/g, '').slice(0, 5);
@@ -347,7 +352,7 @@ export async function saveRbtTravelProfile(input: {
     const zip = input.homeZipCode.replace(/\D/g, '').slice(0, 5);
     if (zip.length !== 5) return { success: false, error: 'Enter a valid 5-digit ZIP code.' };
 
-    let candidate = candidateId
+    const candidate = candidateId
       ? await prisma.atsCandidate.findUnique({
           where: { id: candidateId },
           select: {
@@ -364,19 +369,6 @@ export async function saveRbtTravelProfile(input: {
             onboardingPacket: { select: { id: true, formData: true } },
           },
         });
-
-    // Dev impersonation: attach to any hired candidate packet if user link missing
-    if (!candidate) {
-      candidate = await prisma.atsCandidate.findFirst({
-        where: { stage: 'HIRED', onboardingPacket: { isNot: null } },
-        select: {
-          id: true,
-          dossier: true,
-          onboardingPacket: { select: { id: true, formData: true } },
-        },
-        orderBy: { updatedAt: 'desc' },
-      });
-    }
 
     if (!candidate?.onboardingPacket) {
       return {
@@ -504,6 +496,14 @@ export async function saveRbtTravelProfile(input: {
 
 export async function applyToCaseOpening(openingId: string, message?: string) {
   try {
+    if (!UUID_RE.test(openingId)) {
+      return { success: false, error: 'This opening is no longer available.' };
+    }
+    const normalizedMessage = message?.trim() || null;
+    if (normalizedMessage && normalizedMessage.length > MAX_APPLICATION_MESSAGE_LENGTH) {
+      return { success: false, error: 'Application message must be 2,000 characters or fewer.' };
+    }
+
     const rbtUserId = await resolveActingRbtUserId();
     if (!rbtUserId) {
       return { success: false, error: 'No RBT user available to apply. Sign in or impersonate an RBT user.' };
@@ -522,18 +522,19 @@ export async function applyToCaseOpening(openingId: string, message?: string) {
     }
 
     const application = await prisma.$transaction(async (tx) => {
+      const stillOpen = await tx.caseOpening.updateMany({
+        where: { id: openingId, status: 'OPEN' },
+        data: { updatedAt: new Date() },
+      });
+      if (stillOpen.count !== 1) throw new Error(OPENING_UNAVAILABLE);
+
       const created = await tx.caseApplication.create({
         data: {
           openingId,
           rbtUserId,
           status: 'APPLIED',
-          message: message?.trim() || null,
+          message: normalizedMessage,
         },
-      });
-      // Bump opening so CRM Case Coord inbox sorts this listing to the top
-      await tx.caseOpening.update({
-        where: { id: openingId },
-        data: { updatedAt: new Date() },
       });
       return created;
     });
@@ -578,6 +579,17 @@ export async function applyToCaseOpening(openingId: string, message?: string) {
     revalidatePath('/rbt/job-board');
     return { success: true, data: application };
   } catch (error) {
+    if (error instanceof Error && error.message === OPENING_UNAVAILABLE) {
+      return { success: false, error: 'This opening is no longer available.' };
+    }
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      (error as { code?: unknown }).code === 'P2002'
+    ) {
+      return { success: false, error: 'You already applied to this case.' };
+    }
     console.error('Action failed [applyToCaseOpening]:', error instanceof Error ? error.message : 'Unknown error');
     return { success: false, error: 'Failed to submit application.' };
   }
@@ -585,6 +597,9 @@ export async function applyToCaseOpening(openingId: string, message?: string) {
 
 export async function withdrawCaseApplication(applicationId: string) {
   try {
+    if (!UUID_RE.test(applicationId)) {
+      return { success: false, error: 'Application not found.' };
+    }
     const rbtUserId = await resolveActingRbtUserId();
     if (!rbtUserId) return { success: false, error: 'Not authorized.' };
 
@@ -599,10 +614,17 @@ export async function withdrawCaseApplication(applicationId: string) {
       return { success: false, error: 'Cannot withdraw an approved assignment.' };
     }
 
-    await prisma.caseApplication.update({
-      where: { id: applicationId },
+    const withdrawn = await prisma.caseApplication.updateMany({
+      where: {
+        id: applicationId,
+        rbtUserId,
+        status: { not: 'APPROVED' },
+      },
       data: { status: 'WITHDRAWN' },
     });
+    if (withdrawn.count !== 1) {
+      return { success: false, error: 'Application changed before it could be withdrawn.' };
+    }
 
     // JOB_APPLICATION_WITHDRAWN → Case Coord working this pipeline (prefer client owner)
     try {

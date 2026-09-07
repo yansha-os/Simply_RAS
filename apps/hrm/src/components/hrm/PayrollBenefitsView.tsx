@@ -3,11 +3,11 @@
 import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { CreditCard, DollarSign, Clock, CheckCircle2, ShieldCheck, Heart, FileText, Download, TrendingUp, Activity } from 'lucide-react';
+import { CreditCard, DollarSign, CheckCircle2, Heart, Download, TrendingUp } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function PayrollBenefitsView() {
-  const [paystubPeriod, setPaystubPeriod] = useState('July 15 - July 31, 2026');
+  const [paystubPeriod] = useState('July 15 - July 31, 2026');
 
   const timesheetSummary = {
     billableHours: 68.5,

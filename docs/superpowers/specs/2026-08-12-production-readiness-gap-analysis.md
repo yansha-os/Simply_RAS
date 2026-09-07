@@ -10,7 +10,7 @@
 - Clinical note SoT → [`2026-08-11-aba-session-note-data-collection-spec.md`](./2026-08-11-aba-session-note-data-collection-spec.md)
 - Studio slices → [`2026-08-11-session-studio-implementation-plan.md`](./2026-08-11-session-studio-implementation-plan.md)
 - Enclosed EMR / Artemis replacement → [`2026-08-11-aba-emr-artemis-replacement-roadmap.md`](./2026-08-11-aba-emr-artemis-replacement-roadmap.md)
-- Cohort cutover go/no-go → [`2026-08-11-artemis-dual-run-cutover-checklist.md`](./2026-08-11-artemis-dual-run-cutover-checklist.md)
+- Cohort cutover go/no-go → [`2026-08-11-ras-sandbox-cutover-checklist.md`](./2026-08-11-ras-sandbox-cutover-checklist.md)
 - Connected smoke → [`2026-08-11-connected-product-test-playbook.md`](./2026-08-11-connected-product-test-playbook.md)
 - SQL index → [`docs/sql/README.md`](../../sql/README.md) · Env stub → [`docs/ENV.md`](../../ENV.md)
 

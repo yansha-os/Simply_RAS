@@ -1,0 +1,237 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const CANDIDATE_ID = '11111111-1111-4111-8111-111111111111';
+const OTHER_CANDIDATE_ID = '22222222-2222-4222-8222-222222222222';
+const INTERVIEWER_ID = '33333333-3333-4333-8333-333333333333';
+const FINGERPRINT = '44444444-4444-4444-8444-444444444444';
+
+const mocks = vi.hoisted(() => ({
+  getCurrentUser: vi.fn(),
+  requireRole: vi.fn(),
+  resolveFingerprintValidCandidate: vi.fn(),
+  cookieGet: vi.fn(),
+  revalidatePath: vi.fn(),
+  prisma: {
+    user: { findFirst: vi.fn(), findMany: vi.fn() },
+    atsCandidate: { findUnique: vi.fn(), update: vi.fn() },
+    atsInterview: { findUnique: vi.fn(), upsert: vi.fn() },
+    notification: { create: vi.fn() },
+  },
+}));
+
+vi.mock('@/lib/prisma', () => ({ prisma: mocks.prisma }));
+vi.mock('@/lib/auth', () => ({ getCurrentUser: mocks.getCurrentUser }));
+vi.mock('@/lib/auth-guard', () => ({ requireRole: mocks.requireRole }));
+vi.mock('@/lib/devToolsGate', () => ({ isDevToolsEnabled: () => false }));
+vi.mock('@/lib/magicLinkExpiry', () => ({
+  newMagicLinkExpiry: () => new Date('2026-10-01T00:00:00.000Z'),
+}));
+vi.mock('@/lib/candidateDeviceSession', () => ({
+  CANDIDATE_SESSION_COOKIE: 'ras_device_session_token',
+  DEVICE_FINGERPRINT_COOKIE: 'device_fingerprint',
+  resolveFingerprintValidCandidate: mocks.resolveFingerprintValidCandidate,
+}));
+vi.mock('@/lib/atsStage', () => ({
+  asRecord: (value: unknown) =>
+    value && typeof value === 'object' && !Array.isArray(value) ? value : {},
+  deriveAtsStage: () => 'INTERVIEW',
+  readProgressFromPacket: () => ({}),
+}));
+vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }));
+vi.mock('next/headers', () => ({
+  cookies: vi.fn(async () => ({ get: mocks.cookieGet })),
+}));
+
+import {
+  bookHrInterview,
+  getAtsInterview,
+  getHrMembers,
+} from './hrInterviewActions';
+
+function interviewRow() {
+  return {
+    id: '55555555-5555-4555-8555-555555555555',
+    candidateId: CANDIDATE_ID,
+    interviewerUserId: INTERVIEWER_ID,
+    claimedByUserId: null,
+    scheduledDate: '2026-09-12',
+    scheduledTime: '10:00',
+    scheduledAt: new Date('2026-09-05T12:00:00.000Z'),
+    meetingCode: 'room',
+    meetingLink: 'https://meet.jit.si/room',
+    status: 'SCHEDULED',
+    hrJoinedAt: null,
+    scorecard: {},
+    interviewerNotes: null,
+    scriptProgress: {},
+    recommendation: null,
+    completedAt: null,
+    interviewer: { firstName: 'Harper', lastName: 'Reed', role: 'HR_AGENT' },
+  };
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.getCurrentUser.mockResolvedValue(null);
+  mocks.resolveFingerprintValidCandidate.mockResolvedValue(null);
+  mocks.cookieGet.mockImplementation((name: string) => {
+    if (name === 'ras_device_session_token') return { value: CANDIDATE_ID };
+    if (name === 'device_fingerprint') return { value: FINGERPRINT };
+    return undefined;
+  });
+});
+
+describe('HR interview candidate scope', () => {
+  it('does not expose the HR directory to raw applicant cookies', async () => {
+    const result = await getHrMembers();
+
+    expect(result).toMatchObject({ success: false, data: [] });
+    expect(mocks.prisma.user.findMany).not.toHaveBeenCalled();
+  });
+
+  it('allows a fingerprint-valid applicant to load the interview directory', async () => {
+    mocks.resolveFingerprintValidCandidate.mockResolvedValue({
+      id: CANDIDATE_ID,
+      userId: null,
+      stage: 'INTERVIEW',
+      activationStatus: 'ACTIVE',
+    });
+    mocks.prisma.user.findMany.mockResolvedValue([
+      {
+        id: INTERVIEWER_ID,
+        firstName: 'Harper',
+        lastName: 'Reed',
+        role: 'HR_AGENT',
+        email: 'harper@example.test',
+      },
+    ]);
+
+    const result = await getHrMembers();
+
+    expect(result).toMatchObject({
+      success: true,
+      data: [{ id: INTERVIEWER_ID, name: 'Harper Reed' }],
+    });
+  });
+
+  it('rejects booking another candidate before reading or mutating ATS data', async () => {
+    mocks.resolveFingerprintValidCandidate.mockResolvedValue({
+      id: OTHER_CANDIDATE_ID,
+      userId: null,
+      stage: 'INTERVIEW',
+      activationStatus: 'ACTIVE',
+    });
+
+    const result = await bookHrInterview({
+      candidateId: CANDIDATE_ID,
+      candidateName: 'Forged Applicant',
+      hrInterviewerId: INTERVIEWER_ID,
+      hrInterviewerName: 'Forged Interviewer',
+      date: '2026-09-12',
+      time: '10:00',
+    });
+
+    expect(result).toMatchObject({ success: false });
+    expect(mocks.prisma.atsCandidate.findUnique).not.toHaveBeenCalled();
+    expect(mocks.prisma.atsInterview.upsert).not.toHaveBeenCalled();
+  });
+
+  it('rejects reading another candidate interview', async () => {
+    mocks.resolveFingerprintValidCandidate.mockResolvedValue({
+      id: OTHER_CANDIDATE_ID,
+      userId: null,
+      stage: 'INTERVIEW',
+      activationStatus: 'ACTIVE',
+    });
+
+    const result = await getAtsInterview(CANDIDATE_ID);
+
+    expect(result).toMatchObject({ success: false });
+    expect(mocks.prisma.atsInterview.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('does not return internal HR interview notes to the applicant owner', async () => {
+    mocks.resolveFingerprintValidCandidate.mockResolvedValue({
+      id: CANDIDATE_ID,
+      userId: null,
+      stage: 'INTERVIEW',
+      activationStatus: 'ACTIVE',
+    });
+
+    const result = await getAtsInterview(CANDIDATE_ID);
+
+    expect(result).toMatchObject({ success: false });
+    expect(mocks.prisma.atsInterview.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('allows ATS staff to read the internal interview record', async () => {
+    mocks.getCurrentUser.mockResolvedValue({
+      id: '66666666-6666-4666-8666-666666666666',
+      role: 'HEAD_HR',
+      isActive: true,
+    });
+    mocks.prisma.atsInterview.findUnique.mockResolvedValue(interviewRow());
+
+    const result = await getAtsInterview(CANDIDATE_ID);
+
+    expect(result).toMatchObject({
+      success: true,
+      data: {
+        candidateId: CANDIDATE_ID,
+        interviewerNotes: null,
+        recommendation: null,
+      },
+    });
+  });
+
+  it('allows the fingerprint-validated owner and derives the interviewer from the database', async () => {
+    mocks.resolveFingerprintValidCandidate.mockResolvedValue({
+      id: CANDIDATE_ID,
+      userId: null,
+      stage: 'INTERVIEW',
+      activationStatus: 'ACTIVE',
+    });
+    mocks.prisma.atsCandidate.findUnique.mockResolvedValue({
+      id: CANDIDATE_ID,
+      firstName: 'Avery',
+      lastName: 'Stone',
+      stage: 'INTERVIEW',
+      activationStatus: 'ACTIVE',
+      dossier: {},
+      onboardingPacket: null,
+    });
+    mocks.prisma.user.findFirst.mockResolvedValue({
+      id: INTERVIEWER_ID,
+      firstName: 'Harper',
+      lastName: 'Reed',
+    });
+    mocks.prisma.atsInterview.upsert.mockResolvedValue(interviewRow());
+    mocks.prisma.atsCandidate.update.mockResolvedValue({ id: CANDIDATE_ID });
+    mocks.prisma.notification.create.mockResolvedValue({ id: 'notification-id' });
+
+    const result = await bookHrInterview({
+      candidateId: CANDIDATE_ID,
+      candidateName: 'Browser Supplied Name',
+      hrInterviewerId: INTERVIEWER_ID,
+      hrInterviewerName: 'Browser Supplied Interviewer',
+      date: '2026-09-12',
+      time: '10:00',
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      message: 'Interview successfully booked with Harper Reed!',
+    });
+    expect(JSON.stringify(result)).not.toMatch(
+      /scorecard|interviewerNotes|scriptProgress|recommendation/
+    );
+    expect(mocks.prisma.user.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: INTERVIEWER_ID,
+        role: { in: ['HR_AGENT', 'HEAD_HR'] },
+        isActive: true,
+      },
+      select: { id: true, firstName: true, lastName: true },
+    });
+  });
+});

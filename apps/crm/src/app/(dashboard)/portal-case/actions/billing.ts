@@ -12,6 +12,40 @@ import { revalidatePath } from 'next/cache';
 import { assertPredecessor } from '@/lib/clientStatusGates';
 import { requireStaff, BILLING_ROLES } from '@/lib/auth-guard';
 
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const BILLING_STATUS_CHANGED = 'BILLING_STATUS_CHANGED';
+
+type PaApprovalInput = {
+  authNumber: string;
+  approvedUnits: number;
+  effectiveDate: Date;
+  expirationDate: Date;
+};
+
+function validatePaApprovalInput(data: PaApprovalInput) {
+  const authNumber = data.authNumber?.trim();
+  const approvedUnits = data.approvedUnits;
+  const effectiveDate = new Date(data.effectiveDate);
+  const expirationDate = new Date(data.expirationDate);
+  if (!authNumber || authNumber.length > 200) {
+    return { ok: false as const, error: 'A valid authorization number is required.' };
+  }
+  if (!Number.isInteger(approvedUnits) || approvedUnits <= 0 || approvedUnits > 1_000_000) {
+    return { ok: false as const, error: 'Approved units must be a positive whole number.' };
+  }
+  if (!Number.isFinite(effectiveDate.getTime()) || !Number.isFinite(expirationDate.getTime())) {
+    return { ok: false as const, error: 'Valid effective and expiration dates are required.' };
+  }
+  if (expirationDate < effectiveDate) {
+    return { ok: false as const, error: 'Expiration date cannot be before the effective date.' };
+  }
+  return {
+    ok: true as const,
+    value: { authNumber, approvedUnits, effectiveDate, expirationDate },
+  };
+}
+
 function actionErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
@@ -20,6 +54,7 @@ export async function completeVobAndCreds(clientId: string) {
   try {
     const auth = await requireStaff(BILLING_ROLES);
     if (!auth.ok) return { success: false, error: auth.error };
+    if (!UUID_RE.test(clientId)) return { success: false, error: 'Client not found.' };
 
     const client = await prisma.client.findUnique({
       where: { id: clientId },
@@ -41,30 +76,31 @@ export async function completeVobAndCreds(clientId: string) {
       return { success: true };
     }
 
-    // Create or update PARequest
     const pa = client.paRequests.find(p => p.type === 'ASSESSMENT');
-    
-    if (pa) {
-      await prisma.pARequest.update({
-        where: { id: pa.id },
-        data: { vobCompleted: true, providerCredentialed: true }
+    await prisma.$transaction(async (tx) => {
+      const clientUpdated = await tx.client.updateMany({
+        where: { id: clientId, status: client.status },
+        data: { status: 'VOB_COMPLETED' },
       });
-    } else {
-      await prisma.pARequest.create({
-        data: {
-          clientId,
-          type: 'ASSESSMENT',
-          vobCompleted: true,
-          providerCredentialed: true,
-          status: 'NOT_STARTED'
-        }
-      });
-    }
+      if (clientUpdated.count !== 1) throw new Error(BILLING_STATUS_CHANGED);
 
-    // Move client to VOB_COMPLETED
-    await prisma.client.update({
-      where: { id: clientId },
-      data: { status: 'VOB_COMPLETED' }
+      if (pa) {
+        const paUpdated = await tx.pARequest.updateMany({
+          where: { id: pa.id, clientId, type: 'ASSESSMENT', updatedAt: pa.updatedAt },
+          data: { vobCompleted: true, providerCredentialed: true },
+        });
+        if (paUpdated.count !== 1) throw new Error(BILLING_STATUS_CHANGED);
+      } else {
+        await tx.pARequest.create({
+          data: {
+            clientId,
+            type: 'ASSESSMENT',
+            vobCompleted: true,
+            providerCredentialed: true,
+            status: 'NOT_STARTED',
+          },
+        });
+      }
     });
 
     revalidatePath(`/client/${clientId}`);
@@ -73,6 +109,9 @@ export async function completeVobAndCreds(clientId: string) {
     revalidatePath('/portal-billing/clients');
     return { success: true };
   } catch (error: unknown) {
+    if (error instanceof Error && error.message === BILLING_STATUS_CHANGED) {
+      return { success: false, error: 'The PA or client status changed. Refresh and try again.' };
+    }
     const message = actionErrorMessage(error, 'Failed to complete VOB.');
     console.error('Failed to complete VOB:', message);
     return { success: false, error: message };
@@ -83,6 +122,7 @@ export async function submitPaRequest(clientId: string) {
   try {
     const auth = await requireStaff(BILLING_ROLES);
     if (!auth.ok) return { success: false, error: auth.error };
+    if (!UUID_RE.test(clientId)) return { success: false, error: 'Client not found.' };
 
     const client = await prisma.client.findUnique({
       where: { id: clientId },
@@ -108,15 +148,28 @@ export async function submitPaRequest(clientId: string) {
     if (!pa.vobCompleted || !pa.providerCredentialed) {
       return { success: false, error: 'Complete VOB & credentialing before submitting Assessment PA.' };
     }
+    if (!['NOT_STARTED', 'SUBMITTED', 'DENIED_CLERICAL', 'DENIED_CLINICAL'].includes(pa.status)) {
+      return { success: false, error: `Assessment PA cannot be submitted from ${pa.status}.` };
+    }
 
-    await prisma.pARequest.update({
-      where: { id: pa.id },
-      data: { status: 'SUBMITTED' }
-    });
-
-    await prisma.client.update({
-      where: { id: clientId },
-      data: { status: 'PA_SUBMITTED' }
+    await prisma.$transaction(async (tx) => {
+      const clientUpdated = await tx.client.updateMany({
+        where: { id: clientId, status: client.status },
+        data: { status: 'PA_SUBMITTED' },
+      });
+      const paUpdated = await tx.pARequest.updateMany({
+        where: {
+          id: pa.id,
+          clientId,
+          type: 'ASSESSMENT',
+          status: pa.status,
+          updatedAt: pa.updatedAt,
+        },
+        data: { status: 'SUBMITTED' },
+      });
+      if (clientUpdated.count !== 1 || paUpdated.count !== 1) {
+        throw new Error(BILLING_STATUS_CHANGED);
+      }
     });
 
     revalidatePath(`/client/${clientId}`);
@@ -125,16 +178,20 @@ export async function submitPaRequest(clientId: string) {
     revalidatePath('/portal-billing/clients');
     return { success: true };
   } catch (error: unknown) {
+    if (error instanceof Error && error.message === BILLING_STATUS_CHANGED) {
+      return { success: false, error: 'The PA or client status changed. Refresh and try again.' };
+    }
     const message = actionErrorMessage(error, 'Failed to submit PA.');
     console.error('Failed to submit PA:', message);
     return { success: false, error: message };
   }
 }
 
-export async function denyPaRequest(paId: string, isClinical: boolean) {
+export async function denyPaRequest(paId: string, isClinical: boolean, reason?: string) {
   try {
     const gate = await requireStaff(BILLING_ROLES);
     if (!gate.ok) return { success: false, error: gate.error };
+    if (!UUID_RE.test(paId)) return { success: false, error: 'PA request not found.' };
 
     const existing = await prisma.pARequest.findUnique({
       where: { id: paId },
@@ -149,13 +206,31 @@ export async function denyPaRequest(paId: string, isClinical: boolean) {
         error: `Pipeline gate: Assessment/Treatment PA must be SUBMITTED before deny (got ${existing.status}).`,
       };
     }
+    const normalizedReason = reason?.trim();
+    if (normalizedReason && normalizedReason.length > 5_000) {
+      return { success: false, error: 'Denial reason must be 5,000 characters or fewer.' };
+    }
 
-    const pa = await prisma.pARequest.update({
-      where: { id: paId },
-      data: { status: isClinical ? 'DENIED_CLINICAL' : 'DENIED_CLERICAL' }
+    const denied = await prisma.pARequest.updateMany({
+      where: {
+        id: paId,
+        clientId: existing.clientId,
+        type: existing.type,
+        status: existing.status,
+        updatedAt: existing.updatedAt,
+      },
+      data: {
+        status: isClinical ? 'DENIED_CLINICAL' : 'DENIED_CLERICAL',
+        ...(normalizedReason
+          ? { p2pNotes: normalizedReason, p2pResolved: false }
+          : {}),
+      },
     });
+    if (denied.count !== 1) {
+      return { success: false, error: 'The PA status changed. Refresh and try again.' };
+    }
 
-    revalidatePath(`/client/${pa.clientId}`);
+    revalidatePath(`/client/${existing.clientId}`);
     revalidatePath('/portal-billing');
     revalidatePath('/portal-billing/clients');
     return { success: true };
@@ -166,14 +241,14 @@ export async function denyPaRequest(paId: string, isClinical: boolean) {
   }
 }
 
-export async function approvePaRequest(paId: string, data: { authNumber: string, approvedUnits: number, effectiveDate: Date, expirationDate: Date }) {
+export async function approvePaRequest(paId: string, data: PaApprovalInput) {
   try {
     const gate = await requireStaff(BILLING_ROLES);
     if (!gate.ok) return { success: false, error: gate.error };
 
-    if (new Date(data.expirationDate) < new Date(data.effectiveDate)) {
-      return { success: false, error: 'Expiration date cannot be before the effective date.' };
-    }
+    if (!UUID_RE.test(paId)) return { success: false, error: 'PA request not found.' };
+    const validated = validatePaApprovalInput(data);
+    if (!validated.ok) return { success: false, error: validated.error };
 
     const existing = await prisma.pARequest.findUnique({
       where: { id: paId },
@@ -204,28 +279,34 @@ export async function approvePaRequest(paId: string, data: { authNumber: string,
       };
     }
 
-    const pa = await prisma.pARequest.update({
-      where: { id: paId },
-      data: { 
-        status: 'APPROVED',
-        authNumber: data.authNumber,
-        approvedUnits: data.approvedUnits,
-        effectiveDate: data.effectiveDate,
-        expirationDate: data.expirationDate
+    await prisma.$transaction(async (tx) => {
+      const clientUpdated = await tx.client.updateMany({
+        where: { id: existing.clientId, status: 'PA_SUBMITTED' },
+        data: { status: 'PA_APPROVED' },
+      });
+      const paUpdated = await tx.pARequest.updateMany({
+        where: {
+          id: paId,
+          clientId: existing.clientId,
+          type: 'ASSESSMENT',
+          status: existing.status,
+        },
+        data: { status: 'APPROVED', ...validated.value },
+      });
+      if (clientUpdated.count !== 1 || paUpdated.count !== 1) {
+        throw new Error(BILLING_STATUS_CHANGED);
       }
     });
 
-    await prisma.client.update({
-      where: { id: pa.clientId },
-      data: { status: 'PA_APPROVED' }
-    });
-
-    revalidatePath(`/client/${pa.clientId}`);
+    revalidatePath(`/client/${existing.clientId}`);
     revalidatePath('/portal-case/clients');
     revalidatePath('/portal-billing');
     revalidatePath('/portal-billing/clients');
     return { success: true };
   } catch (error: unknown) {
+    if (error instanceof Error && error.message === BILLING_STATUS_CHANGED) {
+      return { success: false, error: 'The PA or client status changed. Refresh and try again.' };
+    }
     const message = actionErrorMessage(error, 'Failed to approve PA.');
     console.error('Failed to approve PA:', message);
     return { success: false, error: message };
@@ -240,6 +321,7 @@ export async function submitTreatmentPaRequest(clientId: string) {
   try {
     const auth = await requireStaff(BILLING_ROLES);
     if (!auth.ok) return { success: false, error: auth.error };
+    if (!UUID_RE.test(clientId)) return { success: false, error: 'Client not found.' };
 
     const client = await prisma.client.findUnique({
       where: { id: clientId },
@@ -261,25 +343,34 @@ export async function submitTreatmentPaRequest(clientId: string) {
     }
 
     const pa = client.paRequests.find(p => p.type === 'TREATMENT');
-    
-    if (pa) {
-      await prisma.pARequest.update({
-        where: { id: pa.id },
-        data: { status: 'SUBMITTED' }
-      });
-    } else {
-      await prisma.pARequest.create({
-        data: {
-          clientId,
-          type: 'TREATMENT',
-          status: 'SUBMITTED'
-        }
-      });
+    if (pa && !['NOT_STARTED', 'SUBMITTED', 'DENIED_CLERICAL', 'DENIED_CLINICAL'].includes(pa.status)) {
+      return { success: false, error: `Treatment PA cannot be submitted from ${pa.status}.` };
     }
 
-    await prisma.client.update({
-      where: { id: clientId },
-      data: { status: 'TX_PA_SUBMITTED' }
+    await prisma.$transaction(async (tx) => {
+      const clientUpdated = await tx.client.updateMany({
+        where: { id: clientId, status: client.status },
+        data: { status: 'TX_PA_SUBMITTED' },
+      });
+      if (clientUpdated.count !== 1) throw new Error(BILLING_STATUS_CHANGED);
+
+      if (pa) {
+        const paUpdated = await tx.pARequest.updateMany({
+          where: {
+            id: pa.id,
+            clientId,
+            type: 'TREATMENT',
+            status: pa.status,
+            updatedAt: pa.updatedAt,
+          },
+          data: { status: 'SUBMITTED' },
+        });
+        if (paUpdated.count !== 1) throw new Error(BILLING_STATUS_CHANGED);
+      } else {
+        await tx.pARequest.create({
+          data: { clientId, type: 'TREATMENT', status: 'SUBMITTED' },
+        });
+      }
     });
 
     revalidatePath(`/client/${clientId}`);
@@ -287,20 +378,23 @@ export async function submitTreatmentPaRequest(clientId: string) {
     revalidatePath('/portal-billing/clients');
     return { success: true };
   } catch (error: unknown) {
+    if (error instanceof Error && error.message === BILLING_STATUS_CHANGED) {
+      return { success: false, error: 'The PA or client status changed. Refresh and try again.' };
+    }
     const message = actionErrorMessage(error, 'Failed to submit Treatment PA.');
     console.error('Failed to submit Treatment PA:', message);
     return { success: false, error: message };
   }
 }
 
-export async function approveTreatmentPaRequest(paId: string, data: { authNumber: string, approvedUnits: number, effectiveDate: Date, expirationDate: Date }) {
+export async function approveTreatmentPaRequest(paId: string, data: PaApprovalInput) {
   try {
     const gate = await requireStaff(BILLING_ROLES);
     if (!gate.ok) return { success: false, error: gate.error };
 
-    if (new Date(data.expirationDate) < new Date(data.effectiveDate)) {
-      return { success: false, error: 'Expiration date cannot be before the effective date.' };
-    }
+    if (!UUID_RE.test(paId)) return { success: false, error: 'PA request not found.' };
+    const validated = validatePaApprovalInput(data);
+    if (!validated.ok) return { success: false, error: validated.error };
 
     const existing = await prisma.pARequest.findUnique({
       where: { id: paId },
@@ -331,30 +425,34 @@ export async function approveTreatmentPaRequest(paId: string, data: { authNumber
       };
     }
 
-    const pa = await prisma.pARequest.update({
-      where: { id: paId },
-      data: { 
-        status: 'APPROVED',
-        authNumber: data.authNumber,
-        approvedUnits: data.approvedUnits,
-        effectiveDate: data.effectiveDate,
-        expirationDate: data.expirationDate
+    await prisma.$transaction(async (tx) => {
+      const clientUpdated = await tx.client.updateMany({
+        where: { id: existing.clientId, status: 'TX_PA_SUBMITTED' },
+        data: { status: 'STAFFING_PENDING' },
+      });
+      const paUpdated = await tx.pARequest.updateMany({
+        where: {
+          id: paId,
+          clientId: existing.clientId,
+          type: 'TREATMENT',
+          status: existing.status,
+        },
+        data: { status: 'APPROVED', ...validated.value },
+      });
+      if (clientUpdated.count !== 1 || paUpdated.count !== 1) {
+        throw new Error(BILLING_STATUS_CHANGED);
       }
     });
 
-    // Explicit handoff: Treatment PA approved → Case Coord staffing (not buried in saveClientSchedule).
-    // ACTIVE still requires a durable first Session (Bridge E).
-    await prisma.client.update({
-      where: { id: pa.clientId },
-      data: { status: 'STAFFING_PENDING' }
-    });
-
-    revalidatePath(`/client/${pa.clientId}`);
+    revalidatePath(`/client/${existing.clientId}`);
     revalidatePath('/portal-billing');
     revalidatePath('/portal-billing/clients');
     revalidatePath('/portal-case-coord/openings');
     return { success: true };
   } catch (error: unknown) {
+    if (error instanceof Error && error.message === BILLING_STATUS_CHANGED) {
+      return { success: false, error: 'The PA or client status changed. Refresh and try again.' };
+    }
     const message = actionErrorMessage(error, 'Failed to approve Treatment PA.');
     console.error('Failed to approve Treatment PA:', message);
     return { success: false, error: message };

@@ -156,6 +156,47 @@ function mapMessage(
   };
 }
 
+/**
+ * RBT communication is limited to the care-team relationships surfaced by the
+ * inbox: agency case coordinators, the RBT's assigned/application BCBAs, or
+ * an already-established staff thread. Never trust a client-supplied user ID
+ * to widen that audience.
+ */
+async function isAllowedRbtStaffPeer(
+  rbtUserId: string,
+  peerUserId: string
+): Promise<boolean> {
+  const [caseCoordinator, assignedBcba, applicationBcba, existingThread] =
+    await Promise.all([
+      prisma.user.findFirst({
+        where: { id: peerUserId, role: 'CASE_COORDINATOR', isActive: true },
+        select: { id: true },
+      }),
+      prisma.client.findFirst({
+        where: { rbtId: rbtUserId, bcbaId: peerUserId },
+        select: { id: true },
+      }),
+      prisma.caseApplication.findFirst({
+        where: {
+          rbtUserId,
+          opening: { client: { bcbaId: peerUserId } },
+        },
+        select: { id: true },
+      }),
+      prisma.staffMessage.findFirst({
+        where: {
+          OR: [
+            { senderId: rbtUserId, receiverId: peerUserId },
+            { senderId: peerUserId, receiverId: rbtUserId },
+          ],
+        },
+        select: { id: true },
+      }),
+    ]);
+
+  return Boolean(caseCoordinator || assignedBcba || applicationBcba || existingThread);
+}
+
 export async function getRbtCommunicationInbox(): Promise<StaffCommInbox> {
   try {
     const rbtUserId = await resolveActingRbtUserId();
@@ -383,6 +424,9 @@ export async function getRbtStaffThread(peerUserId: string): Promise<{
 
     const me = await resolveActingRbtUserId();
     if (!me) return { success: false, messages: [], error: 'Not signed in as RBT.' };
+    if (!(await isAllowedRbtStaffPeer(me, peerUserId))) {
+      return { success: false, messages: [], error: 'Staff thread not found.' };
+    }
 
     // Most recent 200, then reversed for display — `asc, take` returned the
     // OLDEST 200, so threads past 200 rows never showed new messages (audit M4).
@@ -408,7 +452,12 @@ export async function getRbtStaffThread(peerUserId: string): Promise<{
       .map((m) => m.id);
     if (unreadIds.length > 0) {
       await prisma.staffMessage.updateMany({
-        where: { id: { in: unreadIds } },
+        where: {
+          id: { in: unreadIds },
+          senderId: peerUserId,
+          receiverId: me,
+          readAt: null,
+        },
         data: { readAt: new Date() },
       });
     }
@@ -436,6 +485,10 @@ export async function sendRbtStaffMessage(
     if (!me) return { success: false, error: 'Not signed in as RBT.' };
     if (!peerUserId || peerUserId === NOTIFICATIONS_CHANNEL_ID) {
       return { success: false, error: 'Pick a staff member to message.' };
+    }
+
+    if (!(await isAllowedRbtStaffPeer(me, peerUserId))) {
+      return { success: false, error: 'This staff member is not part of your care-team contacts.' };
     }
 
     const peer = await prisma.user.findFirst({

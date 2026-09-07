@@ -26,8 +26,6 @@ export default async function CaseCoordPortalPage() {
     prisma.client.findMany({
       select: {
         id: true,
-        firstName: true,
-        lastName: true,
         status: true,
         caseCoordinatorId: true,
         rbtId: true,
@@ -48,12 +46,11 @@ export default async function CaseCoordPortalPage() {
   const staffingPendingCount = allClients.filter((c) => c.status === 'STAFFING_PENDING').length;
   const activeCount = allClients.filter((c) => c.status === 'ACTIVE').length;
   const meetAndGreetsPending = allClients.filter((c) => c.rbtId && !c.rbtApproved).length;
-  const dashboardClients = allClients.map((client) => ({ ...client, guardianName: null }));
 
   return (
     <CaseCoordDashboard
       coordinators={coordinators}
-      allClients={dashboardClients}
+      allClients={allClients}
       metrics={{
         staffingPending: staffingPendingCount,
         openOpenings: openOpeningsCount,

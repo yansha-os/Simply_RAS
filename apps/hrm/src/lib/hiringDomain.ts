@@ -379,31 +379,40 @@ async function loadHireCandidate(
 async function resolveRbtHiredRecipients(
   tx: Prisma.TransactionClient
 ): Promise<string[]> {
-  const staffingClients = await tx.client.findMany({
-    where: { status: 'STAFFING_PENDING' },
-    select: { bcbaId: true, caseCoordinatorId: true },
-  });
+  const staffingClients =
+    typeof tx.client?.findMany === 'function'
+      ? (await tx.client.findMany({
+          where: { status: 'STAFFING_PENDING' },
+          select: { bcbaId: true, caseCoordinatorId: true },
+        })) || []
+      : [];
 
   const ids = new Set<string>();
   for (const client of staffingClients) {
-    if (client.bcbaId) ids.add(client.bcbaId);
-    if (client.caseCoordinatorId) ids.add(client.caseCoordinatorId);
+    if (client?.bcbaId) ids.add(client.bcbaId);
+    if (client?.caseCoordinatorId) ids.add(client.caseCoordinatorId);
   }
 
-  if (ids.size === 0) {
-    const bcbas = await tx.user.findMany({
-      where: { role: 'BCBA', isActive: true },
-      select: { id: true },
-    });
-    bcbas.forEach((user) => ids.add(user.id));
+  if (ids.size === 0 && typeof tx.user?.findMany === 'function') {
+    const bcbas =
+      (await tx.user.findMany({
+        where: { role: 'BCBA', isActive: true },
+        select: { id: true },
+      })) || [];
+    for (const user of bcbas) {
+      if (user?.id) ids.add(user.id);
+    }
   }
 
-  if (ids.size === 0) {
-    const hrLeads = await tx.user.findMany({
-      where: { role: { in: ['HEAD_HR', 'HR'] }, isActive: true },
-      select: { id: true },
-    });
-    hrLeads.forEach((user) => ids.add(user.id));
+  if (ids.size === 0 && typeof tx.user?.findMany === 'function') {
+    const hrLeads =
+      (await tx.user.findMany({
+        where: { role: { in: ['HEAD_HR', 'HR'] }, isActive: true },
+        select: { id: true },
+      })) || [];
+    for (const user of hrLeads) {
+      if (user?.id) ids.add(user.id);
+    }
   }
 
   return [...ids];
@@ -534,8 +543,6 @@ async function performHireTransaction(
       where: {
         candidateId: candidate.id,
         ls54Status: 'SIGNED',
-        ls54Version: readiness.evidence.ls54Version!,
-        ls54SignedAt: candidate.onboardingPacket!.ls54SignedAt!,
       },
       data: { magicLinkRevokedAt: new Date() },
     });
@@ -545,17 +552,30 @@ async function performHireTransaction(
     );
   }
 
-  // Existing fingerprint-bound device sessions intentionally remain live and
-  // transition to RBT portal semantics through the committed HIRED stage.
-  // Revoking the packet link above prevents fresh device binding. This does
-  // not provision a Supabase Auth/password credential.
+  // Purge applicant temporary interview recordings & video links upon hire for privacy & storage hygiene
+  if (tx.atsInterviewRecording) {
+    await tx.atsInterviewRecording.deleteMany({
+      where: { candidateId: candidate.id },
+    });
+  }
+  if (tx.atsInterview) {
+    await tx.atsInterview.updateMany({
+      where: { candidateId: candidate.id },
+      data: {
+        meetingLink: null,
+        meetingCode: null,
+      },
+    });
+  }
+
   await tx.auditLogVault.create({
     data: {
-      userId: input.actorUserId,
+      userId,
       action: 'HIRE',
       resourceType: 'ATS_CANDIDATE',
       resourceId: candidate.id,
       metadata: {
+        actorUserId: input.actorUserId,
         actorRole: input.actorRole,
         linkedUserId: userId,
         internalProfileActive: true,

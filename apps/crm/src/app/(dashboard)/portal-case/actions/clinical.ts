@@ -1,46 +1,37 @@
 'use server';
 
+import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
 import { assertPredecessor } from '@/lib/clientStatusGates';
 import { requireClientAccess, requireStaff, CLINICAL_ROLES } from '@/lib/auth-guard';
 import {
-  parsePacketFormData,
-  safeParseJson,
-  type IntakePacketDocFlagKey,
-} from '@/lib/safeParseJson';
+  addClinicalReviewApproval,
+  applyClinicalDocumentCorrection,
+  clearClinicalDocumentRejection,
+  hasAllRequiredClinicalReviewApprovals,
+  isClinicalReviewItemKey,
+  isClinicalStageClientStatus,
+  nextClientStatusAfterClinicalCorrection,
+  removeClinicalReviewApproval,
+  type ClinicalReviewItemKey,
+} from '@/lib/clinicalReviewApprovals';
+import {
+  CLINICAL_VERIFICATION_DB_TO_FORM_KEY,
+  CLINICAL_VERIFICATION_DOC_LABELS,
+  getRequiredClinicalVerificationKeys,
+  isClinicalVerificationDocumentKey,
+  type ClinicalVerificationDocumentKey,
+} from '@/lib/clinicalVerificationDocs';
+import { notifyClient } from '@/lib/notificationDispatcher';
+import { notifyClinicalReviewApprovedHandoff } from '@/lib/intakeWorkflowNotifications';
+import { parsePacketFormData, safeParseJson } from '@/lib/safeParseJson';
 
 type ClinicalActionResult =
   | { success: true }
   | { success: false; error: string };
 
-const CLINICAL_DOCUMENT_KEYS = [
-  'insuranceCardFrontUploaded',
-  'insuranceCardBackUploaded',
-  'medicaidCardFrontUploaded',
-  'medicaidCardBackUploaded',
-  'diagnosticEvalUploaded',
-  'physicianRxUploaded',
-  'iepUploaded',
-  'custodyDocsUploaded',
-  'priorAbaRecordsUploaded',
-] as const satisfies readonly IntakePacketDocFlagKey[];
-
-type ClinicalDocumentKey = (typeof CLINICAL_DOCUMENT_KEYS)[number];
-
-const CLINICAL_DOCUMENT_KEY_SET = new Set<string>(CLINICAL_DOCUMENT_KEYS);
-
-const DOCUMENT_FORM_KEYS: Record<ClinicalDocumentKey, string> = {
-  insuranceCardFrontUploaded: 'docInsuranceFront',
-  insuranceCardBackUploaded: 'docInsuranceBack',
-  medicaidCardFrontUploaded: 'docMedicaidFront',
-  medicaidCardBackUploaded: 'docMedicaidBack',
-  diagnosticEvalUploaded: 'docEval',
-  physicianRxUploaded: 'docReferral',
-  iepUploaded: 'docIEP',
-  custodyDocsUploaded: 'docCustody',
-  priorAbaRecordsUploaded: 'docPriorABA',
-};
+const DOCUMENT_FORM_KEYS = CLINICAL_VERIFICATION_DB_TO_FORM_KEY;
 
 const FORM_01_REVIEW_FIELDS = new Set([
   'childName', 'preferredName', 'dob', 'sexAtBirth', 'childLivesWithParents',
@@ -82,14 +73,16 @@ const AVAILABILITY_FIELD_PATTERN =
   /^avail_(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)_(from|to)$/;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const BOUNCEABLE_CLINICAL_STATUSES = [
+const CLINICAL_CORRECTION_CLIENT_STATUSES = [
   'DOCS_APPROVED_INTAKE',
   'CLINICAL_REVIEW_APPROVED',
 ] as const;
 const MAX_REASON_LENGTH = 1000;
 
-function isClinicalDocumentKey(key: string): key is ClinicalDocumentKey {
-  return CLINICAL_DOCUMENT_KEY_SET.has(key);
+function isClinicalDocumentKey(
+  key: string,
+): key is ClinicalVerificationDocumentKey {
+  return isClinicalVerificationDocumentKey(key);
 }
 
 function isReviewableFormField(fieldId: string): boolean {
@@ -140,39 +133,6 @@ function hasAuthorizedDocumentRoute(value: unknown, clientId: string): boolean {
   return isAuthorizedDocumentPath(path, clientId);
 }
 
-function requiredClinicalReviewKeys(
-  formData: Record<string, unknown>
-): IntakePacketDocFlagKey[] {
-  const keys: IntakePacketDocFlagKey[] = [
-    'intakeFormComplete',
-    'consentFormComplete',
-    'insuranceCardFrontUploaded',
-    'insuranceCardBackUploaded',
-    'diagnosticEvalUploaded',
-    'physicianRxUploaded',
-  ];
-
-  const hasMedicaid =
-    Boolean(formData.hasMedicaid) &&
-    formData.hasMedicaid !== 'No' &&
-    formData.hasMedicaid !== 'Not Sure';
-  const hasCustodyDoc =
-    formData.custodyDocAttached === 'Yes — Attached' ||
-    formData.custodyDocAttached === 'Yes — Will Provide';
-  const hasIep =
-    formData.hasIEP === 'Yes — Attached' ||
-    formData.hasIEP === 'Yes — Will Provide';
-
-  if (hasMedicaid) {
-    keys.push('medicaidCardFrontUploaded', 'medicaidCardBackUploaded');
-  }
-  if (hasCustodyDoc) keys.push('custodyDocsUploaded');
-  if (hasIep) keys.push('iepUploaded');
-  if (formData.hasPriorABA === 'Yes') keys.push('priorAbaRecordsUploaded');
-
-  return keys;
-}
-
 function revalidateClinicalReview(clientId: string) {
   revalidatePath('/', 'layout');
   revalidatePath(`/client/${clientId}`);
@@ -181,7 +141,112 @@ function revalidateClinicalReview(clientId: string) {
   revalidatePath('/magic-link/[id]', 'page');
 }
 
-export async function approveClinicalReview(clientId: string): Promise<ClinicalActionResult> {
+function isClinicalReviewItemAvailable(
+  packet: {
+    intakeFormComplete: boolean;
+    consentFormComplete: boolean;
+    [key: string]: unknown;
+  },
+  formData: Record<string, unknown>,
+  clientId: string,
+  itemKey: ClinicalReviewItemKey,
+): boolean {
+  if (itemKey === 'intakeFormComplete') return Boolean(packet.intakeFormComplete);
+  if (itemKey === 'consentFormComplete') return Boolean(packet.consentFormComplete);
+
+  if (!isClinicalVerificationDocumentKey(itemKey)) return false;
+  if (!packet[itemKey]) return false;
+  return hasAuthorizedDocumentRoute(formData[DOCUMENT_FORM_KEYS[itemKey]], clientId);
+}
+
+export async function approveClinicalReviewItem(
+  clientId: string,
+  packetId: string,
+  itemKey: string,
+): Promise<ClinicalActionResult> {
+  try {
+    const auth = await requireStaff(CLINICAL_ROLES);
+    if (!auth.ok) return { success: false, error: auth.error };
+    if (!UUID_PATTERN.test(clientId) || !UUID_PATTERN.test(packetId)) {
+      return { success: false, error: 'Invalid client or packet.' };
+    }
+    if (!isClinicalReviewItemKey(itemKey)) {
+      return { success: false, error: 'Invalid clinical review item.' };
+    }
+
+    const access = await requireClientAccess(clientId);
+    if (!access.ok) return { success: false, error: access.error };
+
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      include: { intakePacket: true },
+    });
+    const packet = client?.intakePacket;
+    if (!client || !packet || packet.id !== packetId) {
+      return { success: false, error: 'Packet does not belong to this client.' };
+    }
+    if (client.status !== 'DOCS_APPROVED_INTAKE') {
+      return {
+        success: false,
+        error: 'Clinical item approval is only allowed during the clinical review stage.',
+      };
+    }
+    if (packet.status !== 'APPROVED') {
+      return {
+        success: false,
+        error: 'Clinical item approval is only available while the packet is on the Clinical Support desk.',
+      };
+    }
+
+    const formData = parsePacketFormData(packet.formData);
+    if (!isClinicalReviewItemAvailable(packet, formData, clientId, itemKey)) {
+      return {
+        success: false,
+        error: 'This item is not available for clinical review.',
+      };
+    }
+
+    const nextFormData = addClinicalReviewApproval(formData, itemKey);
+    const nextRejections = clearClinicalDocumentRejection(
+      parseRejectionDetails(packet.rejectionDetails),
+      itemKey,
+    );
+    const update = await prisma.intakePacket.updateMany({
+      where: {
+        id: packetId,
+        clientId,
+        status: 'APPROVED',
+      },
+      data: {
+        formData: nextFormData as Prisma.InputJsonValue,
+        rejectionDetails: nextRejections,
+      },
+    });
+    if (update.count !== 1) {
+      return {
+        success: false,
+        error: 'The packet changed while you were reviewing. Refresh and try again.',
+      };
+    }
+
+    revalidateClinicalReview(clientId);
+    return { success: true };
+  } catch (error) {
+    console.error(
+      'approveClinicalReviewItem failed:',
+      error instanceof Error ? error.name : 'UnknownError',
+    );
+    return {
+      success: false,
+      error: 'Failed to approve the clinical review item. Please try again.',
+    };
+  }
+}
+
+export async function approveClinicalReview(
+  clientId: string,
+  options?: { verificationDocsOnly?: boolean },
+): Promise<ClinicalActionResult> {
   try {
     const auth = await requireStaff(CLINICAL_ROLES);
     if (!auth.ok) return { success: false, error: auth.error };
@@ -220,21 +285,36 @@ export async function approveClinicalReview(clientId: string): Promise<ClinicalA
     if (!packet || packet.status !== 'APPROVED') {
       return {
         success: false,
-        error: 'The intake packet must be re-approved by Intake before clinical approval.',
+        error: 'Clinical approval is only available while the packet is on the Clinical Support desk.',
       };
     }
 
     const formData = parsePacketFormData(packet.formData);
-    const missingRequiredItems = requiredClinicalReviewKeys(formData).filter((key) => {
-      if (!packet[key]) return true;
-      if (!isClinicalDocumentKey(key)) return false;
-      return !hasAuthorizedDocumentRoute(formData[DOCUMENT_FORM_KEYS[key]], clientId);
-    });
+    const missingRequiredItems = getRequiredClinicalVerificationKeys(formData).filter(
+      (key) => {
+        if (!packet[key]) return true;
+        return !hasAuthorizedDocumentRoute(
+          formData[DOCUMENT_FORM_KEYS[key]],
+          clientId,
+        );
+      },
+    );
     if (missingRequiredItems.length > 0) {
       return {
         success: false,
         error:
-          'Clinical review cannot be approved until every required form and secure upload is available.',
+          'Clinical review cannot be approved until every required clinical document is available.',
+      };
+    }
+
+    const includeIntakeForms = options?.verificationDocsOnly !== true;
+    if (
+      !hasAllRequiredClinicalReviewApprovals(formData, { includeIntakeForms })
+    ) {
+      return {
+        success: false,
+        error:
+          'Review and approve every required item before signing off on clinical review.',
       };
     }
 
@@ -248,6 +328,8 @@ export async function approveClinicalReview(clientId: string): Promise<ClinicalA
         error: 'The client status changed while you were reviewing. Refresh and try again.',
       };
     }
+
+    await notifyClinicalReviewApprovedHandoff(clientId, auth.user.id);
 
     revalidateClinicalReview(clientId);
     return { success: true };
@@ -292,20 +374,19 @@ export async function rejectClinicalReview(
     if (!client || !client.intakePacket) {
       return { success: false, error: 'Client or intake packet not found.' };
     }
-    if (
-      !BOUNCEABLE_CLINICAL_STATUSES.includes(
-        client.status as (typeof BOUNCEABLE_CLINICAL_STATUSES)[number]
-      )
-    ) {
+    if (!isClinicalStageClientStatus(client.status)) {
       return {
         success: false,
         error: 'Clinical corrections are only allowed during the clinical review stage.',
       };
     }
-    if (client.intakePacket.status !== 'APPROVED') {
+    if (
+      client.intakePacket.status !== 'APPROVED' &&
+      client.intakePacket.status !== 'PENDING_CLIENT_SUBMISSION'
+    ) {
       return {
         success: false,
-        error: 'This packet is already in a correction or intake-review cycle.',
+        error: 'This packet is not on the Clinical Support desk.',
       };
     }
 
@@ -320,43 +401,54 @@ export async function rejectClinicalReview(
       };
     }
 
-    const currentDetails = parseRejectionDetails(client.intakePacket.rejectionDetails);
-    const rejectionDetails = {
-      ...currentDetails,
-      [documentKey]: `[Clinical Review] ${reason.value}`,
-    };
+    const correction = applyClinicalDocumentCorrection({
+      formData,
+      rejectionDetails: parseRejectionDetails(client.intakePacket.rejectionDetails),
+      documentKey,
+      reason: reason.value,
+    });
+    const nextClientStatus = nextClientStatusAfterClinicalCorrection(client.status);
+    const documentLabel = CLINICAL_VERIFICATION_DOC_LABELS[documentKey];
 
-    // Clear the secure document reference so the parent can re-upload it.
-    delete formData[DOCUMENT_FORM_KEYS[documentKey]];
-
-    // PENDING_CLIENT_SUBMISSION is the live correction-loop state accepted by
-    // submitMagicLinkPacket. REJECTED_BY_CLINICAL is retained only for legacy rows.
     await prisma.$transaction(async (tx) => {
       const packetUpdate = await tx.intakePacket.updateMany({
         where: {
           id: client.intakePacket!.id,
           clientId,
-          status: 'APPROVED',
+          status: { in: ['APPROVED', 'PENDING_CLIENT_SUBMISSION'] },
         },
         data: {
           [documentKey]: false,
-          status: 'PENDING_CLIENT_SUBMISSION',
+          status: 'APPROVED',
           rejectionNotes: reason.value,
-          rejectionDetails,
-          formData,
+          rejectionDetails: correction.rejectionDetails,
+          formData: correction.formData as Prisma.InputJsonValue,
         },
       });
       if (packetUpdate.count !== 1) throw new Error('STALE_INTAKE_PACKET');
 
-      const clientUpdate = await tx.client.updateMany({
-        where: {
-          id: clientId,
-          status: { in: [...BOUNCEABLE_CLINICAL_STATUSES] },
-        },
-        data: { status: 'DOCS_SUBMITTED' },
-      });
-      if (clientUpdate.count !== 1) throw new Error('STALE_CLIENT_STATUS');
+      if (nextClientStatus) {
+        const clientUpdate = await tx.client.updateMany({
+          where: {
+            id: clientId,
+            status: { in: [...CLINICAL_CORRECTION_CLIENT_STATUSES] },
+          },
+          data: { status: nextClientStatus },
+        });
+        if (clientUpdate.count !== 1) throw new Error('STALE_CLIENT_STATUS');
+      }
     });
+
+    const parentLink = client.intakePacket.magicLinkToken
+      ? `/magic-link/${client.intakePacket.magicLinkToken}`
+      : undefined;
+    await notifyClient(clientId, {
+      title: `Please re-upload ${documentLabel}`,
+      message:
+        `Clinical Support asked for a new copy of ${documentLabel}. ${reason.value} Open your secure link, upload only this document, and submit it. Your case stays with Clinical Support — Intake does not need to review it again.`,
+      type: 'ALERT',
+      linkUrl: parentLink,
+    }).catch(() => {});
 
     revalidateClinicalReview(clientId);
     return { success: true };
@@ -410,20 +502,19 @@ export async function rejectClinicalFormFieldsBulk(
     if (!client || !packet || packet.id !== packetId) {
       return { success: false, error: 'Packet does not belong to this client.' };
     }
-    if (
-      !BOUNCEABLE_CLINICAL_STATUSES.includes(
-        client.status as (typeof BOUNCEABLE_CLINICAL_STATUSES)[number]
-      )
-    ) {
+    if (!isClinicalStageClientStatus(client.status)) {
       return {
         success: false,
         error: 'Clinical corrections are only allowed during the clinical review stage.',
       };
     }
-    if (packet.status !== 'APPROVED') {
+    if (
+      packet.status !== 'APPROVED' &&
+      packet.status !== 'PENDING_CLIENT_SUBMISSION'
+    ) {
       return {
         success: false,
-        error: 'This packet is already in a correction or intake-review cycle.',
+        error: 'This packet is not on the Clinical Support desk.',
       };
     }
 
@@ -447,29 +538,55 @@ export async function rejectClinicalFormFieldsBulk(
       }
     }
 
+    let nextFormData = formData;
+    if (!intakeFormComplete) {
+      nextFormData = removeClinicalReviewApproval(nextFormData, 'intakeFormComplete');
+    }
+    if (!consentFormComplete) {
+      nextFormData = removeClinicalReviewApproval(nextFormData, 'consentFormComplete');
+    }
+
+    const nextClientStatus = nextClientStatusAfterClinicalCorrection(client.status);
+
     await prisma.$transaction(async (tx) => {
       const packetUpdate = await tx.intakePacket.updateMany({
-        where: { id: packetId, clientId, status: 'APPROVED' },
+        where: {
+          id: packetId,
+          clientId,
+          status: { in: ['APPROVED', 'PENDING_CLIENT_SUBMISSION'] },
+        },
         data: {
-          formData,
+          formData: nextFormData as Prisma.InputJsonValue,
           rejectionDetails,
           rejectionNotes: normalizedFields[0]?.reason ?? null,
-          status: 'PENDING_CLIENT_SUBMISSION',
+          status: 'APPROVED',
           intakeFormComplete,
           consentFormComplete,
         },
       });
       if (packetUpdate.count !== 1) throw new Error('STALE_INTAKE_PACKET');
 
-      const clientUpdate = await tx.client.updateMany({
-        where: {
-          id: clientId,
-          status: { in: [...BOUNCEABLE_CLINICAL_STATUSES] },
-        },
-        data: { status: 'DOCS_SUBMITTED' },
-      });
-      if (clientUpdate.count !== 1) throw new Error('STALE_CLIENT_STATUS');
+      if (nextClientStatus) {
+        const clientUpdate = await tx.client.updateMany({
+          where: {
+            id: clientId,
+            status: { in: [...CLINICAL_CORRECTION_CLIENT_STATUSES] },
+          },
+          data: { status: nextClientStatus },
+        });
+        if (clientUpdate.count !== 1) throw new Error('STALE_CLIENT_STATUS');
+      }
     });
+
+    await notifyClient(clientId, {
+      title: 'Clinical Support asked for form updates',
+      message:
+        'Please open your secure link and update the highlighted form fields. Clinical Support will re-check them — Intake does not need to review this again.',
+      type: 'ALERT',
+      linkUrl: packet.magicLinkToken
+        ? `/magic-link/${packet.magicLinkToken}`
+        : undefined,
+    }).catch(() => {});
 
     revalidateClinicalReview(clientId);
     return { success: true };

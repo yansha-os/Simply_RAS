@@ -74,8 +74,6 @@ export const LEADERSHIP_ROLES: readonly Role[] = ['CEO', 'CLINICAL_DIRECTOR', 'O
 export const INTAKE_ROLES: readonly Role[] = [
   ...LEADERSHIP_ROLES,
   'INTAKE_PA_COORDINATOR',
-  'CASE_COORDINATOR',
-  'CLINICAL_SUPPORT',
 ];
 
 export const BILLING_ROLES: readonly Role[] = [
@@ -96,16 +94,28 @@ export const CASE_COORD_ROLES: readonly Role[] = [
   ...LEADERSHIP_ROLES,
   'CASE_COORDINATOR',
   'CLINICAL_SUPPORT',
-  'INTAKE_PA_COORDINATOR',
 ];
 
-/** Agency-wide manual Plutus tracker access (not the BCBA clinical queue). */
-export const PLUTUS_TRACKER_ROLES: readonly Role[] = [
+/** Session claims queue — billing agents + leadership. */
+export const SESSION_NOTES_ROLES: readonly Role[] = [
   ...LEADERSHIP_ROLES,
   'BILLING',
   'FINANCE',
-  'CASE_COORDINATOR',
+  /** @deprecated Alias of billing permissions — enum kept for DB compat. */
+  'SESSION_NOTES_COORDINATOR',
 ];
+
+/** Mark session notes converted / claim filed — same billing-agent workflow in CRM. */
+export const SESSION_NOTES_CONVERSION_ROLES: readonly Role[] = [
+  ...LEADERSHIP_ROLES,
+  'BILLING',
+  'FINANCE',
+  /** @deprecated Same permissions as BILLING — enum kept for DB compat. */
+  'SESSION_NOTES_COORDINATOR',
+];
+
+/** @deprecated Prefer SESSION_NOTES_ROLES — kept for billing tracker imports. */
+export const PLUTUS_TRACKER_ROLES: readonly Role[] = SESSION_NOTES_ROLES;
 
 export const HR_ROLES: readonly Role[] = [...LEADERSHIP_ROLES, 'HR', 'HEAD_HR', 'HR_AGENT'];
 
@@ -123,6 +133,7 @@ export async function requireClientAccess(clientId: string): Promise<Gate> {
     'INTAKE_PA_COORDINATOR',
     'CASE_COORDINATOR',
     'CLINICAL_SUPPORT',
+    'SESSION_NOTES_COORDINATOR',
     'BILLING',
     'FINANCE',
   ];

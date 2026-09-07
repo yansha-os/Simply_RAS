@@ -2,7 +2,12 @@
 
 import { cookies } from 'next/headers';
 import { getCurrentUser } from '@/lib/auth';
-import { prisma } from '@/lib/prisma';
+import { isDevToolsEnabled } from '@/lib/devToolsGate';
+import {
+  CANDIDATE_SESSION_COOKIE,
+  DEVICE_FINGERPRINT_COOKIE,
+  resolveFingerprintValidCandidate,
+} from '@/lib/candidateDeviceSession';
 
 export type ResolvedHrmUiRole =
   | 'HEAD_HR'
@@ -25,23 +30,26 @@ const STAFF_TO_HRM: Record<string, ResolvedHrmUiRole> = {
   SUPER_ADMIN: 'HEAD_HR',
 };
 
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-function isDevImpersonationEnabled() {
-  return (
-    process.env.NODE_ENV !== 'production' &&
-    process.env.NEXT_PUBLIC_ENABLE_DEV_TOOLS === 'true'
-  );
-}
-
 /**
  * Resolve HRM chrome role for sidebar/header.
- * Device-session applicants who are HIRED are RBTs (not applicants).
- * DevTools Active RBT role cookie is checked before leftover applicant sessions.
+ * Device-session applicants are RBT only when AtsCandidate.stage === HIRED.
+ * LS-54 SIGNED alone never grants staff chrome. Role cookies never grant access
+ * outside DevTools impersonation.
  */
 export async function resolveHrmUiRole(): Promise<ResolvedHrmUiRole> {
-  if (isDevImpersonationEnabled()) {
+  try {
+    const cookieStore = await cookies();
+    const candidate = await resolveFingerprintValidCandidate(
+      cookieStore.get(CANDIDATE_SESSION_COOKIE)?.value,
+      cookieStore.get(DEVICE_FINGERPRINT_COOKIE)?.value
+    );
+    if (candidate?.stage === 'HIRED') return 'RBT';
+    if (candidate) return 'APPLICANT';
+  } catch {
+    /* continue */
+  }
+
+  if (isDevToolsEnabled()) {
     try {
       const cookieStore = await cookies();
       const impersonateRole = cookieStore.get('dev_impersonate_role')?.value;
@@ -59,26 +67,6 @@ export async function resolveHrmUiRole(): Promise<ResolvedHrmUiRole> {
   if (user) {
     const mapped = STAFF_TO_HRM[String(user.role)];
     if (mapped) return mapped;
-  }
-
-  try {
-    const cookieStore = await cookies();
-    const roleCookie = cookieStore.get('ras_hrm_role')?.value;
-    const candidateId = cookieStore.get('ras_device_session_token')?.value;
-
-    if (candidateId && UUID_RE.test(candidateId)) {
-      const candidate = await prisma.atsCandidate.findUnique({
-        where: { id: candidateId },
-        select: { stage: true },
-      });
-      if (candidate?.stage === 'HIRED') return 'RBT';
-      if (candidate) return 'APPLICANT';
-    }
-
-    if (roleCookie === 'RBT') return 'RBT';
-    if (roleCookie === 'APPLICANT') return 'APPLICANT';
-  } catch {
-    // fall through
   }
 
   return 'NONE';

@@ -1,6 +1,7 @@
 import React from 'react';
+import Image from 'next/image';
 import RbtApplicationForm from '@/components/public-rbt/RbtApplicationForm';
-import { Lightbulb, Phone, Mail, Clock, ArrowRight } from 'lucide-react';
+import { Lightbulb, Phone, Mail, Clock } from 'lucide-react';
 import Link from 'next/link';
 
 export const metadata = {
@@ -45,7 +46,7 @@ export default function ApplyPage() {
         <header className="bg-white border-b border-orange-200/80 px-4 sm:px-8 py-3.5 flex items-center justify-between transition-all">
           <Link href="/" className="flex items-center gap-3.5 group">
             <div className="w-11 h-11 rounded-full bg-orange-50 border border-orange-200 shadow-md shadow-orange-500/10 flex items-center justify-center p-1.5 overflow-hidden group-hover:scale-105 transition-transform shrink-0">
-              <img src="/logo.png" alt="Rise & Shine ABA Logo" className="w-full h-full object-contain rounded-full" />
+              <Image src="/logo.png" alt="Rise & Shine ABA Logo" width={44} height={44} className="h-full w-full rounded-full object-contain" priority />
             </div>
             <div>
               <span className="font-extrabold text-slate-900 text-base tracking-tight font-heading group-hover:text-[#F97316] transition-colors block leading-snug">
@@ -145,7 +146,7 @@ export default function ApplyPage() {
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4 border-b border-white/20 pb-6">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-white border border-orange-200 shadow-md p-1 overflow-hidden shrink-0">
-                <img src="/logo.png" alt="Rise & Shine ABA Logo" className="w-full h-full object-contain rounded-full" />
+                <Image src="/logo.png" alt="Rise & Shine ABA Logo" width={40} height={40} className="h-full w-full rounded-full object-contain" />
               </div>
               <span className="font-extrabold text-white text-base tracking-tight font-heading">
                 Rise &amp; Shine ABA

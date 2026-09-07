@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   UserCircle2,
   X,
@@ -114,6 +115,7 @@ export function HrmDevToolsUI() {
 }
 
 function HrmDevToolsPanel() {
+  const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'roles' | 'users' | 'applicants'>('roles');
   const { role, setRole } = useHrmRole();
@@ -234,7 +236,7 @@ function HrmDevToolsPanel() {
       const hired: DevPerson[] = [];
 
       for (const c of res.data) {
-        if (c.stage === 'HIRED') {
+        if (c.stage === 'HIRED' || c.activationStatus === 'ACTIVE') {
           hired.push({
             id: c.userId || c.id,
             name: `${c.name} (Hired RBT)`,
@@ -349,7 +351,7 @@ function HrmDevToolsPanel() {
         await setImpersonationCookie(null, 'HR_AGENT');
         setRole('HR_AGENT');
         setTimeout(() => {
-          window.location.href = '/ats';
+          router.push('/ats');
         }, 500);
       } else if (res.success) {
         toast.message(res.message || 'Application received.');
@@ -435,7 +437,7 @@ function HrmDevToolsPanel() {
         window.dispatchEvent(new Event('hrm_role_changed'));
         window.dispatchEvent(new Event('rbt_clearance_changed'));
         toast.message('Impersonating seeded RBT — opening Schedule…');
-        window.location.assign('/rbt/schedule');
+        router.push('/rbt/schedule');
       }
     } catch {
       toast.error('Seed failed');
@@ -523,15 +525,22 @@ function HrmDevToolsPanel() {
           await setImpersonationCookie(null, newRole === 'NONE' ? null : newRole);
         }
       }
+      const ROLE_ROUTES: Record<HrmRole, string> = {
+        NONE: '/',
+        APPLICANT: '/rbt',
+        HEAD_HR: '/hr-dashboard',
+        HR_AGENT: '/ats',
+        FINANCE: '/payroll',
+        RBT: '/rbt/schedule',
+      };
       setRole(newRole);
       localStorage.setItem('hrm_active_role', newRole);
       window.dispatchEvent(new Event('hrm_role_changed'));
       window.dispatchEvent(new Event('rbt_clearance_changed'));
       toast.success(`Switched HRM Role to: ${label}`);
       setIsOpen(false);
-      if (newRole === 'RBT') {
-        window.location.href = '/rbt/schedule';
-      }
+      const targetRoute = ROLE_ROUTES[newRole] || '/';
+      router.push(targetRoute);
     });
   };
 
@@ -541,12 +550,8 @@ function HrmDevToolsPanel() {
     const isRealUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(user.id);
 
     if (user.candidateId) {
-      // Hired applicant: bind device session + real User UUID when linked
-      if (isRealUuid) {
-        await setImpersonationCookie(user.id, null);
-      } else {
-        await setImpersonationCookie(null, 'RBT');
-      }
+      // Hired applicant: bind device session + RBT role cookie
+      await setImpersonationCookie(isRealUuid ? user.id : null, 'RBT');
       const { devImpersonateApplicantSession } = await import(
         '@/app/actions/applicantSessionActions'
       );
@@ -571,10 +576,24 @@ function HrmDevToolsPanel() {
     window.dispatchEvent(new Event('rbt_clearance_changed'));
     toast.success(`Impersonating Active User: ${user.name} (${user.role})`);
     setIsOpen(false);
-    window.location.assign(user.route);
+    router.push(user.route);
   };
 
   const handleImpersonateApplicant = async (app: DevApplicant) => {
+    if (app.stage === 'HIRED') {
+      // Hired candidate → transition immediately to Active RBT staff portal
+      await handleSwitchUser({
+        id: app.userId || app.id,
+        name: `${app.name} (Hired RBT)`,
+        role: 'RBT',
+        email: app.email,
+        route: '/rbt/schedule',
+        canDelete: true,
+        candidateId: app.id,
+      });
+      return;
+    }
+
     const isApproved =
       app.stage === 'OFFER' ||
       app.stage === 'PHONE_SCREEN' ||
@@ -617,7 +636,7 @@ function HrmDevToolsPanel() {
     window.dispatchEvent(new Event('storage'));
     toast.success(`Impersonating Applicant: ${app.name}`);
     setIsOpen(false);
-    window.location.assign('/rbt');
+    router.push('/rbt');
   };
 
   return (

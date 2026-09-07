@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Clock, Download, MessageSquare, Printer, ShieldCheck, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { OnboardingConfirmModal } from '@/components/rbt/OnboardingConfirmModal';
@@ -20,6 +21,7 @@ import {
 import type { Ls54Payload } from '@/lib/onboardingDocuments';
 
 export function WageOfferApplicantCard({ packComplete }: { packComplete: boolean }) {
+  const router = useRouter();
   const [offer, setOffer] = useState<WageOfferDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [signerName, setSignerName] = useState('');
@@ -83,11 +85,18 @@ export function WageOfferApplicantCard({ packComplete }: { packComplete: boolean
       englishOnlyNoTemplate: offer?.signatureMeta?.englishOnlyNoTemplate,
     };
     return (
-      <div className="space-y-4 rounded-3xl border-2 border-emerald-300 bg-emerald-50 p-6 shadow-xl">
+      <div className="space-y-4 rounded-3xl border-2 border-emerald-400 bg-emerald-50/90 p-6 shadow-xl text-slate-900">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2 text-emerald-800">
-            <ShieldCheck className="h-5 w-5" />
-            <h3 className="font-heading text-lg font-black">Wage notice signed</h3>
+          <div className="flex items-center gap-2.5 text-emerald-950">
+            <ShieldCheck className="h-6 w-6 text-emerald-600" />
+            <div>
+              <h3 className="font-heading text-xl font-black text-emerald-950">
+                🎉 Congratulations! You are Officially Hired!
+              </h3>
+              <p className="text-xs font-mono font-bold text-emerald-800">
+                LS-54 Wage Notice Accepted &amp; Signed · Rate: ${Number(payload.rateOfPay).toFixed(2)}/hr
+              </p>
+            </div>
           </div>
           <div className="flex flex-wrap gap-2">
             <button
@@ -97,7 +106,7 @@ export function WageOfferApplicantCard({ packComplete }: { packComplete: boolean
                   toast.error('Pop-up blocked — allow pop-ups to print / save PDF.');
                 }
               }}
-              className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-emerald-300 bg-white px-3 py-2 text-xs font-bold text-emerald-900"
+              className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-emerald-300 bg-white px-3 py-2 text-xs font-bold text-emerald-900 shadow-sm hover:bg-emerald-50"
             >
               <Printer className="h-3.5 w-3.5" />
               Print / Save PDF
@@ -105,21 +114,64 @@ export function WageOfferApplicantCard({ packComplete }: { packComplete: boolean
             <button
               type="button"
               onClick={() => downloadLs54Html(payload, signedMeta)}
-              className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-emerald-300 bg-white px-3 py-2 text-xs font-bold text-emerald-900"
+              className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-emerald-300 bg-white px-3 py-2 text-xs font-bold text-emerald-900 shadow-sm hover:bg-emerald-50"
             >
               <Download className="h-3.5 w-3.5" />
               Download copy
             </button>
           </div>
         </div>
-        <p className="text-sm text-emerald-900">
-          Your LS-54 is on file at ${Number(payload.rateOfPay).toFixed(2)}/hr. Keep a copy for your
-          records (NY employers must retain the original for 6 years).
-        </p>
-        <p className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">
-          Head HR must complete the separate final hire review. Signing this notice does not create
-          Supabase password credentials or independently activate a staff login.
-        </p>
+
+        <div className="p-5 rounded-2xl border-2 border-emerald-300 bg-white space-y-4 shadow-inner">
+          <div>
+            <h4 className="text-sm font-black text-emerald-950">
+              Welcome to the Rise &amp; Shine ABA team!
+            </h4>
+            <p className="text-xs font-medium text-emerald-800 mt-0.5">
+              Your LS-54 wage agreement is signed. Staff portal access unlocks after Head HR completes final hire.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3 pt-1">
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  const { invalidateApplicantCaches, ensureHiredAsRbtStaff } = await import('@/lib/syncAtsProgress');
+                  invalidateApplicantCaches(offer?.candidateId);
+                  const hired = await ensureHiredAsRbtStaff();
+                  if (!hired) {
+                    toast.error(
+                      'Final hire is still pending Head HR review. Staff portal unlocks after AtsCandidate stage is HIRED.'
+                    );
+                    return;
+                  }
+                  toast.success('Hire confirmed. Opening your RBT staff portal.');
+                  router.push('/rbt/schedule');
+                } catch {
+                  toast.error('Failed to check hire status. Please refresh.');
+                }
+              }}
+              className="inline-flex cursor-pointer items-center gap-2.5 px-6 py-3.5 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black text-sm shadow-xl hover:scale-[1.02] transition-all"
+            >
+              <span>Check hire status &amp; open staff portal</span>
+            </button>
+
+            <Link
+              href="/rbt/job-board"
+              className="inline-flex items-center gap-2 px-4 py-3 rounded-xl bg-brand-orange-500 hover:bg-orange-600 text-white font-extrabold text-xs shadow-md transition-all cursor-pointer"
+            >
+              <span>💼 View RBT Case Job Board</span>
+            </Link>
+            <Link
+              href="/rbt/documents"
+              className="inline-flex items-center gap-2 px-4 py-3 rounded-xl border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 font-extrabold text-xs shadow-sm transition-all cursor-pointer"
+            >
+              <span>📄 View Signed Contracts &amp; Documents</span>
+            </Link>
+          </div>
+        </div>
+
         <div className="overflow-hidden rounded-2xl border border-emerald-200 bg-white">
           <Ls54NoticeDocument payload={payload} meta={signedMeta} />
         </div>
@@ -326,7 +378,7 @@ export function WageOfferApplicantCard({ packComplete }: { packComplete: boolean
                     return;
                   }
                   toast.success('Discussion opened with Head HR.');
-                  window.location.href = '/rbt/help-desk';
+                  router.push('/rbt/help-desk');
                 }}
                 className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-800"
               >
@@ -398,8 +450,12 @@ export function WageOfferApplicantCard({ packComplete }: { packComplete: boolean
               }
               setConfirmKind(null);
               toast.success(
-                'Wage notice signed. Head HR must complete final hire review.'
+                'Wage notice signed. Head HR must complete final hire review before staff portal access.'
               );
+              try {
+                const { invalidateApplicantCaches } = await import('@/lib/syncAtsProgress');
+                invalidateApplicantCaches(offer?.candidateId);
+              } catch {}
               await reload();
               window.dispatchEvent(new Event('rbt_progress_synced'));
             })();

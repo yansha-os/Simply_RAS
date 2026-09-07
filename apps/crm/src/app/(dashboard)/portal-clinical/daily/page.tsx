@@ -6,7 +6,20 @@ import { notFound } from 'next/navigation';
 
 export const dynamic = 'force-dynamic';
 
-export default async function BcbaDailyWorkstationPage() {
+type WorkstationTab = 'esign' | 'supervision' | 'deficiencies';
+
+function resolveInitialTab(tab: string | undefined): WorkstationTab {
+  if (tab === 'supervision' || tab === 'deficiencies') return tab;
+  return 'esign';
+}
+
+export default async function BcbaDailyWorkstationPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string }>;
+}) {
+  const { tab } = await searchParams;
+  const initialTab = resolveInitialTab(tab);
   const access = await requireStaff(CLINICAL_ROLES);
   if (!access.ok) notFound();
   const scopedBcbaId =
@@ -76,7 +89,12 @@ export default async function BcbaDailyWorkstationPage() {
 
   return (
     <div className="p-8">
-      <BcbaDailyWorkstation sessionNotes={sessionNotes} deficiencies={deficiencies} clients={clients} />
+      <BcbaDailyWorkstation
+        sessionNotes={sessionNotes}
+        deficiencies={deficiencies}
+        clients={clients}
+        initialTab={initialTab}
+      />
     </div>
   );
 }

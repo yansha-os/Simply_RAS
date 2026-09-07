@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useState } from 'react';
+import React from 'react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { Megaphone, Users, Mail, Send, TrendingUp, CheckCircle2, HeartHandshake } from 'lucide-react';
+import { Megaphone, Send } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function ReferralMarketingFunnel() {

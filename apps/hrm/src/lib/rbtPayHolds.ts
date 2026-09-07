@@ -142,6 +142,9 @@ export function derivePayHoldFromFlags(flags: SessionPayFlags): {
  * (audit M7: 3-minute sessions were paying ¼ hr once signed).
  */
 export function estimateUnitsFromWindow(startMs: number, endMs: number): number {
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+    return 0;
+  }
   const mins = Math.max(0, (endMs - startMs) / 60000);
   return Math.floor(mins / 15);
 }
@@ -160,7 +163,8 @@ export function resolvePayrollUnits(
   if (typeof noteUnits === 'number' && Number.isFinite(noteUnits) && noteUnits > 0) {
     return { units: Math.floor(noteUnits), source: 'NOTE' };
   }
-  return { units: fallbackUnits, source: 'ESTIMATE' };
+  const safeFallback = Number.isFinite(fallbackUnits) ? Math.max(0, Math.floor(fallbackUnits)) : 0;
+  return { units: safeFallback, source: 'ESTIMATE' };
 }
 
 /** Read checklist pass/fail from a SessionNote.checklistSnapshot JSON blob. */

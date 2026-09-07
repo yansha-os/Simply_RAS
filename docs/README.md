@@ -46,7 +46,9 @@ Design / roadmap docs under [`superpowers/specs/`](./superpowers/specs/):
 | [2026-08-11-bridge-efg-manual-qa-checklist.md](./superpowers/specs/2026-08-11-bridge-efg-manual-qa-checklist.md) | Manual QA click-paths for Bridges E–G |
 | [2026-08-11-session-studio-implementation-plan.md](./superpowers/specs/2026-08-11-session-studio-implementation-plan.md) | Session Studio build slices vs SoT |
 | [2026-08-11-aba-emr-artemis-replacement-roadmap.md](./superpowers/specs/2026-08-11-aba-emr-artemis-replacement-roadmap.md) | Enclosed ABA EMR roadmap — replace Artemis clinical SoT |
-| [2026-08-11-artemis-dual-run-cutover-checklist.md](./superpowers/specs/2026-08-11-artemis-dual-run-cutover-checklist.md) | Go/no-go: cohort dual-run → RAS notes → freeze Artemis writes (not org replacement) |
+| [2026-08-11-ras-sandbox-cutover-checklist.md](./superpowers/specs/2026-08-11-ras-sandbox-cutover-checklist.md) | Go/no-go: sandbox QA → cold cutover (no dual-run; external stack until flip) |
+| [2026-08-19-artemis-exit-enclosed-system-roadmap.md](./superpowers/specs/2026-08-19-artemis-exit-enclosed-system-roadmap.md) | Master Artemis exit — 9-phase workflow, role charters, domain state, Phase 0–4 sequencing |
+| [2026-08-20-pre-prod-readiness-checklist.md](./superpowers/specs/2026-08-20-pre-prod-readiness-checklist.md) | Pre-production deploy go/no-go — SQL order, env locks, role smoke, Phase 0–4 engineering |
 | [2026-08-10-hrm-ats-crm-bridge-design.md](./superpowers/specs/2026-08-10-hrm-ats-crm-bridge-design.md) | HRM ATS ↔ CRM bridge |
 | [2026-08-12-production-readiness-gap-analysis.md](./superpowers/specs/2026-08-12-production-readiness-gap-analysis.md) | Whole-project production-readiness audit — scorecard, blockers, phased path to prod |
 | [2026-08-12-calendar-model-unification-plan.md](./superpowers/specs/2026-08-12-calendar-model-unification-plan.md) | Session vs ScheduleAppointment unification (gap 26) — keep Session, drop unused model, phased hardening |

@@ -172,7 +172,13 @@ export default function ApplicantProfilePage() {
 
     setIsDeleting(true);
     try {
-      // 1. Remove custom stage override & notes from local storage
+      const result = await deleteAtsCandidate(applicantId);
+      if (!result.success) {
+        toast.error(result.error || 'Applicant deletion failed.');
+        return;
+      }
+
+      // Clear client-only display state only after the server confirms deletion.
       const customStages = JSON.parse(localStorage.getItem('ras_ats_custom_stages') || '{}');
       delete customStages[applicantId];
       localStorage.setItem('ras_ats_custom_stages', JSON.stringify(customStages));
@@ -186,18 +192,17 @@ export default function ApplicantProfilePage() {
         localStorage.setItem('ras_deleted_applicants', JSON.stringify(deletedIds));
       }
 
-      // 2. Call server action to purge candidate from database
-      await deleteAtsCandidate(applicantId);
-
-      // 3. Dispatch storage event for re-render sync
       window.dispatchEvent(new Event('storage'));
-    } catch {}
-
-    toast.success(`Applicant ${applicant?.name || ''} has been permanently deleted.`);
-    setShowDeleteModal(false);
-    setTimeout(() => {
-      window.location.href = '/ats';
-    }, 300);
+      toast.success(`Applicant ${applicant?.name || ''} has been permanently deleted.`);
+      setShowDeleteModal(false);
+      setTimeout(() => {
+        router.push('/ats');
+      }, 300);
+    } catch {
+      toast.error('Applicant deletion failed. Please try again.');
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   // Scheduled Interview Payload
@@ -530,7 +535,7 @@ export default function ApplicantProfilePage() {
         const localPreview = URL.createObjectURL(blob);
         setActiveVideoUrl(localPreview);
         setUploadProgress(0);
-        toast.message('Uploading interview take…');
+        toast.message('Saving interview take…');
 
         void saveRecordingBlob({
           applicantId,
@@ -542,17 +547,17 @@ export default function ApplicantProfilePage() {
           .then((res) => {
             setUploadProgress(null);
             if (!res.success || !res.item) {
-              toast.error(res.error || 'Failed to upload recording to Storage');
+              toast.error(res.error || 'Failed to save recording');
               return;
             }
-            setRecordedVideos((prev) => [res.item!, ...prev]);
+            setRecordedVideos((prev) => [res.item!, ...prev.filter((v) => v.id !== res.item!.id)]);
             setActiveVideoUrl(res.item!.url);
-            URL.revokeObjectURL(localPreview);
-            toast.success(`${title} saved to secure storage.`);
+            toast.success(`${title} saved successfully.`);
           })
-          .catch(() => {
+          .catch((err) => {
             setUploadProgress(null);
-            toast.error('Upload failed — check your connection and try again.');
+            console.error('Recording save error:', err);
+            toast.error('Save failed — check your connection and try again.');
           });
       };
 
@@ -1627,7 +1632,7 @@ export default function ApplicantProfilePage() {
                     num: '5', 
                     title: '5. ABA Platforms', 
                     body: [
-                      'Have you used Motivity, Rethink, or another ABA data platform before. What did you use it for. If you have not used one, are you comfortable learning it and completing documentation on time.'
+                      'Have you used an ABA data collection platform (RAS Session Studio, Rethink, or similar) before. What did you use it for. If you have not used one, are you comfortable learning RAS EMR documentation and completing session notes on time.'
                     ] 
                   },
                   { 
@@ -1662,7 +1667,7 @@ export default function ApplicantProfilePage() {
                     num: '10', 
                     title: '10. Company Expectations', 
                     body: [
-                      'Punctuality and reliability. Following the BCBA plan with treatment integrity. Consistent data collection during session. Accurate session start and end times and on time session notes in Motivity. Professional communication with families and the clinical team. Do you understand and agree to these expectations.'
+                      'Punctuality and reliability. Following the BCBA plan with treatment integrity. Consistent data collection during session. Accurate session start and end times and on-time session notes in RAS Session Studio. Professional communication with families and the clinical team. Do you understand and agree to these expectations.'
                     ] 
                   },
                   { 
@@ -2078,12 +2083,13 @@ export default function ApplicantProfilePage() {
                   </div>
                 )}
 
-                {/* FOOTER ACTIONS BAR: SAVE NOTES & SUBMIT DECISION (UNLOCKED ONLY WHEN SCRIPT + SCORECARD ARE COMPLETE) */}
+                {/* FOOTER ACTIONS BAR: SAVE NOTES & SUBMIT DECISION (UNLOCKED ONLY WHEN SCRIPT + SCORECARD + RECORDING ARE COMPLETE) */}
                 {(() => {
                   const ratedCount = Object.values(scorecardCategories).filter(c => c.score !== null).length;
                   const isScriptComplete = completedScriptSteps.length === 11;
                   const isScorecardComplete = ratedCount === 8;
-                  const canSubmitDecision = isScriptComplete && isScorecardComplete;
+                  const isRecordingComplete = recordedVideos.length >= 1;
+                  const canSubmitDecision = isScriptComplete && isScorecardComplete && isRecordingComplete;
 
                   return (
                     <div className="flex items-center justify-between border-t border-white/10 pt-4">
@@ -2106,11 +2112,18 @@ export default function ApplicantProfilePage() {
                                 ⚠️ Rate {8 - ratedCount} more Scorecard Categori{8 - ratedCount === 1 ? 'y' : 'es'}
                               </span>
                             )}
+
+                            {!isRecordingComplete && (
+                              <span className="bg-rose-400/20 text-rose-300 font-extrabold px-3 py-1.5 rounded-xl border border-rose-400/40 shadow-sm animate-pulse flex items-center gap-1">
+                                <Video className="w-3.5 h-3.5 text-rose-400" />
+                                <span>⚠️ Record at least 1 Interview Take</span>
+                              </span>
+                            )}
                           </div>
                         ) : (
                           <span className="text-emerald-400 font-bold flex items-center gap-1.5 bg-emerald-500/10 px-3 py-1.5 rounded-xl border border-emerald-500/30">
                             <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                            <span>✓ All 11 Script Steps &amp; 8 Scorecard Categories Complete — Ready to Submit Decision</span>
+                            <span>✓ Script, Scorecard &amp; Video Take Recorded — Ready to Submit Decision</span>
                           </span>
                         )}
                       </div>
@@ -2129,7 +2142,11 @@ export default function ApplicantProfilePage() {
                           type="button"
                           onClick={() => {
                             if (!canSubmitDecision) {
-                              toast.error('Complete all 11 script steps & rate all 8 categories first!');
+                              if (!isScriptComplete || !isScorecardComplete) {
+                                toast.error('Complete all 11 script steps & rate all 8 categories first!');
+                              } else if (!isRecordingComplete) {
+                                toast.error('You must record at least 1 interview video take before submitting a decision!');
+                              }
                               return;
                             }
                             setShowDecisionModal(true);

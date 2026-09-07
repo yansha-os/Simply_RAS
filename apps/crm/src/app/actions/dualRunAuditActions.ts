@@ -1,12 +1,12 @@
 'use server';
 
 /**
- * Dual-run billing audit worksheet actions (cutover checklist gate 10 —
+ * Sandbox cohort QA worksheet actions (cutover checklist gate 10 —
  * "≥10 cohort notes pass internal checklist").
  *
- * Lists fully signed SessionNotes with every claim-critical field so
- * Billing/Clinical can reconcile them side-by-side against Artemis exports,
- * and persists a per-note "audited / discrepancy" marker.
+ * Lists fully signed SessionNotes with every claim-critical field for
+ * internal QA review before cold cutover, and persists a per-note
+ * "audited / discrepancy" marker.
  *
  * Persistence choice: markers are append-only `AuditLogVault` EDIT rows
  * (`metadata.dualRunAudit`) — no schema change, and the marker history
@@ -14,9 +14,8 @@
  * note wins; a CLEARED row resets the marker.
  */
 
-import type { Prisma, Role } from '@repo/db';
+import type { Prisma, Role, DualRunMode } from '@repo/db';
 import { prisma } from '@/lib/prisma';
-import { revalidatePath } from 'next/cache';
 import { requireStaff } from '@/lib/auth-guard';
 import { writeAuditLog } from '@/lib/auditLog';
 import {
@@ -78,6 +77,8 @@ export type DualRunAuditRow = {
 export type DualRunAuditClientOption = {
   id: string;
   name: string;
+  dualRunCohort: string | null;
+  dualRunMode: DualRunMode | null;
 };
 
 export type ListDualRunAuditResult =
@@ -124,6 +125,8 @@ export async function listDualRunAuditNotes(input: {
   from: string; // YYYY-MM-DD (clinic TZ)
   to: string; // YYYY-MM-DD (clinic TZ)
   clientId?: string;
+  /** When set, restrict to clients tagged with this dualRunCohort label. */
+  cohort?: string;
 }): Promise<ListDualRunAuditResult> {
   const gate = await requireStaff(DUAL_RUN_AUDIT_ROLES);
   if (!gate.ok) return { success: false, error: gate.error, rows: [], clients: [] };
@@ -148,6 +151,8 @@ export async function listDualRunAuditNotes(input: {
   }
 
   try {
+    const cohortFilter = input.cohort?.trim() || undefined;
+
     // DOS = actualStart when present, else scheduledStart.
     const dosRange = {
       OR: [
@@ -155,6 +160,15 @@ export async function listDualRunAuditNotes(input: {
         { actualStart: null, scheduledStart: { gte: fromDate, lte: toDate } },
       ],
       ...(input.clientId ? { clientId: input.clientId } : {}),
+      ...(cohortFilter
+        ? { client: { dualRunCohort: cohortFilter } }
+        : {}),
+    };
+
+    const clientWhere = {
+      sessions: { some: { note: { rbtSigned: true, bcbaSigned: true } } },
+      ...(cohortFilter ? { dualRunCohort: cohortFilter } : {}),
+      ...(input.clientId ? { id: input.clientId } : {}),
     };
 
     const [notes, clients] = await Promise.all([
@@ -184,10 +198,14 @@ export async function listDualRunAuditNotes(input: {
         take: 500,
       }),
       prisma.client.findMany({
-        where: {
-          sessions: { some: { note: { rbtSigned: true, bcbaSigned: true } } },
+        where: clientWhere,
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          dualRunCohort: true,
+          dualRunMode: true,
         },
-        select: { id: true, firstName: true, lastName: true },
         orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
       }),
     ]);
@@ -278,7 +296,11 @@ export async function listDualRunAuditNotes(input: {
       action: 'VIEW',
       entityType: 'DUAL_RUN_AUDIT',
       entityId: `${input.from}..${input.to}`,
-      meta: { noteCount: rows.length, clientFilter: input.clientId ?? null },
+      meta: {
+        noteCount: rows.length,
+        clientFilter: input.clientId ?? null,
+        cohortFilter: cohortFilter ?? null,
+      },
     });
 
     return {
@@ -287,6 +309,8 @@ export async function listDualRunAuditNotes(input: {
       clients: clients.map((c) => ({
         id: c.id,
         name: [c.firstName, c.lastName].filter(Boolean).join(' ') || c.id,
+        dualRunCohort: c.dualRunCohort,
+        dualRunMode: c.dualRunMode,
       })),
     };
   } catch (error) {
@@ -323,7 +347,7 @@ export async function setDualRunAuditMark(
   if (mark === 'DISCREPANCY' && !trimmedNote) {
     return {
       success: false,
-      error: 'Describe the discrepancy (what differs vs Artemis) before flagging.',
+      error: 'Describe the discrepancy (what failed QA) before flagging.',
     };
   }
 
@@ -362,8 +386,6 @@ export async function setDualRunAuditMark(
       },
       select: { timestamp: true },
     });
-
-    revalidatePath('/portal-billing/audit');
 
     return {
       success: true,

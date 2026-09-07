@@ -2,16 +2,21 @@
 
 import React from 'react';
 import { Card, CardContent } from '@/components/ui/Card';
-import { Button } from '@/components/ui/Button';
-import { UserPlus, Mail, FileCheck, ArrowRight, ShieldCheck, Users, Sparkles } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 import Link from 'next/link';
-import { AreaChartWidget, BarChartWidget, DonutChartWidget } from '@/components/ui/AnalyticsCharts';
+import { AreaChartWidget, DonutChartWidget } from '@/components/ui/AnalyticsCharts';
+import type { ClientStatus } from '@prisma/client';
 
-export default function IntakeDashboard({ clients }: { clients: any[] }) {
+type IntakeDashboardClient = {
+  status: ClientStatus;
+  caseCoordinatorId: string | null;
+};
+
+export default function IntakeDashboard({ clients }: { clients: IntakeDashboardClient[] }) {
   const inquiryQueue = clients.filter(c => c.status === 'INQUIRY');
-  const waitingQueue = clients.filter(c => c.status === 'MAGIC_LINK_SENT');
   const reviewQueue = clients.filter(c => c.status === 'DOCS_SUBMITTED');
   const inProgressQueue = clients.filter(c => [
+    'MAGIC_LINK_SENT',
     'DOCS_APPROVED_INTAKE', 
     'CLINICAL_REVIEW_APPROVED', 
     'VOB_COMPLETED', 
@@ -22,8 +27,10 @@ export default function IntakeDashboard({ clients }: { clients: any[] }) {
     'TX_PA_SUBMITTED', 
     'TX_PA_APPROVED'
   ].includes(c.status));
+  const readyToAssignQueue = clients.filter(c => c.status === 'STAFFING_PENDING' && !c.caseCoordinatorId);
 
-  const magicLinkCompletionPct = clients.length > 0 ? Math.round(((clients.length - waitingQueue.length) / clients.length) * 100) : 100;
+  const activeLinksCount = clients.filter(c => c.status === 'MAGIC_LINK_SENT').length;
+  const magicLinkCompletionPct = clients.length > 0 ? Math.round(((clients.length - activeLinksCount) / clients.length) * 100) : 100;
 
   return (
     <div className="space-y-8 mt-6 pb-12 animate-fade-in-up">
@@ -78,21 +85,6 @@ export default function IntakeDashboard({ clients }: { clients: any[] }) {
         <Card className="bg-zinc-950/80 backdrop-blur-xl border border-white/10 shadow-xl rounded-2xl">
           <CardContent className="p-6 space-y-4">
             <div className="flex justify-between items-center">
-              <span className="text-xs font-mono font-bold text-amber-400 uppercase tracking-wider">LINKS SENT</span>
-              <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                AWAITING PARENT
-              </span>
-            </div>
-            <div>
-              <h3 className="text-3xl font-black text-white font-mono tracking-tight">{waitingQueue.length}</h3>
-              <p className="text-xs text-zinc-400 mt-1">Portals Active in Parent Hands</p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-zinc-950/80 backdrop-blur-xl border border-white/10 shadow-xl rounded-2xl">
-          <CardContent className="p-6 space-y-4">
-            <div className="flex justify-between items-center">
               <span className="text-xs font-mono font-bold text-rose-400 uppercase tracking-wider">DOC REVIEW</span>
               <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-rose-500/10 text-rose-400 border border-rose-500/20">
                 ACTION REQ
@@ -108,14 +100,29 @@ export default function IntakeDashboard({ clients }: { clients: any[] }) {
         <Card className="bg-zinc-950/80 backdrop-blur-xl border border-white/10 shadow-xl rounded-2xl">
           <CardContent className="p-6 space-y-4">
             <div className="flex justify-between items-center">
-              <span className="text-xs font-mono font-bold text-emerald-400 uppercase tracking-wider">IN PROGRESS</span>
-              <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                BILLING HANDOFF
+              <span className="text-xs font-mono font-bold text-cyan-400 uppercase tracking-wider">IN PROGRESS</span>
+              <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+                ACTIVE CASES
               </span>
             </div>
             <div>
               <h3 className="text-3xl font-black text-white font-mono tracking-tight">{inProgressQueue.length}</h3>
-              <p className="text-xs text-zinc-400 mt-1">Clients Active in VOB / PA Workflow</p>
+              <p className="text-xs text-zinc-400 mt-1">Active in Parent / VOB / PA Workflow</p>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-zinc-950/80 backdrop-blur-xl border border-white/10 shadow-xl rounded-2xl">
+          <CardContent className="p-6 space-y-4">
+            <div className="flex justify-between items-center">
+              <span className="text-xs font-mono font-bold text-emerald-400 uppercase tracking-wider">READY TO ASSIGN</span>
+              <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                STAFFING
+              </span>
+            </div>
+            <div>
+              <h3 className="text-3xl font-black text-white font-mono tracking-tight">{readyToAssignQueue.length}</h3>
+              <p className="text-xs text-zinc-400 mt-1">Ready for Case Coordinator</p>
             </div>
           </CardContent>
         </Card>
@@ -140,24 +147,12 @@ export default function IntakeDashboard({ clients }: { clients: any[] }) {
           />
         </div>
 
-        <div className="space-y-6">
-          <DonutChartWidget
-            title="Magic Link Completion"
-            percentage={magicLinkCompletionPct}
-            label="Parent Onboarding Rate"
-            color="#FF7A45"
-          />
-          <BarChartWidget
-            title="Intake Queue Breakdown"
-            subtitle="Volume distribution across onboarding stages"
-            data={[
-              { label: '1. Inquiries', value: inquiryQueue.length, color: '#FF7A45' },
-              { label: '2. Sent Links', value: waitingQueue.length, color: '#F59E0B' },
-              { label: '3. Doc Review', value: reviewQueue.length, color: '#F43F5E' },
-              { label: '4. Handoff', value: inProgressQueue.length, color: '#10B981' },
-            ]}
-          />
-        </div>
+        <DonutChartWidget
+          title="Magic Link Completion"
+          percentage={magicLinkCompletionPct}
+          label="Parent Onboarding Rate"
+          color="#FF7A45"
+        />
       </div>
     </div>
   );

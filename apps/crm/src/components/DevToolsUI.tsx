@@ -308,7 +308,7 @@ export function DevToolsUI({
                 Seed staffing (STAFFING_PENDING + staff)
               </button>
               <p className="text-[9px] leading-relaxed text-zinc-500">
-                Seed then walk HRM Schedule → Studio → CRM e-sign → Plutus → payroll. Marker{' '}
+                Seed then walk HRM Schedule → Studio → CRM e-sign → claim filing → payroll. Marker{' '}
                 <span className="font-mono text-zinc-400">demo.studio.learner@…</span>.
               </p>
             </div>
@@ -320,10 +320,10 @@ export function DevToolsUI({
                 QA Quick Launch
               </span>
               <div className="grid grid-cols-2 gap-1.5">
-                <QuickLink href="/case" label="Case pipeline" />
-                <QuickLink href="/notes" label="Notes → Plutus" />
-                <QuickLink href="/portal-clinical/notes" label="BCBA sign queue" />
-                <QuickLink href="/portal-billing" label="PA queues" />
+                <QuickLink href="/portal-case-coord/clients" label="Case pipeline" />
+                <QuickLink href="/portal-billing/claims" label="Session Claims queue" />
+                <QuickLink href="/portal-clinical/daily?tab=esign" label="BCBA sign queue" />
+                <QuickLink href="/portal-billing/clients" label="PA queues" />
                 <QuickLink
                   href={snapshot?.demoClientId ? `/client/${snapshot.demoClientId}` : null}
                   label="Demo learner"
@@ -364,7 +364,7 @@ export function DevToolsUI({
               {snapshot ? (
                 <div className="space-y-1">
                   <StatusRow label="Unsigned notes (awaiting BCBA)" value={snapshot.unsignedNotes} />
-                  <StatusRow label="Signed · not sent to Plutus" value={snapshot.signedUnconverted} />
+                  <StatusRow label="Signed · not claim filed" value={snapshot.signedUnconverted} />
                   <StatusRow label="Open case openings" value={snapshot.openCaseOpenings} />
                   <StatusRow label="Pending PA requests" value={snapshot.pendingPaRequests} />
                   <StatusRow
@@ -391,17 +391,17 @@ export function DevToolsUI({
               </div>
             </div>
 
-            {/* Dual-run readiness — docs pointer only (not a claim that Artemis is replaced) */}
-            <div className="pt-3 border-t border-zinc-800 space-y-1">
+            {/* Sandbox cutover readiness (docs only — no staff worksheet UI) */}
+            <div className="pt-3 border-t border-zinc-800 space-y-2">
               <span className="text-[10px] font-black uppercase tracking-wider text-zinc-500">
-                Dual-run readiness
+                Sandbox cutover readiness
               </span>
               <p className="text-[9px] leading-relaxed text-zinc-500">
-                Cohort go/no-go checklist (docs):{' '}
+                Cohort go/no-go spec:{' '}
                 <span className="font-mono text-zinc-400 break-all">
-                  docs/superpowers/specs/2026-08-11-artemis-dual-run-cutover-checklist.md
+                  docs/superpowers/specs/2026-08-11-ras-sandbox-cutover-checklist.md
                 </span>
-                . Bridges E–G wiring done; Studio depth + SQL still gate D1. Artemis not org-replaced.
+                . Bridges E–G wiring done; Studio depth + SQL still gate cutover readiness.
               </p>
             </div>
           </div>

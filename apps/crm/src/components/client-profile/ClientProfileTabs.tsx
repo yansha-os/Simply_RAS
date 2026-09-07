@@ -11,18 +11,23 @@ import ClientAssignmentsTab from '@/components/client-profile/tabs/ClientAssignm
 import ClientMessagesTab from '@/components/client-profile/tabs/ClientMessagesTab';
 import PeerToPeerTab from '@/components/client-profile/tabs/PeerToPeerTab';
 import ClientDocumentsTab from '@/components/client-profile/tabs/ClientDocumentsTab';
+import BillingDocumentsTab from '@/components/client-profile/tabs/BillingDocumentsTab';
 import BcbaAssessmentTab from '@/components/client-profile/tabs/BcbaAssessmentTab';
 import BcbaTreatmentPlanTab from '@/components/client-profile/tabs/BcbaTreatmentPlanTab';
 import BcbaSessionEmrTab from '@/components/client-profile/tabs/BcbaSessionEmrTab';
 import ClinicalGoalsTab from '@/components/client-profile/tabs/ClinicalGoalsTab';
 import ClinicalChartProgressTab from '@/components/client-profile/tabs/ClinicalChartProgressTab';
+import ClientClaimsTab from '@/components/client-profile/tabs/ClientClaimsTab';
 import StaffingIntegrityTab from '@/components/client-profile/tabs/HrStaffingTab';
 import CaseCoordSchedulingTab from '@/components/client-profile/tabs/CaseCoordSchedulingTab';
 import { UserPlus, CheckCircle2, ArrowRight } from 'lucide-react';
 import { toast } from 'sonner';
 import { markClientMessagesAsRead } from '@/app/(dashboard)/portal-case/actions';
 import { getStatusGuidance, statusIndex } from '@/lib/clientStatusGates';
+import ClinicalSupportBillingHandoffTab from '@/components/client-profile/tabs/ClinicalSupportBillingHandoffTab';
 import {
+  getBillingTabVisibility,
+  getClinicalSupportTabVisibility,
   resolveActiveClientProfileTab,
   resolveRequestedClientProfileTab,
   shouldShowStaffingIntegrityTab,
@@ -123,6 +128,10 @@ type ClientProfileTabsProps = {
   mode?: string;
   tab?: string;
   bcbas?: BcbaOption[];
+  sessionNotesAccess?: {
+    canView: boolean;
+    canConvert: boolean;
+  };
 };
 
 export default function ClientProfileTabs({
@@ -130,6 +139,7 @@ export default function ClientProfileTabs({
   mode,
   tab,
   bcbas,
+  sessionNotesAccess,
 }: ClientProfileTabsProps) {
   const isCaseCoordMode = mode === 'case-coord';
   const isClinicalReviewMode = mode === 'clinical';
@@ -140,12 +150,20 @@ export default function ClientProfileTabs({
     mode === 'assessment_prep' ||
     mode === 'p2p';
   const isBillingMode = mode === 'billing';
-  const showClinicalGoalsTab = isBcbaMode || isClinicalReviewMode || isCaseCoordMode;
+  const showSessionNotesTab = sessionNotesAccess?.canView ?? false;
+  const canConvertSessionNotes = sessionNotesAccess?.canConvert ?? false;
+  const billingTabVisibility = getBillingTabVisibility({
+    clientStatus: client.status,
+    showSessionNotesTab,
+  });
+  const clinicalSupportTabVisibility = getClinicalSupportTabVisibility(client.status);
+  const clientDisplayName = [client.firstName, client.lastName].filter(Boolean).join(' ') || 'Client';
+  const showClinicalGoalsTab = isBcbaMode || isCaseCoordMode;
   // Canonical pipeline order (clientStatusGates) — DISCHARGED is past ACTIVE, so
   // discharged clients keep read-only chart history instead of losing the tab.
   const hasReachedActive = statusIndex(client.status) >= statusIndex('ACTIVE');
   const showChartProgressTab =
-    hasReachedActive && (isBcbaMode || isClinicalReviewMode || isCaseCoordMode);
+    hasReachedActive && (isBcbaMode || isCaseCoordMode);
   const showStaffingIntegrityTab = shouldShowStaffingIntegrityTab(mode, client.status);
 
   /** Deep-links: billing/auth · staffing/activation · staffing_integrity · goals · chart_progress */
@@ -167,6 +185,8 @@ export default function ClientProfileTabs({
   const requestedTab = resolveRequestedClientProfileTab({
     mode,
     queryTab: tab,
+    clientStatus: client.status,
+    showSessionNotesTab,
     hasP2PAlert,
     showChartProgressTab,
     showStaffingIntegrityTab,
@@ -227,21 +247,21 @@ export default function ClientProfileTabs({
         {/* Tabs for Case Coordinator Mode */}
         {isCaseCoordMode ? (
           <>
-            <button 
+            <button
               suppressHydrationWarning
               className={`pb-[12px] text-[13.5px] font-semibold cursor-pointer border-b-2 transition-colors ${activeTab === 'overview' ? 'text-[var(--dawn-hot)] border-[var(--dawn)]' : 'text-[var(--ink-500)] border-transparent hover:text-[var(--ink-300)]'}`}
               onClick={() => setActiveTab('overview')}
             >
               Overview
             </button>
-            <button 
+            <button
               suppressHydrationWarning
               className={`pb-[12px] text-[13.5px] font-semibold cursor-pointer border-b-2 transition-colors ${activeTab === 'documents' ? 'text-[var(--dawn-hot)] border-[var(--dawn)]' : 'text-[var(--ink-500)] border-transparent hover:text-[var(--ink-300)]'}`}
               onClick={() => setActiveTab('documents')}
             >
               Documents
             </button>
-            <button 
+            <button
               suppressHydrationWarning
               className={`pb-[12px] text-[13.5px] font-semibold cursor-pointer border-b-2 transition-colors flex items-center ${activeTab === 'messages' ? 'text-[var(--dawn-hot)] border-[var(--dawn)]' : 'text-[var(--ink-500)] border-transparent hover:text-[var(--ink-300)]'}`}
               onClick={() => {
@@ -257,7 +277,7 @@ export default function ClientProfileTabs({
                 <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full ml-1.5 leading-none shadow-sm">{unreadCount}</span>
               )}
             </button>
-            <button 
+            <button
               suppressHydrationWarning
               className={`pb-[12px] text-[13.5px] font-semibold cursor-pointer border-b-2 transition-colors ${activeTab === 'case_coord_scheduling' ? 'text-[var(--dawn-hot)] border-[var(--dawn)]' : 'text-[var(--ink-500)] border-transparent hover:text-[var(--ink-300)]'}`}
               onClick={() => setActiveTab('case_coord_scheduling')}
@@ -291,15 +311,111 @@ export default function ClientProfileTabs({
             )}
           </>
         ) : isBillingMode ? (
-          /* Billing Mode — PA tracker + Auth Units */
+          /* Billing Mode — workflow-scoped PA / claims tabs */
           <>
-            <button
-              suppressHydrationWarning
-              className={`pb-[12px] text-[13.5px] font-semibold cursor-pointer border-b-2 transition-colors ${activeTab === 'billing' ? 'text-[var(--dawn-hot)] border-[var(--dawn)]' : 'text-[var(--ink-500)] border-transparent hover:text-[var(--ink-300)]'}`}
-              onClick={() => setActiveTab('billing')}
-            >
-              PA &amp; Auth Units
-            </button>
+            {billingTabVisibility.session_notes && (
+              <button
+                suppressHydrationWarning
+                className={`pb-[12px] text-[13.5px] font-semibold cursor-pointer border-b-2 transition-colors ${activeTab === 'session_notes' ? 'text-[var(--dawn-hot)] border-[var(--dawn)]' : 'text-[var(--ink-500)] border-transparent hover:text-[var(--ink-300)]'}`}
+                onClick={() => setActiveTab('session_notes')}
+              >
+                Claims
+              </button>
+            )}
+            {billingTabVisibility.billing_vob && (
+              <button
+                suppressHydrationWarning
+                className={`pb-[12px] text-[13.5px] font-semibold cursor-pointer border-b-2 transition-colors ${activeTab === 'billing_vob' ? 'text-[var(--dawn-hot)] border-[var(--dawn)]' : 'text-[var(--ink-500)] border-transparent hover:text-[var(--ink-300)]'}`}
+                onClick={() => setActiveTab('billing_vob')}
+              >
+                VOB / Benefits
+              </button>
+            )}
+            {billingTabVisibility.billing_assessment_pa && (
+              <button
+                suppressHydrationWarning
+                className={`pb-[12px] text-[13.5px] font-semibold cursor-pointer border-b-2 transition-colors ${activeTab === 'billing_assessment_pa' ? 'text-[var(--dawn-hot)] border-[var(--dawn)]' : 'text-[var(--ink-500)] border-transparent hover:text-[var(--ink-300)]'}`}
+                onClick={() => setActiveTab('billing_assessment_pa')}
+              >
+                Assessment PA
+              </button>
+            )}
+            {billingTabVisibility.billing_treatment_pa && (
+              <button
+                suppressHydrationWarning
+                className={`pb-[12px] text-[13.5px] font-semibold cursor-pointer border-b-2 transition-colors ${activeTab === 'billing_treatment_pa' ? 'text-[var(--dawn-hot)] border-[var(--dawn)]' : 'text-[var(--ink-500)] border-transparent hover:text-[var(--ink-300)]'}`}
+                onClick={() => setActiveTab('billing_treatment_pa')}
+              >
+                Treatment PA
+              </button>
+            )}
+            {billingTabVisibility.billing_auth_units && (
+              <button
+                suppressHydrationWarning
+                className={`pb-[12px] text-[13.5px] font-semibold cursor-pointer border-b-2 transition-colors ${activeTab === 'billing_auth_units' ? 'text-[var(--dawn-hot)] border-[var(--dawn)]' : 'text-[var(--ink-500)] border-transparent hover:text-[var(--ink-300)]'}`}
+                onClick={() => setActiveTab('billing_auth_units')}
+              >
+                Auth Units
+              </button>
+            )}
+            {billingTabVisibility.billing_documents && (
+              <button
+                suppressHydrationWarning
+                className={`pb-[12px] text-[13.5px] font-semibold cursor-pointer border-b-2 transition-colors ${activeTab === 'billing_documents' ? 'text-[var(--dawn-hot)] border-[var(--dawn)]' : 'text-[var(--ink-500)] border-transparent hover:text-[var(--ink-300)]'}`}
+                onClick={() => setActiveTab('billing_documents')}
+              >
+                Billing Documents
+              </button>
+            )}
+            {billingTabVisibility.overview && (
+              <button
+                suppressHydrationWarning
+                className={`pb-[12px] text-[13.5px] font-semibold cursor-pointer border-b-2 transition-colors ${activeTab === 'overview' ? 'text-[var(--dawn-hot)] border-[var(--dawn)]' : 'text-[var(--ink-500)] border-transparent hover:text-[var(--ink-300)]'}`}
+                onClick={() => setActiveTab('overview')}
+              >
+                Overview
+              </button>
+            )}
+          </>
+        ) : isClinicalReviewMode ? (
+          /* Clinical Support Mode — workflow tabs for each handoff stage */
+          <>
+            {clinicalSupportTabVisibility.clinical && (
+              <button
+                suppressHydrationWarning
+                className={`pb-[12px] text-[13.5px] font-semibold cursor-pointer border-b-2 transition-colors ${activeTab === 'clinical' ? 'text-[var(--dawn-hot)] border-[var(--dawn)]' : 'text-[var(--ink-500)] border-transparent hover:text-[var(--ink-300)]'}`}
+                onClick={() => setActiveTab('clinical')}
+              >
+                Clinical Review
+              </button>
+            )}
+            {clinicalSupportTabVisibility.assessment && (
+              <button
+                suppressHydrationWarning
+                className={`pb-[12px] text-[13.5px] font-semibold cursor-pointer border-b-2 transition-colors ${activeTab === 'assessment' ? 'text-[var(--dawn-hot)] border-[var(--dawn)]' : 'text-[var(--ink-500)] border-transparent hover:text-[var(--ink-300)]'}`}
+                onClick={() => setActiveTab('assessment')}
+              >
+                97151 Scheduling
+              </button>
+            )}
+            {clinicalSupportTabVisibility.report && (
+              <button
+                suppressHydrationWarning
+                className={`pb-[12px] text-[13.5px] font-semibold cursor-pointer border-b-2 transition-colors ${activeTab === 'report' ? 'text-[var(--dawn-hot)] border-[var(--dawn)]' : 'text-[var(--ink-500)] border-transparent hover:text-[var(--ink-300)]'}`}
+                onClick={() => setActiveTab('report')}
+              >
+                Report Assembly
+              </button>
+            )}
+            {clinicalSupportTabVisibility.billing_handoff && (
+              <button
+                suppressHydrationWarning
+                className={`pb-[12px] text-[13.5px] font-semibold cursor-pointer border-b-2 transition-colors ${activeTab === 'billing_handoff' ? 'text-[var(--dawn-hot)] border-[var(--dawn)]' : 'text-[var(--ink-500)] border-transparent hover:text-[var(--ink-300)]'}`}
+                onClick={() => setActiveTab('billing_handoff')}
+              >
+                Billing Handoff
+              </button>
+            )}
             <button
               suppressHydrationWarning
               className={`pb-[12px] text-[13.5px] font-semibold cursor-pointer border-b-2 transition-colors ${activeTab === 'overview' ? 'text-[var(--dawn-hot)] border-[var(--dawn)]' : 'text-[var(--ink-500)] border-transparent hover:text-[var(--ink-300)]'}`}
@@ -307,13 +423,15 @@ export default function ClientProfileTabs({
             >
               Overview
             </button>
-            <button
-              suppressHydrationWarning
-              className={`pb-[12px] text-[13.5px] font-semibold cursor-pointer border-b-2 transition-colors ${activeTab === 'documents' ? 'text-[var(--dawn-hot)] border-[var(--dawn)]' : 'text-[var(--ink-500)] border-transparent hover:text-[var(--ink-300)]'}`}
-              onClick={() => setActiveTab('documents')}
-            >
-              Documents
-            </button>
+            {clinicalSupportTabVisibility.documents && (
+              <button
+                suppressHydrationWarning
+                className={`pb-[12px] text-[13.5px] font-semibold cursor-pointer border-b-2 transition-colors ${activeTab === 'documents' ? 'text-[var(--dawn-hot)] border-[var(--dawn)]' : 'text-[var(--ink-500)] border-transparent hover:text-[var(--ink-300)]'}`}
+                onClick={() => setActiveTab('documents')}
+              >
+                Documents
+              </button>
+            )}
             <button
               suppressHydrationWarning
               className={`pb-[12px] text-[13.5px] font-semibold cursor-pointer border-b-2 transition-colors flex items-center ${activeTab === 'messages' ? 'text-[var(--dawn-hot)] border-[var(--dawn)]' : 'text-[var(--ink-500)] border-transparent hover:text-[var(--ink-300)]'}`}
@@ -334,7 +452,7 @@ export default function ClientProfileTabs({
         ) : isBcbaMode ? (
           /* BCBA / Clinical Director Mode Tabs */
           <>
-            <button 
+            <button
               suppressHydrationWarning
               className={`pb-[12px] text-[13.5px] font-semibold cursor-pointer border-b-2 transition-colors ${activeTab === 'overview' ? 'text-[var(--dawn-hot)] border-[var(--dawn)]' : 'text-[var(--ink-500)] border-transparent hover:text-[var(--ink-300)]'}`}
               onClick={() => setActiveTab('overview')}
@@ -342,7 +460,7 @@ export default function ClientProfileTabs({
               Overview
             </button>
 
-            <button 
+            <button
               suppressHydrationWarning
               className={`pb-[12px] text-[13.5px] font-semibold cursor-pointer border-b-2 transition-colors ${activeTab === 'bcba_documents' ? 'text-[var(--dawn-hot)] border-[var(--dawn)]' : 'text-[var(--ink-500)] border-transparent hover:text-[var(--ink-300)]'}`}
               onClick={() => setActiveTab('bcba_documents')}
@@ -366,7 +484,7 @@ export default function ClientProfileTabs({
               Treatment Plan
             </button>
 
-            <button 
+            <button
               suppressHydrationWarning
               className={`pb-[12px] text-[13.5px] font-semibold cursor-pointer border-b-2 transition-colors ${activeTab === 'assign_bcba' ? 'text-[var(--dawn-hot)] border-[var(--dawn)]' : 'text-[var(--ink-500)] border-transparent hover:text-[var(--ink-300)]'}`}
               onClick={() => setActiveTab('assign_bcba')}
@@ -393,23 +511,23 @@ export default function ClientProfileTabs({
             )}
           </>
         ) : (
-          /* Standard Default Profile Tabs (+ clinical mode Goals) */
+          /* Standard Default Profile Tabs */
           <>
-            <button 
+            <button
               suppressHydrationWarning
               className={`pb-[12px] text-[13.5px] font-semibold cursor-pointer border-b-2 transition-colors ${activeTab === 'overview' ? 'text-[var(--dawn-hot)] border-[var(--dawn)]' : 'text-[var(--ink-500)] border-transparent hover:text-[var(--ink-300)]'}`}
               onClick={() => setActiveTab('overview')}
             >
               Overview
             </button>
-            <button 
+            <button
               suppressHydrationWarning
               className={`pb-[12px] text-[13.5px] font-semibold cursor-pointer border-b-2 transition-colors ${activeTab === 'documents' ? 'text-[var(--dawn-hot)] border-[var(--dawn)]' : 'text-[var(--ink-500)] border-transparent hover:text-[var(--ink-300)]'}`}
               onClick={() => setActiveTab('documents')}
             >
               Documents
             </button>
-            <button 
+            <button
               suppressHydrationWarning
               className={`pb-[12px] text-[13.5px] font-semibold cursor-pointer border-b-2 transition-colors flex items-center ${activeTab === 'messages' ? 'text-[var(--dawn-hot)] border-[var(--dawn)]' : 'text-[var(--ink-500)] border-transparent hover:text-[var(--ink-300)]'}`}
               onClick={() => {
@@ -425,15 +543,6 @@ export default function ClientProfileTabs({
                 <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full ml-1.5 leading-none shadow-sm">{unreadCount}</span>
               )}
             </button>
-            {isClinicalReviewMode && (
-              <button
-                suppressHydrationWarning
-                className={`pb-[12px] text-[13.5px] font-semibold cursor-pointer border-b-2 transition-colors ${activeTab === 'clinical_goals' ? 'text-[var(--dawn-hot)] border-[var(--dawn)]' : 'text-[var(--ink-500)] border-transparent hover:text-[var(--ink-300)]'}`}
-                onClick={() => setActiveTab('clinical_goals')}
-              >
-                Clinical Goals
-              </button>
-            )}
             {showChartProgressTab && (
               <button
                 suppressHydrationWarning
@@ -489,7 +598,7 @@ export default function ClientProfileTabs({
               </div>
               <div className="font-heading text-[18px] font-semibold">Client Demographics</div>
             </div>
-            
+
             <div className="grid grid-cols-2 gap-x-[40px] gap-y-[22px]">
               <div className="pb-[14px] border-b border-[var(--line)]">
                 <div className="font-mono text-[10px] text-[var(--dawn)] tracking-[.6px] uppercase mb-[6px]">Child Name</div>
@@ -518,9 +627,18 @@ export default function ClientProfileTabs({
         {activeTab === 'documents' && (
           hasIntakeDocs ? <IntakeDocumentsTab client={client} isCaseCoordMode={isCaseCoordMode} /> : <div className="text-[var(--ink-500)] text-[14px]">No intake packet generated yet.</div>
         )}
-        
+
         {activeTab === 'messages' && (
-          <ClientMessagesTab clientId={client.id} initialMessages={client.messages || []} />
+          <ClientMessagesTab
+            clientId={client.id}
+            initialMessages={client.messages || []}
+            clientStatus={client.status}
+            guardianName={client.guardianName}
+            guardianEmail={client.guardianEmail}
+            guardianPhone={client.guardianPhone}
+            hasIntakePacket={!!client.intakePacket}
+            magicLinkToken={client.intakePacket?.magicLinkToken}
+          />
         )}
 
         {activeTab === 'p2p' && (
@@ -637,11 +755,42 @@ export default function ClientProfileTabs({
         )}
 
         {activeTab === 'clinical' && (
-          <ClinicalReviewTab client={client} />
+          <ClinicalReviewTab
+            client={client}
+            documentVerificationOnly={isClinicalReviewMode}
+          />
+        )}
+
+        {activeTab === 'billing_vob' && isBillingMode && billingTabVisibility.billing_vob && (
+          <BillingAuthTab client={client} section="vob" />
+        )}
+
+        {activeTab === 'billing_assessment_pa' && isBillingMode && billingTabVisibility.billing_assessment_pa && (
+          <BillingAuthTab client={client} section="assessment_pa" />
+        )}
+
+        {activeTab === 'billing_treatment_pa' && isBillingMode && billingTabVisibility.billing_treatment_pa && (
+          <BillingAuthTab client={client} section="treatment_pa" />
+        )}
+
+        {activeTab === 'billing_auth_units' && isBillingMode && billingTabVisibility.billing_auth_units && (
+          <BillingAuthTab client={client} section="auth_units" />
         )}
 
         {activeTab === 'billing' && (isBillingMode || wantsBilling) && (
           <BillingAuthTab client={client} />
+        )}
+
+        {activeTab === 'billing_documents' && isBillingMode && (
+          <BillingDocumentsTab client={client} />
+        )}
+
+        {activeTab === 'session_notes' && isBillingMode && showSessionNotesTab && (
+          <ClientClaimsTab
+            clientId={client.id}
+            clientName={clientDisplayName}
+            canConvert={canConvertSessionNotes}
+          />
         )}
 
         {activeTab === 'assignments' && (
@@ -650,6 +799,10 @@ export default function ClientProfileTabs({
 
         {activeTab === 'assessment' && (
           <BcbaAssessmentTab client={client} />
+        )}
+
+        {activeTab === 'billing_handoff' && isClinicalReviewMode && (
+          <ClinicalSupportBillingHandoffTab client={client} />
         )}
 
         {activeTab === 'treatment_plan' && (
@@ -674,7 +827,7 @@ export default function ClientProfileTabs({
           />
         )}
 
-        {activeTab === 'report' && isPastAssessment && (
+        {activeTab === 'report' && (isPastAssessment || isClinicalReviewMode) && (
           <ReportAssemblyTab client={client} />
         )}
 

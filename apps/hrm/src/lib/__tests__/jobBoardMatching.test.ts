@@ -175,4 +175,18 @@ describe('scoreJobMatch', () => {
     expect(res.distanceMiles).toBeNull();
     expect(res.matchReason).toContain('Listing missing ZIP & borough');
   });
+
+  describe('1% edge cases & defensive resilience', () => {
+    it('handles undefined preferredBoroughs and NaN maxTravelMiles gracefully', () => {
+      const malformedInput = {
+        ...matchInput(),
+        preferredBoroughs: undefined,
+        maxTravelMiles: NaN,
+      } as unknown as MatchInput;
+      const res = scoreJobMatch(malformedInput);
+      expect(Number.isFinite(res.matchScore)).toBe(true);
+      expect(res.matchScore).toBeGreaterThanOrEqual(0);
+      expect(res.matchScore).toBeLessThanOrEqual(99);
+    });
+  });
 });

@@ -74,18 +74,6 @@ export function useHrmRole() {
           setRoleState('RBT');
           return;
         }
-        if (serverRole === 'APPLICANT') {
-          // Don't demote an explicit Active RBT staff impersonation
-          if (saved === 'RBT') {
-            setRoleState('RBT');
-            return;
-          }
-          localStorage.setItem('hrm_active_role', 'APPLICANT');
-          setRoleState('APPLICANT');
-          return;
-        }
-        // Keep Active RBT / Applicant impersonation sticky — do not flash staff chrome
-        // when Supabase session is still Head HR underneath Dev Tools impersonation.
         if (saved === 'RBT' || saved === 'APPLICANT') {
           setRoleState(saved);
           return;

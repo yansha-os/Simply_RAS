@@ -6,6 +6,7 @@ import { requireClientAccess, requireStaff } from '@/lib/auth-guard';
 // Canonical batched fan-out with unread dedupe — do not re-implement locally.
 import { notifyUsers } from '@/app/actions/notifications';
 import { CLINIC_TIME_ZONE, clinicWallClockToUtc } from '@/lib/clinicTimezone';
+import { summarizeStaffCredentials } from '@/lib/staffCredentials';
 import {
   FIRST_SESSION_SCHEDULER_ROLES,
   buildAssignmentAuditRow,
@@ -22,6 +23,9 @@ const ASSESSMENT_CPT = '97151';
 const FIRST_SESSION_STALE = 'FIRST_SESSION_STALE';
 const FIRST_SESSION_COMPLETION_STALE = 'FIRST_SESSION_COMPLETION_STALE';
 const FIRST_SESSION_ACTIVATION_STALE = 'FIRST_SESSION_ACTIVATION_STALE';
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const CPT_RE = /^\d{5}$/;
 
 /**
  * Scheduler-entered `datetime-local` strings carry no TZ; interpret them as
@@ -42,6 +46,29 @@ function isStaffingReady(client: {
     Boolean(client.rbtId) &&
     Boolean(client.bcbaId)
   );
+}
+
+function credentialBlocker(staff: {
+  id: string;
+  role: string;
+  firstName?: string | null;
+  lastName?: string | null;
+  credentials: Array<{
+    credentialType: string;
+    isCredentialed: boolean;
+    expirationDate: Date | null;
+  }>;
+} | null): string | null {
+  if (!staff) return 'staff record is missing';
+  const status = summarizeStaffCredentials({
+    userId: staff.id,
+    displayName: `${staff.firstName ?? ''} ${staff.lastName ?? ''}`.trim() || null,
+    role: staff.role,
+    credentials: staff.credentials,
+  });
+  return status.overall === 'ACTIVE'
+    ? null
+    : status.warnings.join(', ') || 'required credential evidence is missing';
 }
 
 /**
@@ -67,6 +94,20 @@ export async function scheduleFirstTherapySession(input: {
 
   try {
     const cpt = (input.cptCode || THERAPY_CPT).trim();
+    if (
+      !UUID_RE.test(input.clientId) ||
+      !input.expectedRbtId ||
+      !UUID_RE.test(input.expectedRbtId) ||
+      !input.expectedBcbaId ||
+      !UUID_RE.test(input.expectedBcbaId) ||
+      input.expectedClientStatus !== 'STAFFING_PENDING' ||
+      input.expectedRbtApproved !== true ||
+      !CPT_RE.test(cpt) ||
+      (input.location?.trim().length ?? 0) > 250 ||
+      (input.reason?.trim().length ?? 0) > 1_000
+    ) {
+      return { success: false as const, error: 'Valid first-session details are required.' };
+    }
     if (cpt === ASSESSMENT_CPT) {
       return {
         success: false as const,
@@ -76,7 +117,13 @@ export async function scheduleFirstTherapySession(input: {
 
     const start = parseScheduleInstant(input.scheduledStart);
     const end = parseScheduleInstant(input.scheduledEnd);
-    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) {
+    const durationMs = end.getTime() - start.getTime();
+    if (
+      Number.isNaN(start.getTime()) ||
+      Number.isNaN(end.getTime()) ||
+      durationMs <= 0 ||
+      durationMs > 24 * 60 * 60 * 1000
+    ) {
       return { success: false as const, error: 'Invalid session start/end times.' };
     }
 
@@ -107,13 +154,39 @@ export async function scheduleFirstTherapySession(input: {
           client.rbtId
             ? tx.user.findUnique({
                 where: { id: client.rbtId },
-                select: { id: true, role: true, isActive: true },
+                select: {
+                  id: true,
+                  role: true,
+                  isActive: true,
+                  firstName: true,
+                  lastName: true,
+                  credentials: {
+                    select: {
+                      credentialType: true,
+                      isCredentialed: true,
+                      expirationDate: true,
+                    },
+                  },
+                },
               })
             : null,
           client.bcbaId
             ? tx.user.findUnique({
                 where: { id: client.bcbaId },
-                select: { id: true, role: true, isActive: true },
+                select: {
+                  id: true,
+                  role: true,
+                  isActive: true,
+                  firstName: true,
+                  lastName: true,
+                  credentials: {
+                    select: {
+                      credentialType: true,
+                      isCredentialed: true,
+                      expirationDate: true,
+                    },
+                  },
+                },
               })
             : null,
         ]);
@@ -144,6 +217,18 @@ export async function scheduleFirstTherapySession(input: {
           input.expectedBcbaId
         );
         if (!bcbaExpected.ok) return { policyError: bcbaExpected.error } as const;
+        const rbtCredentialBlocker = credentialBlocker(rbt);
+        if (rbtCredentialBlocker) {
+          return {
+            policyError: `RBT credential hard stop: ${rbtCredentialBlocker}.`,
+          } as const;
+        }
+        const bcbaCredentialBlocker = credentialBlocker(bcba);
+        if (bcbaCredentialBlocker) {
+          return {
+            policyError: `BCBA credential hard stop: ${bcbaCredentialBlocker}.`,
+          } as const;
+        }
         if (client.status !== input.expectedClientStatus) {
           return {
             policyError:
@@ -327,6 +412,10 @@ export async function confirmTherapySessionCompleted(sessionId: string) {
   }
 
   try {
+    if (!UUID_RE.test(sessionId)) {
+      return { success: false as const, error: 'A valid session ID is required.' };
+    }
+
     const scopedSession = await prisma.session.findUnique({
       where: { id: sessionId },
       select: { clientId: true },
@@ -353,6 +442,7 @@ export async function confirmTherapySessionCompleted(sessionId: string) {
             scheduledEnd: true,
             actualStart: true,
             actualEnd: true,
+            updatedAt: true,
             client: { select: { caseCoordinatorId: true } },
           },
         });
@@ -383,17 +473,32 @@ export async function confirmTherapySessionCompleted(sessionId: string) {
           } as const;
         }
 
+        if (!session.actualStart || !session.actualEnd) {
+          return {
+            policyError:
+              'Actual service start and end times must be recorded before completion.',
+          } as const;
+        }
+        const actualDurationMs =
+          session.actualEnd.getTime() - session.actualStart.getTime();
+        if (actualDurationMs <= 0 || actualDurationMs > 24 * 60 * 60 * 1000) {
+          return {
+            policyError: 'Actual service timestamps do not form a valid session window.',
+          } as const;
+        }
+
         const updated = await tx.session.updateMany({
           where: {
             id: session.id,
             clientId: session.clientId,
             status: session.status,
             cptCode: session.cptCode,
+            actualStart: session.actualStart,
+            actualEnd: session.actualEnd,
+            updatedAt: session.updatedAt,
           },
           data: {
             status: 'COMPLETED',
-            actualStart: session.actualStart || session.scheduledStart,
-            actualEnd: session.actualEnd || session.scheduledEnd,
           },
         });
         if (updated.count !== 1) throw new Error(FIRST_SESSION_COMPLETION_STALE);
@@ -403,8 +508,6 @@ export async function confirmTherapySessionCompleted(sessionId: string) {
           session: {
             ...session,
             status: 'COMPLETED' as const,
-            actualStart: session.actualStart || session.scheduledStart,
-            actualEnd: session.actualEnd || session.scheduledEnd,
           },
         } as const;
       },
@@ -455,6 +558,10 @@ export async function activateClientAfterFirstSession(clientId: string) {
   }
 
   try {
+    if (!UUID_RE.test(clientId)) {
+      return { success: false as const, error: 'A valid client ID is required.' };
+    }
+
     const access = await requireClientAccess(clientId);
     if (!access.ok) {
       return { success: false as const, error: access.error };
@@ -510,17 +617,55 @@ export async function activateClientAfterFirstSession(clientId: string) {
         const [rbt, bcba] = await Promise.all([
           tx.user.findUnique({
             where: { id: client.rbtId },
-            select: { id: true, role: true, isActive: true },
+            select: {
+              id: true,
+              role: true,
+              isActive: true,
+              firstName: true,
+              lastName: true,
+              credentials: {
+                select: {
+                  credentialType: true,
+                  isCredentialed: true,
+                  expirationDate: true,
+                },
+              },
+            },
           }),
           tx.user.findUnique({
             where: { id: client.bcbaId },
-            select: { id: true, role: true, isActive: true },
+            select: {
+              id: true,
+              role: true,
+              isActive: true,
+              firstName: true,
+              lastName: true,
+              credentials: {
+                select: {
+                  credentialType: true,
+                  isCredentialed: true,
+                  expirationDate: true,
+                },
+              },
+            },
           }),
         ]);
         const rbtTarget = validateAssignmentTarget(rbt, 'RBT');
         if (!rbtTarget.ok) return { policyError: rbtTarget.error } as const;
         const bcbaTarget = validateAssignmentTarget(bcba, 'BCBA');
         if (!bcbaTarget.ok) return { policyError: bcbaTarget.error } as const;
+        const rbtCredentialBlocker = credentialBlocker(rbt);
+        if (rbtCredentialBlocker) {
+          return {
+            policyError: `RBT credential hard stop: ${rbtCredentialBlocker}.`,
+          } as const;
+        }
+        const bcbaCredentialBlocker = credentialBlocker(bcba);
+        if (bcbaCredentialBlocker) {
+          return {
+            policyError: `BCBA credential hard stop: ${bcbaCredentialBlocker}.`,
+          } as const;
+        }
 
         const firstSession = await tx.session.findFirst({
           where: {
@@ -612,6 +757,9 @@ export async function activateClientAfterFirstSession(clientId: string) {
 
 export async function getClientTherapySessions(clientId: string) {
   try {
+    if (!UUID_RE.test(clientId)) {
+      return { success: false as const, sessions: [], error: 'A valid client ID is required.' };
+    }
     const gate = await requireClientAccess(clientId);
     if (!gate.ok) return { success: false as const, sessions: [], error: gate.error };
 

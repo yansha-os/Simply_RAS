@@ -26,32 +26,32 @@ export default async function MagicLinkPage(props: { params: Promise<{ id: strin
   const liveness = magicLinkStatus(packet);
   if (!liveness.ok) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-6 bg-[#0a0a0c] bg-grid-pattern relative">
-        <div className="max-w-md w-full bg-[#0f1115] border border-amber-500/30 p-10 rounded-[2rem] shadow-[0_0_50px_rgba(255,180,0,0.12)] text-center animate-slide-up">
-          <div className="w-20 h-20 bg-amber-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
-            <ShieldAlert className="w-10 h-10 text-amber-400" />
+      <div className="min-h-screen flex items-center justify-center p-6 bg-slate-50 relative font-sans">
+        <div className="max-w-md w-full bg-white border border-amber-200 p-8 sm:p-10 rounded-3xl shadow-xl text-center animate-slide-up">
+          <div className="w-16 h-16 bg-amber-100 rounded-2xl flex items-center justify-center mx-auto mb-5 text-amber-600 shadow-sm">
+            <ShieldAlert className="w-8 h-8" />
           </div>
-          <h1 className="text-3xl font-heading font-black text-white text-glow mb-4">This Link Is No Longer Active</h1>
-          <p className="text-slate-400 leading-relaxed mb-8">
+          <h1 className="text-2xl font-heading font-extrabold text-slate-900 mb-3">This Link Is No Longer Active</h1>
+          <p className="text-slate-600 text-sm leading-relaxed mb-6">
             {liveness.error} Don&apos;t worry — everything you already filled out and uploaded is saved safely.
           </p>
           <div className="text-left space-y-3">
-            <div className="flex items-start gap-3 rounded-xl border border-white/10 bg-zinc-950/60 p-4">
-              <div className="w-9 h-9 shrink-0 rounded-lg bg-brand-blue-500/10 border border-brand-blue-500/25 flex items-center justify-center">
-                <Phone className="w-4 h-4 text-brand-blue-400" />
+            <div className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="w-9 h-9 shrink-0 rounded-xl bg-orange-100 border border-orange-200 flex items-center justify-center text-orange-600">
+                <Phone className="w-4 h-4" />
               </div>
               <div>
-                <p className="text-sm font-semibold text-white">Contact your care coordinator</p>
-                <p className="text-xs text-zinc-400 mt-0.5">Call or message the clinic and let them know your secure link stopped working.</p>
+                <p className="text-sm font-bold text-slate-900">Contact your care coordinator</p>
+                <p className="text-xs text-slate-500 mt-0.5">Call or message the clinic and let them know your secure link stopped working.</p>
               </div>
             </div>
-            <div className="flex items-start gap-3 rounded-xl border border-white/10 bg-zinc-950/60 p-4">
-              <div className="w-9 h-9 shrink-0 rounded-lg bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center">
-                <RefreshCw className="w-4 h-4 text-emerald-400" />
+            <div className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="w-9 h-9 shrink-0 rounded-xl bg-emerald-100 border border-emerald-200 flex items-center justify-center text-emerald-600">
+                <RefreshCw className="w-4 h-4" />
               </div>
               <div>
-                <p className="text-sm font-semibold text-white">Get a fresh link</p>
-                <p className="text-xs text-zinc-400 mt-0.5">They can send you a new secure link right away, and you&apos;ll pick up exactly where you left off.</p>
+                <p className="text-sm font-bold text-slate-900">Get a fresh link</p>
+                <p className="text-xs text-slate-500 mt-0.5">They can send you a new secure link right away, and you&apos;ll pick up exactly where you left off.</p>
               </div>
             </div>
           </div>
@@ -64,34 +64,69 @@ export default async function MagicLinkPage(props: { params: Promise<{ id: strin
   const headersList = await headers();
   const currentFingerprint = headersList.get('x-device-fingerprint');
 
-  if (!currentFingerprint) {
-    // If somehow middleware didn't run, fallback to soft warning or pass
-    console.warn("No device fingerprint found in headers. Middleware might not be running.");
-  } else {
-    if (!packet.deviceFingerprint) {
-      // First time clicking link, lock the device
-      await prisma.intakePacket.update({
+  if (!currentFingerprint || !/^[0-9a-f-]{36}$/i.test(currentFingerprint)) {
+    notFound();
+  }
+
+  let boundFingerprint = packet.deviceFingerprint;
+  if (!boundFingerprint) {
+    const claimed = await prisma.intakePacket.updateMany({
+      where: {
+        id: packet.id,
+        magicLinkToken: params.id,
+        magicLinkRevokedAt: null,
+        deviceFingerprint: null,
+        OR: [
+          { magicLinkExpiresAt: null },
+          { magicLinkExpiresAt: { gt: new Date() } },
+        ],
+      },
+      data: { deviceFingerprint: currentFingerprint },
+    });
+
+    if (claimed.count === 1) {
+      boundFingerprint = currentFingerprint;
+    } else {
+      // Another request may have won the first-open race, or staff may have
+      // revoked/rotated the link after the initial read. Re-read and fail closed.
+      const latest = await prisma.intakePacket.findUnique({
         where: { id: packet.id },
-        data: { deviceFingerprint: currentFingerprint }
+        select: {
+          magicLinkToken: true,
+          magicLinkExpiresAt: true,
+          magicLinkRevokedAt: true,
+          deviceFingerprint: true,
+        },
       });
-      packet.deviceFingerprint = currentFingerprint;
-    } else if (packet.deviceFingerprint !== currentFingerprint) {
+      if (
+        !latest ||
+        latest.magicLinkToken !== params.id ||
+        !magicLinkStatus(latest).ok
+      ) {
+        notFound();
+      }
+      boundFingerprint = latest.deviceFingerprint;
+    }
+  }
+
+  if (boundFingerprint !== currentFingerprint) {
       // Mismatch! Security lock.
       return (
-        <div className="min-h-screen flex items-center justify-center p-6 bg-[#0a0a0c] bg-grid-pattern relative">
-          <div className="max-w-md w-full bg-[#0f1115] border border-red-500/30 p-10 rounded-[2rem] shadow-[0_0_50px_rgba(255,0,0,0.15)] text-center animate-slide-up">
-            <div className="w-20 h-20 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
-              <ShieldAlert className="w-10 h-10 text-red-500" />
+        <div className="min-h-screen flex items-center justify-center p-6 bg-slate-50 relative font-sans">
+          <div className="max-w-md w-full bg-white border border-red-200 p-8 sm:p-10 rounded-3xl shadow-xl text-center animate-slide-up">
+            <div className="w-16 h-16 bg-red-100 rounded-2xl flex items-center justify-center mx-auto mb-5 text-red-600 shadow-sm">
+              <ShieldAlert className="w-8 h-8" />
             </div>
-            <h1 className="text-3xl font-heading font-black text-white text-glow mb-4">Device Locked</h1>
-            <p className="text-slate-400 leading-relaxed">
-              For your security and HIPAA compliance, this portal is locked to the original device that opened this link. 
-              Please return to your original device, or contact the clinic to request a new secure link.
+            <h1 className="text-2xl font-heading font-extrabold text-slate-900 mb-3">Device Locked</h1>
+            <p className="text-slate-600 text-sm leading-relaxed mb-4">
+              For your security and HIPAA compliance, this portal is locked to the original device that opened this link.
+            </p>
+            <p className="text-xs text-slate-500 leading-relaxed bg-slate-50 border border-slate-200 rounded-2xl p-4">
+              Please return to your original device, or contact your care coordinator to request a fresh secure link.
             </p>
           </div>
         </div>
       );
-    }
   }
 
   // To keep compatibility with ContinuousIntakeForm

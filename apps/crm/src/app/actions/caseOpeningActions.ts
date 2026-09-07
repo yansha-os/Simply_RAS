@@ -462,17 +462,58 @@ function revalidateCaseOpeningSurfaces(clientId?: string | null) {
 }
 
 export async function closeCaseOpening(openingId: string) {
-  try {
-    const gate = await requireStaff(CASE_COORD_ROLES);
-    if (!gate.ok) return { success: false, error: gate.error };
+  const gate = await requireStaff(CASE_COORD_ROLES);
+  if (!gate.ok) return { success: false as const, error: gate.error };
 
-    const opening = await prisma.caseOpening.update({
+  try {
+    if (!UUID_PATTERN.test(openingId)) {
+      return { success: false as const, error: 'Opening not found.' };
+    }
+
+    const existing = await prisma.caseOpening.findUnique({
       where: { id: openingId },
-      data: { status: 'CLOSED' },
-      select: { clientId: true },
+      select: {
+        clientId: true,
+        status: true,
+        client: { select: { caseCoordinatorId: true } },
+      },
     });
-    revalidateCaseOpeningSurfaces(opening.clientId);
-    return { success: true };
+    if (!existing) return { success: false as const, error: 'Opening not found.' };
+
+    const access = await requireClientAccess(existing.clientId);
+    if (!access.ok) return { success: false as const, error: access.error };
+    const scope = validateOwnedClientScope(
+      {
+        id: gate.user.id,
+        role: gate.user.role,
+        isActive: gate.user.isActive !== false,
+      },
+      existing.client.caseCoordinatorId
+    );
+    if (!scope.ok) return { success: false as const, error: scope.error };
+    if (existing.status !== 'OPEN') {
+      return { success: false as const, error: 'Opening is already closed.' };
+    }
+
+    const closed = await prisma.caseOpening.updateMany({
+      where: {
+        id: openingId,
+        clientId: existing.clientId,
+        status: 'OPEN',
+        client: {
+          is: { caseCoordinatorId: existing.client.caseCoordinatorId },
+        },
+      },
+      data: { status: 'CLOSED' },
+    });
+    if (closed.count !== 1) {
+      return {
+        success: false as const,
+        error: 'The opening or client assignment changed. Refresh and try again.',
+      };
+    }
+    revalidateCaseOpeningSurfaces(existing.clientId);
+    return { success: true as const };
   } catch (error) {
     console.error('Action failed [closeCaseOpening]:', error instanceof Error ? error.message : 'Unknown error');
     return { success: false, error: 'Failed to close opening.' };
@@ -719,17 +760,36 @@ export async function updateCaseApplicationStatus(
 
 export async function sendApplicationStaffMessage(applicationId: string, content: string) {
   try {
-    const gate = await requireStaff(CASE_COORD_ROLES);
+    const gate = await requireStaff(CASE_OPENING_MANAGER_ROLES);
     if (!gate.ok) return { success: false, error: gate.error };
 
     const trimmed = content.trim();
     if (!trimmed) return { success: false, error: 'Message cannot be empty.' };
+    if (!UUID_PATTERN.test(applicationId) || trimmed.length > 5_000) {
+      return { success: false, error: 'Invalid message request.' };
+    }
 
     const app = await prisma.caseApplication.findUnique({
       where: { id: applicationId },
-      include: { opening: true },
+      include: {
+        opening: {
+          include: { client: { select: { caseCoordinatorId: true } } },
+        },
+      },
     });
     if (!app) return { success: false, error: 'Application not found.' };
+
+    const access = await requireClientAccess(app.opening.clientId);
+    if (!access.ok) return { success: false, error: access.error };
+    const scope = validateOwnedClientScope(
+      {
+        id: gate.user.id,
+        role: gate.user.role,
+        isActive: gate.user.isActive !== false,
+      },
+      app.opening.client.caseCoordinatorId
+    );
+    if (!scope.ok) return { success: false, error: scope.error };
 
     const senderId = gate.user.id;
     if (!UUID_PATTERN.test(senderId)) {
@@ -765,11 +825,31 @@ export async function sendApplicationStaffMessage(applicationId: string, content
 export async function sendParentCaseMessage(clientId: string, content: string) {
   try {
     // Staff (case coord surface) — parents use sendClientMessage instead.
-    const gate = await requireStaff(CASE_COORD_ROLES);
+    const gate = await requireStaff(CASE_OPENING_MANAGER_ROLES);
     if (!gate.ok) return { success: false, error: gate.error };
 
     const trimmed = content.trim();
     if (!trimmed) return { success: false, error: 'Message cannot be empty.' };
+    if (!UUID_PATTERN.test(clientId) || trimmed.length > 5_000) {
+      return { success: false, error: 'Invalid message request.' };
+    }
+
+    const access = await requireClientAccess(clientId);
+    if (!access.ok) return { success: false, error: access.error };
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      select: { caseCoordinatorId: true },
+    });
+    if (!client) return { success: false, error: 'Client not found.' };
+    const scope = validateOwnedClientScope(
+      {
+        id: gate.user.id,
+        role: gate.user.role,
+        isActive: gate.user.isActive !== false,
+      },
+      client.caseCoordinatorId
+    );
+    if (!scope.ok) return { success: false, error: scope.error };
 
     await prisma.clientMessage.create({
       data: {
@@ -791,23 +871,48 @@ export async function sendParentCaseMessage(clientId: string, content: string) {
 
 export async function getApplicationThread(applicationId: string) {
   try {
-    const gate = await requireStaff();
+    const gate = await requireStaff(CASE_OPENING_MANAGER_ROLES);
     if (!gate.ok) return { success: false, error: gate.error, messages: [], parentMessages: [] };
+    if (!UUID_PATTERN.test(applicationId)) {
+      return { success: false, error: 'Not found.', messages: [], parentMessages: [] };
+    }
 
     const app = await prisma.caseApplication.findUnique({
       where: { id: applicationId },
       include: {
         rbt: { select: { id: true, firstName: true, lastName: true } },
-        opening: { select: { caseCode: true, clientId: true } },
+        opening: {
+          select: {
+            caseCode: true,
+            clientId: true,
+            client: { select: { caseCoordinatorId: true } },
+          },
+        },
       },
     });
     if (!app) return { success: false, error: 'Not found.', messages: [], parentMessages: [] };
 
+    const access = await requireClientAccess(app.opening.clientId);
+    if (!access.ok) {
+      return { success: false, error: access.error, messages: [], parentMessages: [] };
+    }
+    const scope = validateOwnedClientScope(
+      {
+        id: gate.user.id,
+        role: gate.user.role,
+        isActive: gate.user.isActive !== false,
+      },
+      app.opening.client.caseCoordinatorId
+    );
+    if (!scope.ok) {
+      return { success: false, error: scope.error, messages: [], parentMessages: [] };
+    }
+
     const messages = await prisma.staffMessage.findMany({
       where: {
         OR: [
-          { senderId: app.rbtUserId },
-          { receiverId: app.rbtUserId },
+          { senderId: gate.user.id, receiverId: app.rbtUserId },
+          { senderId: app.rbtUserId, receiverId: gate.user.id },
         ],
         content: { contains: `[${app.opening.caseCode}]` },
       },

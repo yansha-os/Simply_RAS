@@ -4,6 +4,7 @@
 **Status:** Spec (product / architecture — operational guidance, not legal advice)  
 **Product:** Rise & Shine — Simple RAS CRM + HRM  
 **Related (do not duplicate):**
+- **Master Artemis exit roadmap (Phase 0–4, role charters, dual-run):** [`2026-08-19-artemis-exit-enclosed-system-roadmap.md`](./2026-08-19-artemis-exit-enclosed-system-roadmap.md)
 - Spine: [`2026-08-11-aba-crm-hrm-spine-roadmap.md`](./2026-08-11-aba-crm-hrm-spine-roadmap.md)
 - Session-note SoT: [`2026-08-11-aba-session-note-data-collection-spec.md`](./2026-08-11-aba-session-note-data-collection-spec.md)
 - Studio plan: [`2026-08-11-session-studio-implementation-plan.md`](./2026-08-11-session-studio-implementation-plan.md)
@@ -248,20 +249,23 @@ Do **not** reopen ATS. Do **not** weaken Bridge F/G gates.
 
 ---
 
-## 8. Migration / dual-run plan from Artemis
+## 8. Migration / cutover plan (legacy EMR)
+
+> **Strategy update (2026-08-19):** Cutover is **sandbox + cold turkey**, not dual-run. Production caseload stays on the external stack until a written go/no-go flip. Authoritative checklist: [`2026-08-11-ras-sandbox-cutover-checklist.md`](./2026-08-11-ras-sandbox-cutover-checklist.md).
 
 ### 8.1 Principle
 
-**No big-bang.** Dual-run by cohort until RAS chart + notes pass exit criteria; then freeze Artemis writes for that cohort.
+**No parallel operation.** Prove readiness on pretend clients in RAS (2–3 week sandbox), then **cold cutover** when leadership signs go/no-go. Rollback = return to external production (operational parachute — not in RAS).
 
-### 8.2 Dual-run modes
+### 8.2 Cutover phases (replaces dual-run modes)
 
-| Mode | Who writes clinical | Duration | Exit |
+| Phase | RAS | Production caseload | Exit |
 |---|---|---|---|
-| **D0 Shadow** | Artemis primary; RAS notes optional parallel | Pilots | Studio QA green |
-| **D1 Dual-write** | New sessions → RAS Studio; Artemis read-only for historical | 2–6 weeks / cohort | BCBA + Billing accept RAS notes into Plutus |
-| **D2 RAS primary** | Artemis write disabled for cohort | Until org-wide | Import historical complete |
-| **D3 Decommission** | Artemis accounts off; export archived | Final | Contract exit |
+| **Sandbox** | Pretend clients; full workflow rehearsal | External stack | Studio QA green |
+| **Cutover Readiness** | Sandbox at claim-ready depth | Still external | ≥10-note internal QA; Billing accepts RAS→Plutus |
+| **Cold Cutover** | Flip real ACTIVE clients to RAS SoT | RAS for flipped cohort | Written go/no-go |
+| **Enclosed Operations** | RAS SoT for all active care | RAS | Roadmap P1–P3 exits |
+| **Decommission** | Historical PDF archive only | RAS | Contract exit |
 
 ### 8.3 Data import patterns
 
@@ -275,7 +279,7 @@ Do **not** reopen ATS. Do **not** weaken Bridge F/G gates.
 
 ### 8.4 Cutover checklist (per cohort)
 
-**Actionable go/no-go:** [`2026-08-11-artemis-dual-run-cutover-checklist.md`](./2026-08-11-artemis-dual-run-cutover-checklist.md) (Phases A dual-run / B exit Artemis writes / C rollback). Summary:
+**Actionable go/no-go:** [`2026-08-11-ras-sandbox-cutover-checklist.md`](./2026-08-11-ras-sandbox-cutover-checklist.md) (Sandbox → Cutover Readiness → Cold Cutover / rollback). **Cutover strategy (2026-08-19):** sandbox + cold turkey — **not** dual-run or parallel operation with legacy EMR. Summary:
 
 1. Cohort clients ACTIVE with durable `Session` path (Bridge E).  
 2. Studio SoT slices applied (structuredContent, checklist, POS, units).  
@@ -288,7 +292,7 @@ Do **not** reopen ATS. Do **not** weaken Bridge F/G gates.
 9. Historical Artemis PDFs attached under Documents.  
 10. Audit sample: 10 notes pass internal checklist; counsel/compliance sign-off as needed.
 
-Do **not** treat this list as “Artemis replaced” org-wide — that is D3 after all cohorts at D2.
+Do **not** treat this list as “legacy EMR replaced” org-wide — that is decommission after all cohorts at Live.
 
 ---
 

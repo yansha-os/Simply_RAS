@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma';
+import { computeBillingDashboardMetrics } from '@/lib/billingPaQueueMetrics';
 
 const assessmentStatuses = [
   'CLINICAL_REVIEW_APPROVED',
@@ -84,4 +85,9 @@ export async function loadBillingQueue() {
     assessmentClients: assessmentClients.map(sanitizeTreatmentPlan),
     treatmentClients: treatmentClients.map(sanitizeTreatmentPlan),
   };
+}
+
+export async function loadBillingDashboardMetrics() {
+  const { assessmentClients, treatmentClients } = await loadBillingQueue();
+  return computeBillingDashboardMetrics(assessmentClients, treatmentClients);
 }

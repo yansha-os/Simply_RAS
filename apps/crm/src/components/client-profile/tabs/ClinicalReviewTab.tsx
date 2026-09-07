@@ -1,22 +1,31 @@
 'use client';
 
-import React, { useState, useEffect, useSyncExternalStore, useTransition } from 'react';
-import { createPortal } from 'react-dom';
+import React, { Fragment, useState, useEffect, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { FileText, CheckCircle, AlertTriangle, X, Eye, FileCheck } from 'lucide-react';
-import { approveClinicalReview, rejectClinicalReview, rejectClinicalFormFieldsBulk } from '@/app/(dashboard)/portal-case/actions/clinical';
+import { DocumentReviewPreviewModal } from '@/components/client-profile/DocumentReviewPreviewModal';
+import { DocumentReviewStackedDialog } from '@/components/client-profile/DocumentReviewStackedDialog';
+import { SecureDocumentPreviewContent } from '@/components/client-profile/SecureDocumentPreviewContent';
+import {
+  DocumentReviewApproveButton,
+  DocumentReviewApprovedBadge,
+  DocumentReviewRejectButton,
+  DocumentReviewSendCorrectionsButton,
+} from '@/components/client-profile/DocumentReviewToolbarButtons';
+import { FileText, CheckCircle, AlertTriangle, Eye, Pencil, Clock } from 'lucide-react';
+import { getSecureDocument } from '@/lib/secureDocument';
+import { approveClinicalReview, approveClinicalReviewItem, rejectClinicalReview, rejectClinicalFormFieldsBulk } from '@/app/(dashboard)/portal-case/actions/clinical';
+import {
+  CLINICAL_VERIFICATION_DB_TO_FORM_KEY,
+  CLINICAL_VERIFICATION_DOC_LABELS,
+  getRequiredClinicalVerificationKeys,
+  type ClinicalVerificationDocumentKey,
+} from '@/lib/clinicalVerificationDocs';
+import { parseClinicalReviewApprovals, resolveClinicalReviewRowBadge, isClinicalFamilyCorrectionLoop, shouldShowClinicalWaitingForFamilyBanner, shouldShowClinicalNeedsReviewBanner, summarizeClinicalCorrectionStates, type ClinicalReviewItemKey } from '@/lib/clinicalReviewApprovals';
 import { Form01ClientIntake } from '@/components/magic-link/Form01ClientIntake';
 import { Form02Consent } from '@/components/magic-link/Form02Consent';
 import { parsePacketFormData, safeParseJson } from '@/lib/safeParseJson';
-
-type SecureDocument = {
-  url: string;
-  name: string;
-  size: string;
-  type: string;
-};
 
 type ClinicalPacketView = {
   id: string;
@@ -43,8 +52,6 @@ type ClinicalClientView = {
   intakePacket: ClinicalPacketView | null;
   [key: string]: unknown;
 };
-
-const subscribeToHydration = () => () => {};
 
 const FORM_02_FIELD_KEYS = new Set([
   'cpt97151', 'cpt97153', 'cpt97154', 'cpt97155', 'cpt97156', 'cpt97157',
@@ -87,39 +94,19 @@ function getActionError(result: unknown): string | null {
   return typeof error === 'string' && error.trim() ? error : null;
 }
 
-function isAuthorizedDocumentPath(path: string | null, clientId: string): boolean {
-  if (!path) return false;
-  const separatorIndex = path.indexOf('/');
-  if (separatorIndex < 1 || path.slice(0, separatorIndex) !== clientId) return false;
-  return /^[a-zA-Z0-9._-]{1,160}$/.test(path.slice(separatorIndex + 1));
-}
-
-function getSecureDocument(value: unknown, clientId: string): SecureDocument | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  const document = value as Record<string, unknown>;
-  if (typeof document.url !== 'string') return null;
-
-  const [pathname, query = ''] = document.url.split('?', 2);
-  const path = new URLSearchParams(query).get('path');
-  if (pathname !== '/api/documents' || !isAuthorizedDocumentPath(path, clientId)) {
-    return null;
-  }
-
-  return {
-    url: document.url,
-    name: typeof document.name === 'string' ? document.name : 'Secure document',
-    size: typeof document.size === 'string' ? document.size : '',
-    type: typeof document.type === 'string' ? document.type : '',
-  };
-}
-
-export default function ClinicalReviewTab({ client }: { client: ClinicalClientView }) {
+export default function ClinicalReviewTab({
+  client,
+  documentVerificationOnly = false,
+}: {
+  client: ClinicalClientView;
+  /** CSS clinical mode — verify uploads only; Intake already approved Form 01/02. */
+  documentVerificationOnly?: boolean;
+}) {
   const router = useRouter();
   const packet = client.intakePacket;
 
-  const [previewDoc, setPreviewDoc] = useState<{ key: string, name: string } | null>(null);
+  const [previewDoc, setPreviewDoc] = useState<{ key: ClinicalReviewItemKey, name: string } | null>(null);
   const [rejectDoc, setRejectDoc] = useState<{ key: string, name: string } | null>(null);
-  const [approvedDocs, setApprovedDocs] = useState<string[]>([]);
 
   // Staged rejection states
   const [isChangeMode, setIsChangeMode] = useState(false);
@@ -133,11 +120,6 @@ export default function ClinicalReviewTab({ client }: { client: ClinicalClientVi
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
-  const mounted = useSyncExternalStore(
-    subscribeToHydration,
-    () => true,
-    () => false
-  );
   useEffect(() => {
     const hasOpenDialog = Boolean(
       previewDoc ||
@@ -224,6 +206,7 @@ export default function ClinicalReviewTab({ client }: { client: ClinicalClientVi
 
   const rejectionDetails = parseRejectionDetails(packet.rejectionDetails);
   const formData = parsePacketFormData(packet.formData);
+  const approvedDocs = parseClinicalReviewApprovals(formData);
 
   const rejectedFieldsList = Object.keys(rejectionDetails)
     .filter(k => k.startsWith('formField_'))
@@ -256,60 +239,58 @@ export default function ClinicalReviewTab({ client }: { client: ClinicalClientVi
     const fields = stagedRejections.map(fieldId => ({ fieldId, reason }));
     runAction(
       () => rejectClinicalFormFieldsBulk(client.id, packet.id, fields),
-      'The packet was returned for parent corrections.',
+      'The parent packet is open for the requested corrections. Other approved clinical items stay approved.',
       () => {
         setPreviewDoc(null);
         setIsChangeMode(false);
         setStagedRejections([]);
         setShowSubmitConfirm(false);
         setBulkRejectReason('');
-        setApprovedDocs([]);
       }
     );
   };
 
-  const hasMedicaid = formData['hasMedicaid'] && formData['hasMedicaid'] !== 'No' && formData['hasMedicaid'] !== 'Not Sure';
-  const hasCustodyDoc = formData['custodyDocAttached'] === 'Yes — Attached' || formData['custodyDocAttached'] === 'Yes — Will Provide';
-  const hasIEP = formData['hasIEP'] === 'Yes — Attached' || formData['hasIEP'] === 'Yes — Will Provide';
-  const hasPriorABA = formData['hasPriorABA'] === 'Yes';
-
-  const dbKeyToFormKey: Record<string, string> = {
-    insuranceCardFrontUploaded: 'docInsuranceFront',
-    insuranceCardBackUploaded: 'docInsuranceBack',
-    medicaidCardFrontUploaded: 'docMedicaidFront',
-    medicaidCardBackUploaded: 'docMedicaidBack',
-    diagnosticEvalUploaded: 'docEval',
-    physicianRxUploaded: 'docReferral',
-    iepUploaded: 'docIEP',
-    custodyDocsUploaded: 'docCustody',
-    priorAbaRecordsUploaded: 'docPriorABA'
-  };
-
-  // Calculate required docs for approval
-  const visibleKeys = [
-    'intakeFormComplete',
-    'consentFormComplete',
-    'insuranceCardFrontUploaded',
-    'insuranceCardBackUploaded',
-    'diagnosticEvalUploaded',
-    'physicianRxUploaded'
-  ];
-  if (hasMedicaid) { visibleKeys.push('medicaidCardFrontUploaded', 'medicaidCardBackUploaded'); }
-  if (hasIEP) { visibleKeys.push('iepUploaded'); }
-  if (hasCustodyDoc) { visibleKeys.push('custodyDocsUploaded'); }
-  if (hasPriorABA) { visibleKeys.push('priorAbaRecordsUploaded'); }
+  const dbKeyToFormKey: Record<string, string> =
+    CLINICAL_VERIFICATION_DB_TO_FORM_KEY;
+  const requiredDocumentKeys = getRequiredClinicalVerificationKeys(formData);
+  const visibleKeys: ClinicalReviewItemKey[] = documentVerificationOnly
+    ? [...requiredDocumentKeys]
+    : [
+        'intakeFormComplete',
+        'consentFormComplete',
+        ...requiredDocumentKeys,
+      ];
 
   const clinicalReviewComplete = CLINICAL_COMPLETE_STATUSES.has(client.status);
-  const clinicalStatusMismatch =
-    (clinicalReviewComplete || client.status === 'DOCS_APPROVED_INTAKE') &&
-    packet.status !== 'APPROVED';
   const isClinicalReviewReady =
     client.status === 'DOCS_APPROVED_INTAKE' && packet.status === 'APPROVED';
   const correctionEntries = Object.entries(rejectionDetails);
-  const awaitingParentCorrections =
-    packet.status === 'PENDING_CLIENT_SUBMISSION' && correctionEntries.length > 0;
+  const clinicalCorrectionLoop = isClinicalFamilyCorrectionLoop({
+    clientStatus: client.status,
+    packetStatus: packet.status,
+    rejectionDetails,
+  });
+  const correctionSummary = summarizeClinicalCorrectionStates(formData, rejectionDetails);
+  const clinicalStatusMismatch =
+    (clinicalReviewComplete || client.status === 'DOCS_APPROVED_INTAKE') &&
+    packet.status !== 'APPROVED' &&
+    !clinicalCorrectionLoop;
+  const awaitingParentCorrections = shouldShowClinicalWaitingForFamilyBanner({
+    clientStatus: client.status,
+    packetStatus: packet.status,
+    rejectionDetails,
+    formData,
+  });
+  const needsCssReReview = shouldShowClinicalNeedsReviewBanner({
+    clientStatus: client.status,
+    packetStatus: packet.status,
+    rejectionDetails,
+    formData,
+  });
   const awaitingParentSubmission =
-    packet.status === 'PENDING_CLIENT_SUBMISSION' && correctionEntries.length === 0;
+    packet.status === 'PENDING_CLIENT_SUBMISSION' &&
+    correctionEntries.length === 0 &&
+    client.status !== 'DOCS_APPROVED_INTAKE';
   const awaitingIntakeReview =
     client.status === 'DOCS_SUBMITTED' &&
     packet.status === 'SUBMITTED';
@@ -330,7 +311,7 @@ export default function ClinicalReviewTab({ client }: { client: ClinicalClientVi
         )
     : false;
 
-  const renderDocumentRow = ({ title, dbKey, isForm = false }: { title: string, dbKey: string, isForm?: boolean }) => {
+  const renderDocumentRow = ({ title, dbKey, isForm = false }: { title: string, dbKey: ClinicalReviewItemKey, isForm?: boolean }) => {
     const isApprovedLocally = approvedDocs.includes(dbKey) || clinicalReviewComplete;
     const document = isForm
       ? null
@@ -361,15 +342,33 @@ export default function ClinicalReviewTab({ client }: { client: ClinicalClientVi
             <FileText className="w-4 h-4 mr-3 text-zinc-500" aria-hidden="true" /> {title}
           </span>
           {directRejection && (
-            <span className="ml-7 mt-1 pr-4 text-xs text-red-400">
-              Correction requested: {directRejection}
+            <span className={`ml-7 mt-1 pr-4 text-xs ${isAvailable ? 'text-amber-300' : 'text-red-400'}`}>
+              {isAvailable
+                ? `New upload received — review again. Previous note: ${directRejection}`
+                : `Correction requested: ${directRejection}`}
             </span>
           )}
         </button>
         
         <div className="flex items-center space-x-2">
           {(() => {
-            if (isRejected) {
+            const rowBadge = resolveClinicalReviewRowBadge({
+              isRejected,
+              isApproved: isApprovedLocally,
+              isAvailable,
+              clientStatus: client.status,
+              packetStatus: packet.status,
+            });
+
+            if (rowBadge === 'WAITING_FOR_FAMILY') {
+              return (
+                <span className="flex items-center rounded-full border border-sky-500/30 bg-sky-500/10 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-sky-300">
+                  <Clock className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" /> WAITING FOR FAMILY
+                </span>
+              );
+            }
+
+            if (rowBadge === 'CHANGES_NEEDED') {
               return (
                 <span className="flex items-center rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-red-400">
                   CHANGES NEEDED
@@ -377,7 +376,7 @@ export default function ClinicalReviewTab({ client }: { client: ClinicalClientVi
               );
             }
 
-            if (isApprovedLocally) {
+            if (rowBadge === 'APPROVED') {
               return (
                 <span className="flex items-center px-3 py-1 rounded-full text-xs font-bold tracking-wider bg-green-500/10 text-green-400">
                   <CheckCircle className="w-3.5 h-3.5 mr-1.5" aria-hidden="true" /> APPROVED
@@ -385,15 +384,15 @@ export default function ClinicalReviewTab({ client }: { client: ClinicalClientVi
               );
             }
 
-            if (!isAvailable) {
+            if (rowBadge === 'MISSING') {
               return (
                 <span className="flex items-center bg-zinc-500/10 text-zinc-400 px-3 py-1 rounded-full text-[10px] font-bold tracking-wider uppercase">
-                  MISSING
+                  {packet.status === 'PENDING_CLIENT_SUBMISSION' ? 'PENDING UPLOAD' : 'MISSING'}
                 </span>
               );
             }
 
-            if (!isClinicalReviewReady) {
+            if (rowBadge === 'AWAITING_INTAKE') {
               return (
                 <span className="flex items-center rounded-full border border-amber-500/20 bg-amber-500/10 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-amber-300">
                   AWAITING INTAKE
@@ -446,16 +445,45 @@ export default function ClinicalReviewTab({ client }: { client: ClinicalClientVi
           <div className="flex items-start gap-3">
             <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-400" aria-hidden="true" />
             <div>
-              <h3 className="font-heading font-semibold text-white">Awaiting parent corrections</h3>
+              <h3 className="font-heading font-semibold text-white">
+                Waiting for family
+              </h3>
               <p className="mt-1 text-sm leading-6 text-zinc-300">
-                This packet is back in the secure magic-link re-upload loop. Intake will review the
-                resubmission before Clinical can continue.
+                Clinical Support flagged the documents below. This case stays on the Clinical Support queue until the family re-uploads. Intake is not in this loop.
               </p>
               {correctionEntries.length > 0 && (
                 <ul className="mt-3 space-y-2" aria-label="Requested corrections">
+                  {correctionEntries.map(([key, reason]) => {
+                    const resubmitted = correctionSummary.needsCssReviewKeys.includes(key);
+                    return (
+                    <li key={key} className={`rounded-lg border px-3 py-2 text-xs ${resubmitted ? 'border-amber-500/20 bg-amber-500/10 text-amber-100' : 'border-white/10 bg-black/20 text-red-200'}`}>
+                      {resubmitted ? `New upload received — ${reason}` : reason}
+                    </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {needsCssReReview && (
+        <div className="rounded-2xl border border-amber-500/25 bg-[radial-gradient(circle_at_top_left,rgba(245,158,11,0.16),transparent_55%)] p-5" role="status">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" aria-hidden="true" />
+            <div>
+              <h3 className="font-heading font-semibold text-white">
+                Needs review
+              </h3>
+              <p className="mt-1 text-sm leading-6 text-zinc-300">
+                The family re-uploaded the flagged document. Preview the new file and re-approve it. The previous rejection note stays until you approve.
+              </p>
+              {correctionEntries.length > 0 && (
+                <ul className="mt-3 space-y-2" aria-label="Documents ready for re-review">
                   {correctionEntries.map(([key, reason]) => (
-                    <li key={key} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs text-red-200">
-                      {reason}
+                    <li key={key} className="rounded-lg border border-amber-500/20 bg-black/20 px-3 py-2 text-xs text-amber-100">
+                      New upload received — review again. Previous note: {reason}
                     </li>
                   ))}
                 </ul>
@@ -489,14 +517,18 @@ export default function ClinicalReviewTab({ client }: { client: ClinicalClientVi
         <CardHeader className="pb-4 border-b border-white/5 flex flex-row justify-between items-center">
           <div>
             <CardTitle className="text-lg text-white flex items-center gap-3">
-              Clinical Review
+              {documentVerificationOnly ? 'Clinical Document Verification' : 'Clinical Review'}
               {clinicalReviewComplete && (
                 <span className="text-[10px] font-bold border px-2.5 py-1 rounded-md tracking-wider uppercase bg-green-500/10 border-green-500/30 text-green-400">
                   APPROVED
                 </span>
               )}
             </CardTitle>
-            <p className="text-sm text-zinc-400 mt-1">Review the medical documentation to establish medical necessity.</p>
+            <p className="text-sm text-zinc-400 mt-1">
+              {documentVerificationOnly
+                ? 'Cross-check insurance cards and clinical supporting documents. Intake has already approved Form 01 and Form 02.'
+                : 'Review the medical documentation to establish medical necessity.'}
+            </p>
           </div>
 
           {!clinicalReviewComplete && (
@@ -529,40 +561,36 @@ export default function ClinicalReviewTab({ client }: { client: ClinicalClientVi
         <CardContent className="pt-6 space-y-8">
           {isClinicalReviewReady && !clinicalReviewComplete && (
             <p className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-xs text-zinc-400" role="status">
-              Reviewed {approvedDocs.length} of {visibleKeys.length} required items. Open each item and confirm it before final approval.
+              Reviewed {approvedDocs.length} of {visibleKeys.length} required{' '}
+              {documentVerificationOnly ? 'documents' : 'items'}. Open each{' '}
+              {documentVerificationOnly ? 'document' : 'item'} and confirm it before final approval.
             </p>
           )}
           
-          <div className="grid md:grid-cols-2 gap-8">
-            <div className="space-y-3">
-              <h4 className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest pl-1">Required Forms</h4>
-              <div className="space-y-1">
-                {renderDocumentRow({ title: 'Client Intake Form (Form 01)', dbKey: 'intakeFormComplete', isForm: true })}
-                {renderDocumentRow({ title: 'Consent & Authorization (Form 02)', dbKey: 'consentFormComplete', isForm: true })}
+          <div className={documentVerificationOnly ? 'space-y-3' : 'grid md:grid-cols-2 gap-8'}>
+            {!documentVerificationOnly && (
+              <div className="space-y-3">
+                <h4 className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest pl-1">Required Forms</h4>
+                <div className="space-y-1">
+                  {renderDocumentRow({ title: 'Client Intake Form (Form 01)', dbKey: 'intakeFormComplete', isForm: true })}
+                  {renderDocumentRow({ title: 'Consent & Authorization (Form 02)', dbKey: 'consentFormComplete', isForm: true })}
+                </div>
               </div>
-            </div>
+            )}
 
             <div className="space-y-3">
-              <h4 className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest pl-1">Document Uploads</h4>
+              <h4 className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest pl-1">
+                {documentVerificationOnly ? 'Clinical Verification Checklist' : 'Document Uploads'}
+              </h4>
               <div className="space-y-1">
-                {renderDocumentRow({ title: 'Primary Insurance Card (Front)', dbKey: 'insuranceCardFrontUploaded' })}
-                {renderDocumentRow({ title: 'Primary Insurance Card (Back)', dbKey: 'insuranceCardBackUploaded' })}
-                
-                {hasMedicaid && (
-                  <>
-                    {renderDocumentRow({ title: 'Medicaid Card (Front)', dbKey: 'medicaidCardFrontUploaded' })}
-                    {renderDocumentRow({ title: 'Medicaid Card (Back)', dbKey: 'medicaidCardBackUploaded' })}
-                  </>
-                )}
-                
-                {renderDocumentRow({ title: 'Diagnostic Evaluation Report', dbKey: 'diagnosticEvalUploaded' })}
-                {renderDocumentRow({ title: 'Physician Referral / Prescription', dbKey: 'physicianRxUploaded' })}
-                
-                {hasIEP && renderDocumentRow({ title: 'IEP / IFSP', dbKey: 'iepUploaded' })}
-                
-                {hasCustodyDoc && renderDocumentRow({ title: 'Custody/Guardianship Order', dbKey: 'custodyDocsUploaded' })}
-                
-                {hasPriorABA && renderDocumentRow({ title: 'Prior ABA Records', dbKey: 'priorAbaRecordsUploaded' })}
+                {requiredDocumentKeys.map((dbKey) => (
+                  <Fragment key={dbKey}>
+                    {renderDocumentRow({
+                      title: CLINICAL_VERIFICATION_DOC_LABELS[dbKey as ClinicalVerificationDocumentKey],
+                      dbKey,
+                    })}
+                  </Fragment>
+                ))}
               </div>
             </div>
           </div>
@@ -570,334 +598,302 @@ export default function ClinicalReviewTab({ client }: { client: ClinicalClientVi
         </CardContent>
       </Card>
 
-      {mounted && createPortal(
-        <>
-          {/* Preview Modal */}
-          {previewDoc && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-200">
-              <div
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="clinical-preview-title"
-                className="bg-zinc-900 border border-white/10 rounded-2xl w-full max-w-6xl shadow-2xl overflow-hidden flex flex-col h-[90vh]"
+      <DocumentReviewPreviewModal
+        isOpen={Boolean(previewDoc)}
+        onClose={handleCloseModal}
+        title={previewDoc?.name ?? ''}
+        titleId="clinical-preview-title"
+        breadcrumbLabel="Clinical Verification"
+        isApproved={previewDoc ? approvedDocs.includes(previewDoc.key) : false}
+        toolbarCenter={
+          previewDoc &&
+          (previewDoc.key === 'intakeFormComplete' || previewDoc.key === 'consentFormComplete') &&
+          isClinicalReviewReady &&
+          previewItemAvailable ? (
+            <div className="flex shrink-0 items-center gap-0.5 rounded-full border border-white/[0.07] bg-zinc-800/80 p-1">
+              <button
+                type="button"
+                onClick={() => setIsChangeMode(false)}
+                aria-pressed={!isChangeMode}
+                className={`flex cursor-pointer items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold transition-all duration-200 ${
+                  !isChangeMode
+                    ? 'bg-zinc-700 text-white shadow-sm'
+                    : 'text-zinc-500 hover:text-zinc-300'
+                }`}
               >
-            <div className="flex justify-between items-center p-4 border-b border-white/10 bg-zinc-950">
-              <h3 id="clinical-preview-title" className="font-semibold text-white flex items-center">
-                <Eye className="w-5 h-5 mr-2 text-brand-blue-500" aria-hidden="true" />
-                Preview: {previewDoc.name}
-              </h3>
-              
-              <div className="flex items-center space-x-4">
-                {(previewDoc.key === 'intakeFormComplete' || previewDoc.key === 'consentFormComplete') && isClinicalReviewReady && previewItemAvailable && (
-                  <div className="flex items-center bg-white/5 rounded-lg p-1 space-x-2">
-                    <button 
-                      type="button"
-                      onClick={() => setIsChangeMode(false)}
-                      aria-pressed={!isChangeMode}
-                      className={`cursor-pointer px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${!isChangeMode ? 'bg-zinc-700 text-white shadow' : 'text-zinc-400 hover:text-white'}`}
-                    >
-                      View Mode
-                    </button>
-                    <button 
-                      type="button"
-                      onClick={() => setIsChangeMode(true)}
-                      aria-pressed={isChangeMode}
-                      className={`cursor-pointer px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${isChangeMode ? 'bg-orange-500 text-black shadow' : 'text-zinc-400 hover:text-white'}`}
-                    >
-                      Request Changes Mode
-                    </button>
-                  </div>
-                )}
-                
-                {isChangeMode && stagedRejections.length > 0 && (
-                  <Button type="button" variant="danger" disabled={isActionPending} onClick={() => setShowSubmitConfirm(true)}>
-                    Send {stagedRejections.length} Request(s)
-                  </Button>
-                )}
-                
-                {!isChangeMode && isClinicalReviewReady && previewItemAvailable && !approvedDocs.includes(previewDoc.key) && (
-                  <div className="flex space-x-2">
-                    {previewDoc.key !== 'intakeFormComplete' && previewDoc.key !== 'consentFormComplete' && (
-                      <Button type="button" variant="danger" disabled={isActionPending} onClick={() => {
+                <Eye className="h-3 w-3" />
+                View Mode
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsChangeMode(true)}
+                aria-pressed={isChangeMode}
+                className={`flex cursor-pointer items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold transition-all duration-200 ${
+                  isChangeMode
+                    ? 'bg-zinc-700 text-white shadow-sm'
+                    : 'text-zinc-500 hover:text-zinc-300'
+                }`}
+              >
+                <Pencil className="h-3 w-3" />
+                Request Changes
+              </button>
+            </div>
+          ) : undefined
+        }
+        toolbarActions={
+          previewDoc ? (
+            <>
+              {isChangeMode && stagedRejections.length > 0 && (
+                <DocumentReviewSendCorrectionsButton
+                  count={stagedRejections.length}
+                  disabled={isActionPending}
+                  onClick={() => setShowSubmitConfirm(true)}
+                />
+              )}
+
+              {!isChangeMode && isClinicalReviewReady && previewItemAvailable && !approvedDocs.includes(previewDoc.key) && (
+                <>
+                  {previewDoc.key !== 'intakeFormComplete' && previewDoc.key !== 'consentFormComplete' && (
+                    <DocumentReviewRejectButton
+                      disabled={isActionPending}
+                      onClick={() => {
                         setActionError(null);
                         setRejectDoc(previewDoc);
-                      }}>
-                        Request Correction
-                      </Button>
-                    )}
-                    <div className="relative group rounded-md">
-                      <div className="absolute -inset-0.5 bg-green-500 rounded-md blur opacity-50 group-hover:opacity-100 transition duration-200"></div>
-                      <Button type="button" variant="primary" className="relative cursor-pointer bg-zinc-900 hover:bg-zinc-800 text-white font-bold tracking-wide border border-green-500/50" onClick={() => {
-                        setApprovedDocs(prev => prev.includes(previewDoc.key) ? prev : [...prev, previewDoc.key]);
-                        setPreviewDoc(null);
-                      }}>
-                        Approve
-                      </Button>
-                    </div>
-                  </div>
-                )}
-
-                <div className="w-px h-6 bg-white/10 mx-2"></div>
-                <button
-                  type="button"
-                  autoFocus
-                  aria-label="Close document preview"
-                  onClick={handleCloseModal}
-                  className="cursor-pointer text-zinc-400 hover:text-white transition-colors p-1"
-                >
-                  <X className="w-6 h-6" aria-hidden="true" />
-                </button>
-              </div>
-            </div>
-            
-            {isChangeMode && (
-              <div className="bg-orange-500/10 border-b border-orange-500/20 p-3 text-center">
-                <p className="text-orange-400 text-sm font-medium flex items-center justify-center">
-                  <AlertTriangle className="w-4 h-4 mr-2" aria-hidden="true" />
-                  Select fields that need correction. A specific reason is required before the packet returns to Intake.
-                </p>
-              </div>
-            )}
-
-            <div className="flex-1 p-8 flex items-start justify-center bg-zinc-900/50 overflow-y-auto">
-              {previewDoc.key === 'intakeFormComplete' ? (
-                <div className="w-full max-w-4xl">
-                  <Form01ClientIntake 
-                    formData={formData} 
-                    client={client} 
-                    readOnly={true} 
-                    adminReviewMode={isChangeMode} 
-                    rejectedFields={rejectedFieldsList} 
-                    stagedRejections={stagedRejections}
-                    onRejectField={handleRejectFormField} 
+                      }}
+                    />
+                  )}
+                  <DocumentReviewApproveButton
+                    disabled={isActionPending}
+                    onClick={() => {
+                      if (!previewDoc) return;
+                      runAction(
+                        () =>
+                          approveClinicalReviewItem(
+                            client.id,
+                            packet.id,
+                            previewDoc.key,
+                          ),
+                        `${previewDoc.name} approved.`,
+                        () => setPreviewDoc(null),
+                      );
+                    }}
                   />
-                </div>
-              ) : previewDoc.key === 'consentFormComplete' ? (
-                <div className="w-full max-w-4xl">
-                  <Form02Consent 
-                    formData={formData} 
-                    client={client} 
-                    readOnly={true} 
-                    adminReviewMode={isChangeMode} 
-                    rejectedFields={rejectedFieldsList} 
-                    stagedRejections={stagedRejections}
-                    onRejectField={handleRejectFormField} 
-                  />
-                </div>
-              ) : (
-                (() => {
-                  const formKey = dbKeyToFormKey[previewDoc.key] || previewDoc.key;
-                  const docData = getSecureDocument(formData[formKey], client.id);
-                  
-                  if (docData) {
-                    return (
-                      <div className="w-full bg-white rounded-lg shadow-2xl overflow-hidden relative flex flex-col mt-4">
-                        <div className="bg-zinc-100 border-b border-zinc-200 px-4 py-3 flex items-center justify-between text-zinc-600">
-                          <div className="flex items-center text-sm font-medium">
-                            <FileCheck className="w-4 h-4 mr-2 text-green-600" aria-hidden="true" />
-                            {docData.name}
-                          </div>
-                          <div className="text-xs font-mono">{docData.size}</div>
-                        </div>
-                        <div className="bg-zinc-200 p-4 flex items-center justify-center min-h-[50vh]">
-                          {docData.type === 'application/pdf' ? (
-                            <iframe
-                              src={docData.url}
-                              title={`${previewDoc.name} PDF preview`}
-                              className="w-full h-[70vh] rounded shadow-inner"
-                            />
-                          ) : (
-                            // Authenticated, short-lived document route; intrinsic dimensions are unknown.
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img src={docData.url} alt={docData.name} className="w-full h-auto object-contain shadow-2xl rounded" />
-                          )}
-                        </div>
-                      </div>
-                    );
-                  }
-
-                  return (
-                    <div className="w-full max-w-4xl h-[70vh] bg-white rounded-lg shadow-2xl overflow-hidden relative flex flex-col mt-10">
-                      <div className="bg-zinc-100 border-b border-zinc-200 px-4 py-3 flex items-center justify-between text-zinc-600">
-                        <div className="flex items-center text-sm font-medium">
-                          <AlertTriangle className="w-4 h-4 mr-2 text-orange-600" aria-hidden="true" />
-                          Secure document unavailable
-                        </div>
-                      </div>
-                      <div className="flex-1 bg-zinc-200/50 p-8 flex items-center justify-center relative">
-                        <div className="max-w-md text-center text-zinc-600">
-                          This upload is missing, was returned for correction, or does not use the authorized document route. It cannot be reviewed or approved.
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })()
+                </>
               )}
+
+              {!isChangeMode && approvedDocs.includes(previewDoc.key) && (
+                <DocumentReviewApprovedBadge />
+              )}
+            </>
+          ) : undefined
+        }
+        changeModeBanner={
+          isChangeMode ? (
+            <div className="flex flex-shrink-0 items-center justify-center gap-2 border-b border-orange-500/20 bg-orange-500/[0.08] px-5 py-2.5">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-orange-400" aria-hidden="true" />
+              <p className="text-xs font-medium text-orange-300">
+                Click any field to flag it for correction. A parent-facing reason is required before sending.
+              </p>
             </div>
+          ) : undefined
+        }
+      >
+        {previewDoc?.key === 'intakeFormComplete' ? (
+          <div className="mx-auto w-full max-w-5xl px-4 py-6">
+            <Form01ClientIntake
+              formData={formData}
+              client={client}
+              readOnly={true}
+              adminReviewMode={isChangeMode}
+              rejectedFields={rejectedFieldsList}
+              stagedRejections={stagedRejections}
+              onRejectField={handleRejectFormField}
+            />
           </div>
-        </div>
-      )}
+        ) : previewDoc?.key === 'consentFormComplete' ? (
+          <div className="mx-auto w-full max-w-5xl px-4 py-6">
+            <Form02Consent
+              formData={formData}
+              client={client}
+              readOnly={true}
+              adminReviewMode={isChangeMode}
+              rejectedFields={rejectedFieldsList}
+              stagedRejections={stagedRejections}
+              onRejectField={handleRejectFormField}
+            />
+          </div>
+        ) : previewDoc ? (
+          <SecureDocumentPreviewContent
+            docData={getSecureDocument(
+              formData[dbKeyToFormKey[previewDoc.key] || previewDoc.key],
+              client.id
+            )}
+            previewTitle={previewDoc.name}
+          />
+        ) : null}
+      </DocumentReviewPreviewModal>
 
       {/* Approve Main Clinical Review Modal */}
-      {showApproveConfirm && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="approve-clinical-title"
-            className="bg-zinc-900 border border-white/10 rounded-xl w-full max-w-md shadow-2xl overflow-hidden p-6 space-y-4"
-          >
-            <h3 id="approve-clinical-title" className="text-lg font-semibold text-white flex items-center">
-              <CheckCircle className="w-5 h-5 text-green-500 mr-2" aria-hidden="true" /> Approve Clinical Review
-            </h3>
-            <p className="text-sm text-zinc-400">By approving, you confirm that the diagnostic report and referrals establish medical necessity for ABA therapy.</p>
-            {actionError && <p role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">{actionError}</p>}
-            <div className="flex justify-end space-x-3 pt-4">
-              <Button type="button" autoFocus variant="secondary" disabled={isActionPending} onClick={() => setShowApproveConfirm(false)}>Cancel</Button>
-              <div className="relative group rounded-md">
-                <div className="absolute -inset-0.5 bg-green-500 rounded-md blur opacity-50 group-hover:opacity-100 transition duration-200"></div>
-                <Button
-                  type="button"
-                  disabled={isActionPending}
-                  isLoading={isActionPending}
-                  variant="primary"
-                  className="relative cursor-pointer bg-zinc-900 hover:bg-zinc-800 text-white font-bold tracking-wide border border-green-500/50"
-                  onClick={() => runAction(
-                    () => approveClinicalReview(client.id),
-                    'Clinical review approved. Billing can begin VOB.',
-                    () => setShowApproveConfirm(false)
-                  )}
-                >
-                  Confirm Approval
-                </Button>
-              </div>
+      <DocumentReviewStackedDialog
+        isOpen={showApproveConfirm}
+        onClose={() => setShowApproveConfirm(false)}
+        titleId="approve-clinical-title"
+        dismissOnBackdrop={!isActionPending}
+      >
+        <div className="space-y-4 p-6 pr-12">
+          <h3 id="approve-clinical-title" className="font-heading flex items-center text-lg font-semibold text-white">
+            <CheckCircle className="mr-2 h-5 w-5 text-green-500" aria-hidden="true" /> Approve Clinical Review
+          </h3>
+          <p className="text-sm leading-relaxed text-zinc-400">By approving, you confirm that the diagnostic report and referrals establish medical necessity for ABA therapy.</p>
+          {actionError && <p role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">{actionError}</p>}
+          <div className="flex justify-end space-x-3 pt-4">
+            <Button type="button" autoFocus variant="secondary" disabled={isActionPending} onClick={() => setShowApproveConfirm(false)}>Cancel</Button>
+            <div className="group relative rounded-md">
+              <div className="absolute -inset-0.5 rounded-md bg-green-500 opacity-50 blur transition duration-200 group-hover:opacity-100" />
+              <Button
+                type="button"
+                disabled={isActionPending}
+                isLoading={isActionPending}
+                variant="primary"
+                className="relative cursor-pointer border border-green-500/50 bg-zinc-900 font-bold tracking-wide text-white hover:bg-zinc-800"
+                onClick={() => runAction(
+                  () => approveClinicalReview(client.id, {
+                    verificationDocsOnly: documentVerificationOnly,
+                  }),
+                  'Clinical review approved. Billing can begin VOB.',
+                  () => setShowApproveConfirm(false)
+                )}
+              >
+                Confirm Approval
+              </Button>
             </div>
           </div>
         </div>
-      )}
+      </DocumentReviewStackedDialog>
 
-      {/* Reject Modal */}
-      {rejectDoc && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="clinical-correction-title"
-            className="bg-zinc-900 border border-white/10 rounded-xl w-full max-w-md shadow-2xl overflow-hidden"
-          >
-            <div className="p-6 space-y-4">
-              <h3 id="clinical-correction-title" className="text-lg font-semibold text-white flex items-center"><AlertTriangle className="w-5 h-5 mr-2 text-red-500" aria-hidden="true" /> Request Correction: {rejectDoc.name}</h3>
-              <p className="text-sm text-zinc-400">This returns the packet to the Intake queue so the coordinator can help the parent provide the correct clinical documents.</p>
-              <label htmlFor="clinical-document-reason" className="block text-xs font-semibold uppercase tracking-wider text-zinc-300">
-                Correction reason
-              </label>
-              <textarea 
-                id="clinical-document-reason"
-                autoFocus
-                className="w-full text-sm border border-white/10 p-3 rounded-lg bg-zinc-950 text-white focus:border-red-500 outline-none transition-colors h-24 resize-none"
-                placeholder="e.g. The evaluation report is missing a formal ASD diagnosis."
-                value={rejectReason}
-                onChange={(e) => setRejectReason(e.target.value)}
-                maxLength={1000}
-                required
-                aria-describedby="clinical-document-reason-help"
-              />
-              <p id="clinical-document-reason-help" className="text-xs text-zinc-500">
-                The parent and Intake team will see this reason. {rejectReason.length}/1000
-              </p>
-              {actionError && <p role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">{actionError}</p>}
-              <div className="flex justify-end space-x-3 pt-2">
-                <Button type="button" variant="secondary" disabled={isActionPending} onClick={() => { setRejectDoc(null); setRejectReason(''); }}>Cancel</Button>
-                <Button
-                  type="button"
-                  variant="danger"
-                  isLoading={isActionPending}
-                  disabled={rejectReason.trim().length < 5 || isActionPending}
-                  className={rejectReason.trim().length >= 5 ? 'cursor-pointer' : 'cursor-not-allowed'}
-                  onClick={() => runAction(
-                    () => rejectClinicalReview(client.id, rejectDoc.key, rejectReason.trim()),
-                    'The document was returned for parent correction.',
-                    () => {
-                      setRejectDoc(null);
-                      setRejectReason('');
-                      setPreviewDoc(null);
-                      setApprovedDocs([]);
-                    }
-                  )}
-                >
-                  Return to Intake
-                </Button>
-              </div>
+      {/* Reject Modal — portaled above preview at z-120 */}
+      <DocumentReviewStackedDialog
+        isOpen={Boolean(rejectDoc)}
+        onClose={() => {
+          if (isActionPending) return;
+          setRejectDoc(null);
+          setRejectReason('');
+        }}
+        titleId="clinical-correction-title"
+        dismissOnBackdrop={!isActionPending}
+      >
+        {rejectDoc && (
+          <div className="space-y-4 p-6 pr-12">
+            <h3 id="clinical-correction-title" className="font-heading flex items-center text-lg font-semibold text-white">
+              <AlertTriangle className="mr-2 h-5 w-5 text-red-500" aria-hidden="true" /> Request Correction: {rejectDoc.name}
+            </h3>
+            <p className="text-sm leading-relaxed text-zinc-400">This asks the family to re-upload this document only. Other approved clinical items stay approved, and the case remains on the Clinical Support queue until the new file is reviewed.</p>
+            <label htmlFor="clinical-document-reason" className="block text-xs font-semibold uppercase tracking-wider text-zinc-300">
+              Correction reason
+            </label>
+            <textarea
+              id="clinical-document-reason"
+              autoFocus
+              className="h-24 w-full resize-none rounded-lg border border-white/10 bg-zinc-950 p-3 text-sm text-white outline-none transition-colors focus:border-red-500"
+              placeholder="e.g. The evaluation report is missing a formal ASD diagnosis."
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              maxLength={1000}
+              required
+              aria-describedby="clinical-document-reason-help"
+            />
+            <p id="clinical-document-reason-help" className="text-xs text-zinc-500">
+              The family will see this reason. Intake is not notified. {rejectReason.length}/1000
+            </p>
+            {actionError && <p role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">{actionError}</p>}
+            <div className="flex justify-end space-x-3 pt-2">
+              <Button type="button" variant="secondary" disabled={isActionPending} onClick={() => { setRejectDoc(null); setRejectReason(''); }}>Cancel</Button>
+              <Button
+                type="button"
+                variant="danger"
+                isLoading={isActionPending}
+                disabled={rejectReason.trim().length < 5 || isActionPending}
+                className={rejectReason.trim().length >= 5 ? 'cursor-pointer' : 'cursor-not-allowed'}
+                onClick={() => runAction(
+                  () => rejectClinicalReview(client.id, rejectDoc.key, rejectReason.trim()),
+                  'Correction requested. The family was asked to re-upload this document. This case stays on Clinical Support.',
+                  () => {
+                    setRejectDoc(null);
+                    setRejectReason('');
+                    setPreviewDoc(null);
+                  }
+                )}
+              >
+                Request Correction
+              </Button>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </DocumentReviewStackedDialog>
 
       {/* Discard Confirm */}
-      {showDiscardConfirm && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div role="dialog" aria-modal="true" aria-labelledby="discard-clinical-title" className="bg-zinc-900 border border-white/10 rounded-xl w-full max-w-md shadow-2xl overflow-hidden">
-            <div className="p-6 space-y-4">
-              <h3 id="discard-clinical-title" className="text-lg font-semibold text-white">Discard Changes?</h3>
-              <p className="text-sm text-zinc-400">You have {stagedRejections.length} field(s) selected for correction. Are you sure you want to discard these selections and close the form?</p>
-              <div className="flex justify-end space-x-3 pt-4">
-                <Button type="button" variant="secondary" onClick={() => setShowDiscardConfirm(false)}>Keep Editing</Button>
-                <Button type="button" variant="danger" onClick={() => {
-                  setShowDiscardConfirm(false);
-                  setStagedRejections([]);
-                  setIsChangeMode(false);
-                  setPreviewDoc(null);
-                }}>Discard & Close</Button>
-              </div>
-            </div>
+      <DocumentReviewStackedDialog
+        isOpen={showDiscardConfirm}
+        onClose={() => setShowDiscardConfirm(false)}
+        titleId="discard-clinical-title"
+      >
+        <div className="space-y-4 p-6 pr-12">
+          <h3 id="discard-clinical-title" className="font-heading text-lg font-semibold text-white">Discard Changes?</h3>
+          <p className="text-sm leading-relaxed text-zinc-400">You have {stagedRejections.length} field(s) selected for correction. Are you sure you want to discard these selections and close the form?</p>
+          <div className="flex justify-end space-x-3 pt-4">
+            <Button type="button" variant="secondary" onClick={() => setShowDiscardConfirm(false)}>Keep Editing</Button>
+            <Button type="button" variant="danger" className="cursor-pointer" onClick={() => {
+              setShowDiscardConfirm(false);
+              setStagedRejections([]);
+              setIsChangeMode(false);
+              setPreviewDoc(null);
+            }}>Discard & Close</Button>
           </div>
         </div>
-      )}
+      </DocumentReviewStackedDialog>
 
       {/* Submit Bulk Confirm */}
-      {showSubmitConfirm && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div role="dialog" aria-modal="true" aria-labelledby="return-intake-title" className="bg-zinc-900 border border-white/10 rounded-xl w-full max-w-md shadow-2xl overflow-hidden">
-            <div className="p-6 space-y-4">
-              <h3 id="return-intake-title" className="text-lg font-semibold text-white">Return to Intake?</h3>
-              <p className="text-sm text-zinc-400">You are about to wipe {stagedRejections.length} field(s) and bounce this form back to the Intake Coordinator.</p>
-              <label htmlFor="clinical-field-reason" className="block text-xs font-semibold uppercase tracking-wider text-zinc-300">
-                What must be corrected?
-              </label>
-              <textarea
-                id="clinical-field-reason"
-                autoFocus
-                value={bulkRejectReason}
-                onChange={(event) => setBulkRejectReason(event.target.value)}
-                maxLength={1000}
-                required
-                placeholder="Describe the correction needed so the parent knows exactly what to update."
-                className="h-28 w-full resize-none rounded-lg border border-white/10 bg-zinc-950 p-3 text-sm text-white outline-none transition-colors focus:border-red-500"
-              />
-              <p className="text-xs text-zinc-500">
-                Applied to all {stagedRejections.length} selected fields. {bulkRejectReason.length}/1000
-              </p>
-              {actionError && <p role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">{actionError}</p>}
-              <div className="flex justify-end space-x-3 pt-4">
-                <Button type="button" variant="secondary" disabled={isActionPending} onClick={() => setShowSubmitConfirm(false)}>Cancel</Button>
-                <Button
-                  type="button"
-                  variant="danger"
-                  isLoading={isActionPending}
-                  disabled={bulkRejectReason.trim().length < 5 || isActionPending}
-                  className={bulkRejectReason.trim().length >= 5 ? 'cursor-pointer' : 'cursor-not-allowed'}
-                  onClick={handleBulkRejectSubmit}
-                >
-                  Confirm & Send
-                </Button>
-              </div>
-            </div>
+      <DocumentReviewStackedDialog
+        isOpen={showSubmitConfirm}
+        onClose={() => setShowSubmitConfirm(false)}
+        titleId="return-intake-title"
+        dismissOnBackdrop={!isActionPending}
+      >
+        <div className="space-y-4 p-6 pr-12">
+          <h3 id="return-intake-title" className="font-heading text-lg font-semibold text-white">Return to Intake?</h3>
+          <p className="text-sm leading-relaxed text-zinc-400">You are about to wipe {stagedRejections.length} field(s) and bounce this form back to the Intake Coordinator.</p>
+          <label htmlFor="clinical-field-reason" className="block text-xs font-semibold uppercase tracking-wider text-zinc-300">
+            What must be corrected?
+          </label>
+          <textarea
+            id="clinical-field-reason"
+            autoFocus
+            value={bulkRejectReason}
+            onChange={(event) => setBulkRejectReason(event.target.value)}
+            maxLength={1000}
+            required
+            placeholder="Describe the correction needed so the parent knows exactly what to update."
+            className="h-28 w-full resize-none rounded-lg border border-white/10 bg-zinc-950 p-3 text-sm text-white outline-none transition-colors focus:border-red-500"
+          />
+          <p className="text-xs text-zinc-500">
+            Applied to all {stagedRejections.length} selected fields. {bulkRejectReason.length}/1000
+          </p>
+          {actionError && <p role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">{actionError}</p>}
+          <div className="flex justify-end space-x-3 pt-4">
+            <Button type="button" variant="secondary" disabled={isActionPending} onClick={() => setShowSubmitConfirm(false)}>Cancel</Button>
+            <Button
+              type="button"
+              variant="danger"
+              isLoading={isActionPending}
+              disabled={bulkRejectReason.trim().length < 5 || isActionPending}
+              className={bulkRejectReason.trim().length >= 5 ? 'cursor-pointer' : 'cursor-not-allowed'}
+              onClick={handleBulkRejectSubmit}
+            >
+              Confirm & Send
+            </Button>
           </div>
         </div>
-      )}
-      </>,
-      document.body
-    )}
+      </DocumentReviewStackedDialog>
 
     </div>
   );

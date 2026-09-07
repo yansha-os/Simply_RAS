@@ -13,6 +13,9 @@ import {
   validateParentTreatmentPlanSign,
 } from '@/lib/parentTreatmentPlanSign';
 import { notifyUsers } from '@/app/actions/notifications';
+import { preserveClinicalReviewApprovals } from '@/lib/clinicalReviewApprovals';
+import { parsePacketFormData } from '@/lib/safeParseJson';
+import { requireClientAccess } from '@/lib/auth-guard';
 
 type ClientSchedule = Record<string, { start: string; end: string } | null>;
 
@@ -47,12 +50,70 @@ export async function saveIntakeProgress(
     const gate = await requireStaffOrParent({ packetId });
     if (!gate.ok) return { success: false, error: gate.error };
 
-    await prisma.intakePacket.update({
+    const existing = await prisma.intakePacket.findUnique({
       where: { id: packetId },
-      data: {
-        formData: JSON.stringify(formData)
-      }
+      select: {
+        clientId: true,
+        status: true,
+        updatedAt: true,
+        formData: true,
+        rejectionDetails: true,
+      },
     });
+    if (!existing) return { success: false, error: 'Intake packet not found.' };
+    if (gate.via === 'parent' && gate.clientId !== existing.clientId) {
+      return { success: false, error: 'Intake packet not found.' };
+    }
+    if (gate.via === 'staff') {
+      const access = await requireClientAccess(existing.clientId);
+      if (!access.ok) return { success: false, error: access.error };
+    }
+
+    const rejectionDetails = existing.rejectionDetails;
+    const hasCorrectionRequest =
+      rejectionDetails !== null &&
+      (typeof rejectionDetails === 'string'
+        ? rejectionDetails.trim() !== '' && rejectionDetails.trim() !== '{}'
+        : typeof rejectionDetails === 'object' &&
+          !Array.isArray(rejectionDetails) &&
+          Object.keys(rejectionDetails).length > 0);
+    if (
+      gate.via === 'parent' &&
+      existing.status !== 'PENDING_CLIENT_SUBMISSION' &&
+      !(existing.status === 'APPROVED' && hasCorrectionRequest)
+    ) {
+      return {
+        success: false,
+        error: 'This packet is currently locked while our team reviews it.',
+      };
+    }
+
+    const incoming =
+      formData && typeof formData === 'object' && !Array.isArray(formData)
+        ? (formData as Record<string, unknown>)
+        : {};
+    const persisted = preserveClinicalReviewApprovals(
+      incoming,
+      parsePacketFormData(existing.formData),
+    );
+
+    const saved = await prisma.intakePacket.updateMany({
+      where: {
+        id: packetId,
+        clientId: existing.clientId,
+        status: existing.status,
+        updatedAt: existing.updatedAt,
+      },
+      data: {
+        formData: JSON.stringify(persisted),
+      },
+    });
+    if (saved.count !== 1) {
+      return {
+        success: false,
+        error: 'This intake packet changed in another session. Reload before continuing.',
+      };
+    }
     return { success: true };
   } catch (e) {
     console.error("Failed to save intake progress:", e instanceof Error ? e.message : e);
@@ -99,14 +160,49 @@ export async function submitForm01(
     const gate = await requireStaffOrParent({ packetId });
     if (!gate.ok) return { success: false, error: gate.error };
 
-    const packet = await prisma.intakePacket.update({
+    const existing = await prisma.intakePacket.findUnique({
       where: { id: packetId },
+      select: {
+        clientId: true,
+        status: true,
+        updatedAt: true,
+        formData: true,
+        consentFormComplete: true,
+      },
+    });
+    if (!existing) return { success: false, error: 'Intake packet not found.' };
+    if (gate.via === 'parent') {
+      if (gate.clientId !== existing.clientId || existing.status !== 'PENDING_CLIENT_SUBMISSION') {
+        return { success: false, error: 'This intake packet is not editable.' };
+      }
+    } else {
+      const access = await requireClientAccess(existing.clientId);
+      if (!access.ok) return { success: false, error: access.error };
+    }
+    const persisted = preserveClinicalReviewApprovals(
+      formData as Record<string, unknown>,
+      parsePacketFormData(existing.formData),
+    );
+    const submitted = await prisma.intakePacket.updateMany({
+      where: {
+        id: packetId,
+        clientId: existing.clientId,
+        status: existing.status,
+        updatedAt: existing.updatedAt,
+      },
       data: {
-        formData: JSON.stringify(formData),
+        formData: JSON.stringify(persisted),
         intakeFormComplete: true
       }
     });
-    await notifyIntakeFormsComplete(packet);
+    if (submitted.count !== 1) {
+      return { success: false, error: 'This intake packet changed in another session. Reload and try again.' };
+    }
+    await notifyIntakeFormsComplete({
+      clientId: existing.clientId,
+      intakeFormComplete: true,
+      consentFormComplete: existing.consentFormComplete,
+    });
     return { success: true };
   } catch (e) {
     console.error("Failed to submit intake form:", e instanceof Error ? e.message : e);
@@ -122,14 +218,49 @@ export async function submitForm02(
     const gate = await requireStaffOrParent({ packetId });
     if (!gate.ok) return { success: false, error: gate.error };
 
-    const packet = await prisma.intakePacket.update({
+    const existing = await prisma.intakePacket.findUnique({
       where: { id: packetId },
+      select: {
+        clientId: true,
+        status: true,
+        updatedAt: true,
+        formData: true,
+        intakeFormComplete: true,
+      },
+    });
+    if (!existing) return { success: false, error: 'Intake packet not found.' };
+    if (gate.via === 'parent') {
+      if (gate.clientId !== existing.clientId || existing.status !== 'PENDING_CLIENT_SUBMISSION') {
+        return { success: false, error: 'This intake packet is not editable.' };
+      }
+    } else {
+      const access = await requireClientAccess(existing.clientId);
+      if (!access.ok) return { success: false, error: access.error };
+    }
+    const persisted = preserveClinicalReviewApprovals(
+      formData as Record<string, unknown>,
+      parsePacketFormData(existing.formData),
+    );
+    const submitted = await prisma.intakePacket.updateMany({
+      where: {
+        id: packetId,
+        clientId: existing.clientId,
+        status: existing.status,
+        updatedAt: existing.updatedAt,
+      },
       data: {
-        formData: JSON.stringify(formData),
+        formData: JSON.stringify(persisted),
         consentFormComplete: true
       }
     });
-    await notifyIntakeFormsComplete(packet);
+    if (submitted.count !== 1) {
+      return { success: false, error: 'This intake packet changed in another session. Reload and try again.' };
+    }
+    await notifyIntakeFormsComplete({
+      clientId: existing.clientId,
+      intakeFormComplete: existing.intakeFormComplete,
+      consentFormComplete: true,
+    });
     return { success: true };
   } catch (e) {
     console.error("Failed to submit consent form:", e instanceof Error ? e.message : e);
@@ -141,19 +272,40 @@ export async function requestClientChanges(token: string, notes: string) {
   const gate = await requireStaffOrParent({ token });
   if (!gate.ok) return { error: gate.error };
 
+  const trimmedNotes = notes.trim();
+  if (!trimmedNotes || trimmedNotes.length > 2_000) {
+    return { error: 'Change-request notes must be between 1 and 2,000 characters.' };
+  }
+
   const packet = await prisma.intakePacket.findUnique({
-    where: { magicLinkToken: token }
+    where: { magicLinkToken: token },
+    select: { id: true, clientId: true, updatedAt: true },
   });
 
   if (!packet) return { error: "Packet not found" };
+  if (gate.via === 'parent' && gate.packetId !== packet.id) {
+    return { error: 'Packet not found' };
+  }
+  if (gate.via === 'staff') {
+    const access = await requireClientAccess(packet.clientId);
+    if (!access.ok) return { error: access.error };
+  }
 
-  await prisma.intakePacket.update({
-    where: { magicLinkToken: token },
+  const requested = await prisma.intakePacket.updateMany({
+    where: {
+      id: packet.id,
+      clientId: packet.clientId,
+      magicLinkToken: token,
+      updatedAt: packet.updatedAt,
+    },
     data: {
       clientChangeRequested: true,
-      clientChangeNotes: notes
+      clientChangeNotes: trimmedNotes,
     }
   });
+  if (requested.count !== 1) {
+    return { error: 'This intake packet changed in another session. Reload and try again.' };
+  }
 
   // INTAKE_CHANGES_REQUESTED → intake staff: parent asked to edit submitted info;
   // the flag only shows inside IntakeDocumentsTab, so surface it on the bell too.
@@ -166,7 +318,7 @@ export async function requestClientChanges(token: string, notes: string) {
       await notifyUsers({
         userIds: await resolveIntakeRecipients(client.caseCoordinatorId),
         title: `Parent requested changes · ${client.firstName} ${client.lastName}`,
-        message: `${client.firstName} ${client.lastName}'s parent asked to update their intake info: ${notes.slice(0, 140)}`,
+        message: `${client.firstName} ${client.lastName}'s parent asked to update their intake info: ${trimmedNotes.slice(0, 140)}`,
         type: 'INTAKE_CHANGES_REQUESTED',
         linkUrl: `/client/${packet.clientId}`,
         dedupeHours: 0,
@@ -203,6 +355,7 @@ export async function signTreatmentPlan(
       select: {
         id: true,
         status: true,
+        updatedAt: true,
         treatmentPlan: true,
         guardianName: true,
         // 1:1 — never treat as array
@@ -241,8 +394,12 @@ export async function signTreatmentPlan(
     const bumpToScheduled =
       client.status === 'PA_APPROVED' && treatmentPlan.status === 'COMPLETED';
 
-    await prisma.client.update({
-      where: { id: clientId },
+    const signed = await prisma.client.updateMany({
+      where: {
+        id: clientId,
+        updatedAt: client.updatedAt,
+        status: client.status,
+      },
       data: bumpToScheduled
         ? {
             treatmentPlan: treatmentPlan as Prisma.InputJsonValue,
@@ -250,6 +407,13 @@ export async function signTreatmentPlan(
           }
         : { treatmentPlan: treatmentPlan as Prisma.InputJsonValue },
     });
+    if (signed.count !== 1) {
+      return {
+        success: false,
+        error: 'The treatment plan changed while you were reviewing it. Reload and review the latest version before signing.',
+        code: 'PLAN_STALE',
+      };
+    }
 
     // Ids only — no PHI (signature / guardian names excluded).
     void writeAuditLog({
@@ -292,6 +456,13 @@ export async function saveClientSchedule(
   try {
     const gate = await requireStaffOrParent({ clientId });
     if (!gate.ok) return { success: false, error: gate.error };
+    if (gate.via === 'parent' && gate.clientId !== clientId) {
+      return { success: false, error: 'Could not verify portal access.' };
+    }
+    if (gate.via === 'staff') {
+      const access = await requireClientAccess(clientId);
+      if (!access.ok) return { success: false, error: access.error };
+    }
 
     const client = await prisma.client.findUnique({ 
       where: { id: clientId },
@@ -312,10 +483,20 @@ export async function saveClientSchedule(
       dataToUpdate.status = 'STAFFING_PENDING';
     }
 
-    await prisma.client.update({
-      where: { id: clientId },
+    const saved = await prisma.client.updateMany({
+      where: {
+        id: clientId,
+        status: client.status,
+        updatedAt: client.updatedAt,
+      },
       data: dataToUpdate
     });
+    if (saved.count !== 1) {
+      return {
+        success: false,
+        error: 'The client schedule changed in another session. Reload before continuing.',
+      };
+    }
     
     revalidatePath(`/client/${clientId}`);
     if (client.intakePacket?.magicLinkToken) {

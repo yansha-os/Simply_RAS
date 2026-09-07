@@ -15,7 +15,7 @@ Also see:
 - `docs/superpowers/specs/2026-08-11-aba-session-note-data-collection-spec.md` — RBT data collection / note draft rules (clinical SoT; pairs with Session Studio)
 - `docs/superpowers/specs/2026-08-11-session-studio-implementation-plan.md` — Build slices to close Studio gaps vs SoT (after Bridges F/G wiring)
 - `docs/superpowers/specs/2026-08-11-aba-emr-artemis-replacement-roadmap.md` — Enclosed EMR / Artemis replacement (HRM owns delivery, not chart SoT)
-- `docs/superpowers/specs/2026-08-11-artemis-dual-run-cutover-checklist.md` — Cohort dual-run → RAS Studio notes → freeze Artemis writes
+- `docs/superpowers/specs/2026-08-11-ras-sandbox-cutover-checklist.md` — Sandbox QA → cold cutover (no dual-run)
 - `.agents/skills/crm-app-map/SKILL.md` — CRM ownership / CaseOpening authorship
 - `.agents/skills/intake-workflow-map/SKILL.md` — client status machine (do not flip from HRM)
 

@@ -25,6 +25,19 @@ function isProtectedPath(pathname: string): boolean {
   )
 }
 
+function isDevToolsBypassEnabled(request: NextRequest): boolean {
+  if (
+    process.env.NODE_ENV === 'production' ||
+    process.env.NEXT_PUBLIC_ENABLE_DEV_TOOLS !== 'true'
+  ) {
+    return false
+  }
+  return Boolean(
+    request.cookies.get('dev_impersonate_role')?.value ||
+    request.cookies.get('dev_impersonate_user_id')?.value
+  )
+}
+
 function secureCookieOptions(maxAge: number) {
   return {
     httpOnly: true,
@@ -33,6 +46,13 @@ function secureCookieOptions(maxAge: number) {
     path: '/',
     maxAge,
   }
+}
+
+function hardenMagicLinkResponse(response: NextResponse): NextResponse {
+  response.headers.set('Referrer-Policy', 'no-referrer')
+  response.headers.set('X-Robots-Tag', 'noindex, nofollow')
+  response.headers.set('Cache-Control', 'private, no-store, max-age=0')
+  return response
 }
 
 function hrmRedirectUrl(pathname: string): string {
@@ -63,7 +83,9 @@ export async function proxy(request: NextRequest) {
     const parts = pathname.split('/')
     const token = parts[2]
     if (!token || token.length > 128 || !/^[a-zA-Z0-9_-]+$/.test(token)) {
-      return NextResponse.redirect(new URL('/login', request.url))
+      return hardenMagicLinkResponse(
+        NextResponse.redirect(new URL('/login', request.url))
+      )
     }
 
     const existingFp = request.cookies.get('device_fingerprint')?.value
@@ -83,7 +105,7 @@ export async function proxy(request: NextRequest) {
       fingerprint,
       secureCookieOptions(60 * 60 * 24 * 365)
     )
-    return response
+    return hardenMagicLinkResponse(response)
   }
 
   let response = NextResponse.next({
@@ -125,14 +147,15 @@ export async function proxy(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
 
-  if (isProtectedPath(pathname) && !user) {
+  const isDevBypassed = isDevToolsBypassEnabled(request)
+  if (isProtectedPath(pathname) && !user && !isDevBypassed) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     url.searchParams.set('next', pathname)
     return NextResponse.redirect(url)
   }
 
-  if (pathname.startsWith('/login') && user) {
+  if (pathname.startsWith('/login') && (user || isDevBypassed)) {
     const url = request.nextUrl.clone()
     url.pathname = '/'
     url.search = ''

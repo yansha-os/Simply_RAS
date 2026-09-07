@@ -32,6 +32,8 @@ import {
   payloadsFromTreatmentPlan,
   treatmentPlanHasSyncableGoals,
 } from '@/lib/syncSessionStudioTargets';
+import { evaluateActiveClientDemoHygiene } from '@repo/db/pilot-cohort-hygiene';
+import { assertNoteCredentialHardStop } from '@/lib/staffCredentials.server';
 
 export interface SubmitHrmSessionNotePayload {
   rbtUserId?: string;
@@ -1622,6 +1624,28 @@ export async function submitHrmSessionEmrNote(data: SubmitHrmSessionNotePayload)
     const taskAnalyses = data.taskAnalyses?.length ? data.taskAnalyses : legacyTa;
     const probes = data.probes || [];
     const abcEvents = data.abcEvents || [];
+
+    const activeDemoHygiene = evaluateActiveClientDemoHygiene(client.status, {
+      trials: data.trials,
+      probes,
+      abcEvents,
+    });
+    if (!activeDemoHygiene.ok) {
+      return { success: false as const, code: activeDemoHygiene.code, error: activeDemoHygiene.reason };
+    }
+
+    const credentialGate = await assertNoteCredentialHardStop({
+      clientStatus: client.status,
+      rbtUserId: sessionRbtId,
+      bcbaUserId: sessionBcbaId,
+    });
+    if (!credentialGate.ok) {
+      return {
+        success: false as const,
+        code: credentialGate.code,
+        error: credentialGate.error,
+      };
+    }
 
     // --- Slice 2: SessionTrialData rows (DTT + probe) when SkillTarget UUID ---
     // Built before the transaction; only writes happen inside it.

@@ -8,17 +8,13 @@ import {
   ClipboardCheck,
   FileCheck2,
   Send,
-  Workflow,
   type LucideIcon,
 } from 'lucide-react';
 import Link from 'next/link';
-import ClinicalSupportClient from './ClinicalSupportClient';
 import {
   buildClinicalSupportQueues,
   type ClinicalSupportClient as ClinicalSupportClientSummary,
 } from './clinicalSupportWorkflow';
-
-type DashboardView = 'overview' | 'queue';
 
 type KpiCard = {
   label: string;
@@ -31,16 +27,13 @@ type KpiCard = {
     badge: string;
     icon: string;
     hover: string;
-    bar: string;
   };
 };
 
 export default function ClinicalSupportDashboard({
   clients,
-  view = 'overview',
 }: {
   clients: ClinicalSupportClientSummary[];
-  view?: DashboardView;
 }) {
   const queues = buildClinicalSupportQueues(clients);
   const kpis: KpiCard[] = [
@@ -57,7 +50,6 @@ export default function ClinicalSupportDashboard({
         icon:
           'border-brand-orange-500/20 bg-brand-orange-500/10 text-brand-orange-400',
         hover: 'hover:border-brand-orange-500/50',
-        bar: 'bg-brand-orange-500',
       },
     },
     {
@@ -71,7 +63,6 @@ export default function ClinicalSupportDashboard({
         badge: 'border-amber-500/20 bg-amber-500/10 text-amber-400',
         icon: 'border-amber-500/20 bg-amber-500/10 text-amber-400',
         hover: 'hover:border-amber-500/50',
-        bar: 'bg-amber-500',
       },
     },
     {
@@ -85,7 +76,6 @@ export default function ClinicalSupportDashboard({
         badge: 'border-cyan-500/20 bg-cyan-500/10 text-cyan-400',
         icon: 'border-cyan-500/20 bg-cyan-500/10 text-cyan-400',
         hover: 'hover:border-cyan-500/50',
-        bar: 'bg-cyan-500',
       },
     },
     {
@@ -93,22 +83,19 @@ export default function ClinicalSupportDashboard({
       detail: 'Assembled packets awaiting Treatment PA submission',
       value: queues.billingHandoff.length,
       icon: Send,
-      badge: 'Plutus handoff',
+      badge: 'Billing claims',
       styles: {
         label: 'text-emerald-400',
         badge: 'border-emerald-500/20 bg-emerald-500/10 text-emerald-400',
         icon: 'border-emerald-500/20 bg-emerald-500/10 text-emerald-400',
         hover: 'hover:border-emerald-500/50',
-        bar: 'bg-emerald-500',
       },
     },
   ];
-  const largestQueue = Math.max(1, ...kpis.map((item) => item.value));
 
   return (
     <div className="mt-6 space-y-8 pb-12 animate-fade-in-up">
-      {view === 'overview' && (
-        <div className="group relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-r from-zinc-950 via-zinc-900 to-zinc-950 p-7 shadow-2xl backdrop-blur-2xl md:p-8">
+      <div className="group relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-r from-zinc-950 via-zinc-900 to-zinc-950 p-7 shadow-2xl backdrop-blur-2xl md:p-8">
           <div className="pointer-events-none absolute right-1/4 top-0 h-96 w-96 rounded-full bg-brand-orange-500/10 blur-3xl" />
           <div className="pointer-events-none absolute bottom-0 left-10 h-96 w-96 rounded-full bg-cyan-500/10 blur-3xl" />
 
@@ -129,7 +116,7 @@ export default function ClinicalSupportDashboard({
               <p className="max-w-2xl text-sm leading-relaxed text-zinc-400">
                 Move each client through one durable handoff at a time: clinical
                 verification, 97151 scheduling in ET, signed report assembly, then
-                Billing&apos;s manual Plutus tracker.
+                Billing&apos;s PA tracker and session claims pipeline.
               </p>
             </div>
 
@@ -142,91 +129,50 @@ export default function ClinicalSupportDashboard({
             </Link>
           </div>
         </div>
-      )}
 
       <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
-        {kpis.map((item) => {
-          const Icon = item.icon;
-          return (
-            <Card
-              key={item.label}
-              className={`relative overflow-hidden rounded-2xl border border-white/10 bg-zinc-950/80 shadow-xl backdrop-blur-xl transition-all duration-300 hover:scale-[1.02] ${item.styles.hover}`}
-            >
-              <CardContent className="space-y-4 p-6">
-                <div className="flex items-center justify-between gap-3">
-                  <span
-                    className={`font-mono text-[11px] font-bold uppercase tracking-wider ${item.styles.label}`}
-                  >
-                    {item.label}
-                  </span>
-                  <span
-                    className={`rounded-full border px-2.5 py-1 font-mono text-[9px] font-bold uppercase tracking-wider ${item.styles.badge}`}
-                  >
-                    {item.badge}
-                  </span>
-                </div>
-                <div className="flex items-end justify-between gap-4">
-                  <div>
-                    <h3 className="font-mono text-3xl font-black tracking-tight text-white">
-                      {item.value}
-                    </h3>
-                    <p className="mt-1 text-xs leading-relaxed text-zinc-400">
-                      {item.detail}
-                    </p>
+          {kpis.map((item) => {
+            const Icon = item.icon;
+            return (
+              <Card
+                key={item.label}
+                className={`relative overflow-hidden rounded-2xl border border-white/10 bg-zinc-950/80 shadow-xl backdrop-blur-xl transition-all duration-300 hover:scale-[1.02] ${item.styles.hover}`}
+              >
+                <CardContent className="space-y-4 p-6">
+                  <div className="flex items-center justify-between gap-3">
+                    <span
+                      className={`font-mono text-[11px] font-bold uppercase tracking-wider ${item.styles.label}`}
+                    >
+                      {item.label}
+                    </span>
+                    <span
+                      className={`rounded-full border px-2.5 py-1 font-mono text-[9px] font-bold uppercase tracking-wider ${item.styles.badge}`}
+                    >
+                      {item.badge}
+                    </span>
                   </div>
-                  <div
-                    className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border ${item.styles.icon}`}
-                  >
-                    <Icon className="h-5 w-5" />
+                  <div className="flex items-end justify-between gap-4">
+                    <div>
+                      <h3 className="font-mono text-3xl font-black tracking-tight text-white">
+                        {item.value}
+                      </h3>
+                      <p className="mt-1 text-xs leading-relaxed text-zinc-400">
+                        {item.detail}
+                      </p>
+                    </div>
+                    <div
+                      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border ${item.styles.icon}`}
+                    >
+                      <Icon className="h-5 w-5" />
+                    </div>
                   </div>
-                </div>
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
 
-      <Card className="overflow-hidden rounded-2xl border border-white/10 bg-zinc-950/70 shadow-2xl backdrop-blur-xl">
-        <CardContent className="p-5 md:p-6">
-          <div className="flex flex-col justify-between gap-3 border-b border-white/5 pb-4 sm:flex-row sm:items-center">
-            <div>
-              <h2 className="flex items-center gap-2 font-heading text-base font-bold text-white">
-                <Workflow className="h-4 w-4 text-cyan-400" />
-                Live workload distribution
-              </h2>
-              <p className="mt-1 text-xs text-zinc-500">
-                Current queue volume only — no forecasted or placeholder metrics.
-              </p>
-            </div>
-            <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-zinc-300">
-              {queues.total} open handoff{queues.total === 1 ? '' : 's'}
-            </span>
-          </div>
-          <div className="mt-5 grid gap-4 lg:grid-cols-4">
-            {kpis.map((item) => (
-              <div key={item.label} className="space-y-2">
-                <div className="flex items-center justify-between gap-2 font-mono text-[10px] font-bold uppercase tracking-wider">
-                  <span className="truncate text-zinc-400">{item.label}</span>
-                  <span className="text-white">{item.value}</span>
-                </div>
-                <div className="h-1.5 overflow-hidden rounded-full bg-zinc-800">
-                  <div
-                    className={`h-full rounded-full transition-all duration-500 ${item.styles.bar}`}
-                    style={{ width: `${(item.value / largestQueue) * 100}%` }}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-
-      <ClinicalSupportClient
-        queues={queues}
-        limitPerLane={view === 'overview' ? 3 : undefined}
-      />
-
-      {view === 'overview' && queues.total > 0 && (
+      {queues.total > 0 && (
         <div className="flex justify-center">
           <Link
             href="/clinical-support/clients"

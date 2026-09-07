@@ -625,8 +625,8 @@ export const TreatmentPlanPDF = ({
   client,
   treatmentPlan,
 }: {
-  client: any;
-  treatmentPlan: any;
+  client: unknown;
+  treatmentPlan: unknown;
 }) => {
   const model = buildTreatmentPlanReportModel({ client, treatmentPlan });
   return (

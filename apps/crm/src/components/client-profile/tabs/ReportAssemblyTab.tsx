@@ -20,8 +20,15 @@ import {
   buildTreatmentPlanReportModel,
   NOT_DOCUMENTED,
 } from '@/lib/pdf/treatmentPlanReportModel';
+import type { ClientStatus } from '@prisma/client';
 
-export default function ReportAssemblyTab({ client }: { client: any }) {
+type ReportAssemblyClient = {
+  id: string;
+  status: ClientStatus;
+  treatmentPlan: unknown;
+};
+
+export default function ReportAssemblyTab({ client }: { client: ReportAssemblyClient }) {
   const [dataChecked, setDataChecked] = useState(false);
   const [formatChecked, setFormatChecked] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -34,9 +41,13 @@ export default function ReportAssemblyTab({ client }: { client: any }) {
     'STAFFING_PENDING',
     'ACTIVE',
   ].includes(client.status);
-  const plan =
-    client.treatmentPlan && typeof client.treatmentPlan === 'object' ? client.treatmentPlan : {};
-  const hasSignature = !!plan.parentSignature;
+  const plan = useMemo<Record<string, unknown>>(() => {
+    const value = client.treatmentPlan;
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  }, [client.treatmentPlan]);
+  const hasSignature = Boolean(plan.parentSignature);
 
   // Same model the PDF renders from — the checklist below is exactly what
   // prints, section for section ("Not yet documented" included).
@@ -77,8 +88,8 @@ export default function ReportAssemblyTab({ client }: { client: any }) {
 
   const handleRouteToBilling = () => {
     startRouting(async () => {
-      const res: any = await assembleReport(client.id);
-      if (res && res.success === false) {
+      const res = await assembleReport(client.id);
+      if (res.success === false) {
         toast.error(res.error || 'Failed to route report to Billing.');
       } else {
         toast.success('Report assembled and routed to Billing.');

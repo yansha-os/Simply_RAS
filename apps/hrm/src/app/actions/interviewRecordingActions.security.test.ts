@@ -1,0 +1,97 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const RECORDING_ID = '11111111-1111-4111-8111-111111111111';
+const CANDIDATE_ID = '22222222-2222-4222-8222-222222222222';
+const INTERVIEW_ID = '33333333-3333-4333-8333-333333333333';
+
+const mocks = vi.hoisted(() => {
+  const remove = vi.fn();
+  const storageFrom = vi.fn(() => ({ remove }));
+  return {
+    remove,
+    storageClient: { storage: { from: storageFrom } },
+    requireRole: vi.fn(),
+    revalidatePath: vi.fn(),
+    prisma: {
+      atsInterviewRecording: {
+        findUnique: vi.fn(),
+        delete: vi.fn(),
+      },
+    },
+  };
+});
+
+vi.mock('@/lib/prisma', () => ({ prisma: mocks.prisma }));
+vi.mock('@/lib/auth-guard', () => ({ requireRole: mocks.requireRole }));
+vi.mock('@/lib/supabase/admin', () => ({
+  createAdminClient: () => mocks.storageClient,
+}));
+vi.mock('@/lib/supabase/server', () => ({
+  createClient: vi.fn(async () => mocks.storageClient),
+}));
+vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }));
+
+import { deleteInterviewRecording } from './interviewRecordingActions';
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.requireRole.mockResolvedValue({ id: 'staff-id' });
+  mocks.prisma.atsInterviewRecording.findUnique.mockResolvedValue({
+    id: RECORDING_ID,
+    candidateId: CANDIDATE_ID,
+    interviewId: INTERVIEW_ID,
+    storageBucket: 'ats-interview-recordings',
+    storagePath: `${CANDIDATE_ID}/${INTERVIEW_ID}/${RECORDING_ID}.webm`,
+    mimeType: 'video/webm',
+  });
+  mocks.prisma.atsInterviewRecording.delete.mockResolvedValue({});
+});
+
+describe('interview recording deletion integrity', () => {
+  it('retains metadata when Storage deletion fails', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    mocks.remove.mockResolvedValue({ error: { message: 'storage unavailable' } });
+
+    try {
+      const result = await deleteInterviewRecording(RECORDING_ID);
+
+      expect(result).toMatchObject({ success: false });
+      expect(result.error).toMatch(/remains tracked/i);
+      expect(mocks.prisma.atsInterviewRecording.delete).not.toHaveBeenCalled();
+      expect(mocks.revalidatePath).not.toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it('deletes metadata only after Storage confirms deletion', async () => {
+    mocks.remove.mockResolvedValue({ error: null });
+
+    const result = await deleteInterviewRecording(RECORDING_ID);
+
+    expect(result).toEqual({ success: true });
+    expect(mocks.prisma.atsInterviewRecording.delete).toHaveBeenCalledWith({
+      where: { id: RECORDING_ID },
+    });
+    expect(mocks.revalidatePath).toHaveBeenCalledWith(
+      `/ats/applicant/${CANDIDATE_ID}`
+    );
+  });
+
+  it('refuses to delete an object when persisted storage metadata escapes the canonical path', async () => {
+    mocks.prisma.atsInterviewRecording.findUnique.mockResolvedValue({
+      id: RECORDING_ID,
+      candidateId: CANDIDATE_ID,
+      interviewId: INTERVIEW_ID,
+      storageBucket: 'another-private-bucket',
+      storagePath: `victim/${RECORDING_ID}.webm`,
+      mimeType: 'video/webm',
+    });
+
+    const result = await deleteInterviewRecording(RECORDING_ID);
+
+    expect(result).toMatchObject({ success: false, error: expect.stringMatching(/metadata/i) });
+    expect(mocks.remove).not.toHaveBeenCalled();
+    expect(mocks.prisma.atsInterviewRecording.delete).not.toHaveBeenCalled();
+  });
+});

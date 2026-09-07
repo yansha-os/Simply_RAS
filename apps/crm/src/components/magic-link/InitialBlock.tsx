@@ -1,10 +1,42 @@
-import React, { useState, useContext } from 'react';
-import { PenTool, CheckCircle } from 'lucide-react';
+import React, { useContext } from 'react';
 import { FieldWrapper, AdminReviewContext, ReadOnlyDisplay } from './FormUIHelpers';
 
-export function InitialBlock({ label, fieldId, description, required, currentValue, onChange, globalInitials }: any) {
+type InitialValue = {
+  initials: string;
+  timestamp: string;
+};
+
+type InitialBlockProps = {
+  label: string;
+  fieldId: string;
+  description?: string;
+  required?: boolean;
+  currentValue?: unknown;
+  onChange: (fieldId: string, value: InitialValue | null) => unknown;
+  globalInitials?: string | null;
+};
+
+function isInitialValue(value: unknown): value is InitialValue {
+  if (!value || typeof value !== 'object') return false;
+  return (
+    'initials' in value &&
+    typeof value.initials === 'string' &&
+    'timestamp' in value &&
+    typeof value.timestamp === 'string'
+  );
+}
+
+export function InitialBlock({
+  label,
+  fieldId,
+  description,
+  required,
+  currentValue,
+  onChange,
+  globalInitials,
+}: InitialBlockProps) {
   const { readOnly, adminReviewMode } = useContext(AdminReviewContext);
-  const isAgreed = !!currentValue;
+  const isAgreed = isInitialValue(currentValue);
   const timestamp = isAgreed ? new Date(currentValue.timestamp).toLocaleString() : null;
   const initial = isAgreed ? currentValue.initials : null;
 
@@ -43,8 +75,9 @@ export function InitialBlock({ label, fieldId, description, required, currentVal
         </div>
         
         <button 
+          type="button"
           onClick={handleTap}
-          className={`initial-btn ${isAgreed ? 'signed' : ''}`}
+          className={`initial-btn cursor-pointer ${isAgreed ? 'signed' : ''}`}
         >
           {isAgreed ? (
             `✓ ${initial}`

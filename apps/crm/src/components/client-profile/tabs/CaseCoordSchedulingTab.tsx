@@ -21,6 +21,7 @@ import {
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 import ClientJobBoardPanel from '@/components/client-profile/tabs/ClientJobBoardPanel';
+import type { ClientJobBoardData } from '@/components/client-profile/tabs/ClientJobBoardPanel';
 import StaffingReadinessChecklist from '@/components/portal-case-coord/StaffingReadinessChecklist';
 import { getStaffingReadiness } from '@/lib/staffingReadiness';
 import { CLINIC_TIME_ZONE, addClinicDays, clinicDateKey } from '@/lib/clinicTimezone';
@@ -54,7 +55,7 @@ export default function CaseCoordSchedulingTab({
   client,
   initialSubTab = 'job_board',
 }: {
-  client: any;
+  client: ClientJobBoardData & { sessions?: TherapySession[] };
   initialSubTab?: 'job_board' | 'activation';
 }) {
   const router = useRouter();

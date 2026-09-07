@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  billingPaQueueHref,
+  billingProfileHref,
+  getBillingTabVisibility,
+  getClinicalSupportTabVisibility,
+  getDefaultBillingTab,
+  getDefaultClinicalSupportTab,
   resolveActiveClientProfileTab,
   resolveRequestedClientProfileTab,
   shouldShowStaffingIntegrityTab,
@@ -79,6 +85,284 @@ describe('resolveRequestedClientProfileTab', () => {
       })
     ).toBe('p2p');
   });
+
+  it('defaults clinical support mode to the Clinical Review tab', () => {
+    expect(
+      resolveRequestedClientProfileTab({
+        mode: 'clinical',
+        hasP2PAlert: false,
+        showChartProgressTab: false,
+        showStaffingIntegrityTab: false,
+      })
+    ).toBe('clinical');
+  });
+
+  it('defaults clinical support mode by pipeline stage when status is known', () => {
+    expect(
+      resolveRequestedClientProfileTab({
+        mode: 'clinical',
+        clientStatus: 'PA_APPROVED',
+        hasP2PAlert: false,
+        showChartProgressTab: false,
+        showStaffingIntegrityTab: false,
+      })
+    ).toBe('assessment');
+
+    expect(
+      resolveRequestedClientProfileTab({
+        mode: 'clinical',
+        clientStatus: 'REPORT_ASSEMBLED',
+        hasP2PAlert: false,
+        showChartProgressTab: false,
+        showStaffingIntegrityTab: false,
+      })
+    ).toBe('billing_handoff');
+  });
+
+  it('opens clinical support workflow tabs from deep links', () => {
+    expect(
+      resolveRequestedClientProfileTab({
+        mode: 'clinical',
+        queryTab: 'report',
+        clientStatus: 'ASSESSMENT_SCHEDULED',
+        hasP2PAlert: false,
+        showChartProgressTab: false,
+        showStaffingIntegrityTab: false,
+      })
+    ).toBe('report');
+  });
+
+  it('opens clinical review from a tab deep link without mode', () => {
+    expect(
+      resolveRequestedClientProfileTab({
+        queryTab: 'clinical',
+        hasP2PAlert: false,
+        showChartProgressTab: false,
+        showStaffingIntegrityTab: false,
+      })
+    ).toBe('clinical');
+  });
+
+  it('defaults billing mode by workflow stage and maps legacy document links', () => {
+    expect(
+      resolveRequestedClientProfileTab({
+        mode: 'billing',
+        clientStatus: 'CLINICAL_REVIEW_APPROVED',
+        showSessionNotesTab: true,
+        hasP2PAlert: false,
+        showChartProgressTab: false,
+        showStaffingIntegrityTab: false,
+      })
+    ).toBe('billing_vob');
+
+    expect(
+      resolveRequestedClientProfileTab({
+        mode: 'billing',
+        queryTab: 'documents',
+        clientStatus: 'ACTIVE',
+        showSessionNotesTab: true,
+        hasP2PAlert: false,
+        showChartProgressTab: false,
+        showStaffingIntegrityTab: false,
+      })
+    ).toBe('billing_documents');
+
+    expect(
+      resolveRequestedClientProfileTab({
+        mode: 'billing',
+        queryTab: 'billing_documents',
+        clientStatus: 'ACTIVE',
+        showSessionNotesTab: true,
+        hasP2PAlert: false,
+        showChartProgressTab: false,
+        showStaffingIntegrityTab: false,
+      })
+    ).toBe('billing_documents');
+
+    expect(
+      resolveRequestedClientProfileTab({
+        mode: 'billing',
+        queryTab: 'messages',
+        clientStatus: 'ACTIVE',
+        showSessionNotesTab: true,
+        hasP2PAlert: false,
+        showChartProgressTab: false,
+        showStaffingIntegrityTab: false,
+      })
+    ).toBe('session_notes');
+  });
+});
+
+describe('clinical support workflow tabs', () => {
+  it('reveals handoff tabs progressively by client status', () => {
+    expect(getClinicalSupportTabVisibility('DOCS_APPROVED_INTAKE')).toMatchObject({
+      clinical: true,
+      assessment: false,
+      report: false,
+      billing_handoff: false,
+      documents: false,
+    });
+    expect(getClinicalSupportTabVisibility('PA_APPROVED')).toMatchObject({
+      clinical: true,
+      assessment: true,
+      report: false,
+      documents: false,
+    });
+    expect(getClinicalSupportTabVisibility('REPORT_ASSEMBLED')).toMatchObject({
+      clinical: true,
+      assessment: true,
+      report: true,
+      billing_handoff: true,
+      documents: false,
+    });
+  });
+
+  it('redirects legacy documents deep links to the workflow default', () => {
+    expect(
+      resolveRequestedClientProfileTab({
+        mode: 'clinical',
+        queryTab: 'documents',
+        clientStatus: 'DOCS_APPROVED_INTAKE',
+        hasP2PAlert: false,
+        showChartProgressTab: false,
+        showStaffingIntegrityTab: false,
+      }),
+    ).toBe('clinical');
+
+    expect(
+      resolveRequestedClientProfileTab({
+        mode: 'clinical',
+        queryTab: 'documents',
+        clientStatus: 'PA_APPROVED',
+        hasP2PAlert: false,
+        showChartProgressTab: false,
+        showStaffingIntegrityTab: false,
+      }),
+    ).toBe('assessment');
+  });
+
+  it('does not open clinical goals or chart progress in clinical support mode', () => {
+    expect(
+      resolveRequestedClientProfileTab({
+        mode: 'clinical',
+        queryTab: 'clinical_goals',
+        clientStatus: 'ACTIVE',
+        hasP2PAlert: false,
+        showChartProgressTab: true,
+        showStaffingIntegrityTab: false,
+      }),
+    ).toBe('clinical');
+
+    expect(
+      resolveRequestedClientProfileTab({
+        mode: 'clinical',
+        queryTab: 'chart_progress',
+        clientStatus: 'ACTIVE',
+        hasP2PAlert: false,
+        showChartProgressTab: true,
+        showStaffingIntegrityTab: false,
+      }),
+    ).toBe('clinical');
+  });
+
+  it('defaults each handoff stage to its workflow tab', () => {
+    expect(getDefaultClinicalSupportTab('DOCS_APPROVED_INTAKE')).toBe('clinical');
+    expect(getDefaultClinicalSupportTab('PA_APPROVED')).toBe('assessment');
+    expect(getDefaultClinicalSupportTab('ASSESSMENT_SCHEDULED')).toBe('report');
+    expect(getDefaultClinicalSupportTab('REPORT_ASSEMBLED')).toBe('billing_handoff');
+  });
+});
+
+describe('billing workflow tabs', () => {
+  it('shows VOB after clinical review and Assessment PA only after VOB', () => {
+    expect(
+      getBillingTabVisibility({
+        clientStatus: 'CLINICAL_REVIEW_APPROVED',
+        showSessionNotesTab: false,
+      })
+    ).toMatchObject({
+      billing_vob: true,
+      billing_assessment_pa: false,
+    });
+
+    expect(
+      getBillingTabVisibility({
+        clientStatus: 'VOB_COMPLETED',
+        showSessionNotesTab: false,
+      })
+    ).toMatchObject({
+      billing_vob: true,
+      billing_assessment_pa: true,
+    });
+  });
+
+  it('deep-links PA queue lanes to VOB or Assessment PA tabs', () => {
+    expect(billingPaQueueHref('abc', 'ASSESSMENT', true)).toBe(
+      '/client/abc?mode=billing&tab=vob'
+    );
+    expect(billingPaQueueHref('abc', 'ASSESSMENT', false)).toBe(
+      '/client/abc?mode=billing&tab=assessment_pa'
+    );
+    expect(billingPaQueueHref('abc', 'TREATMENT')).toBe(
+      '/client/abc?mode=billing&tab=treatment_pa'
+    );
+    expect(billingProfileHref('abc', 'CLINICAL_REVIEW_APPROVED')).toBe(
+      '/client/abc?mode=billing&tab=vob'
+    );
+    expect(billingProfileHref('abc', 'VOB_COMPLETED')).toBe(
+      '/client/abc?mode=billing&tab=assessment_pa'
+    );
+  });
+
+  it('hides PA/auth tabs for active claims work', () => {
+    const visibility = getBillingTabVisibility({
+      clientStatus: 'ACTIVE',
+      showSessionNotesTab: true,
+    });
+
+    expect(visibility.session_notes).toBe(true);
+    expect(visibility.billing_vob).toBe(false);
+    expect(visibility.billing_assessment_pa).toBe(false);
+    expect(visibility.billing_treatment_pa).toBe(false);
+    expect(visibility.billing_auth_units).toBe(false);
+    expect(visibility.billing_documents).toBe(true);
+  });
+
+  it('defaults active billing clients to claims tab', () => {
+    expect(
+      getDefaultBillingTab({
+        clientStatus: 'ACTIVE',
+        showSessionNotesTab: true,
+      })
+    ).toBe('session_notes');
+  });
+
+  it('defaults treatment PA queue clients to the treatment tab', () => {
+    expect(
+      resolveRequestedClientProfileTab({
+        mode: 'billing',
+        clientStatus: 'REPORT_ASSEMBLED',
+        showSessionNotesTab: true,
+        hasP2PAlert: false,
+        showChartProgressTab: false,
+        showStaffingIntegrityTab: false,
+      })
+    ).toBe('billing_treatment_pa');
+  });
+
+  it('maps legacy billing deep links to the workflow default', () => {
+    expect(
+      resolveRequestedClientProfileTab({
+        mode: 'billing',
+        queryTab: 'billing',
+        clientStatus: 'TX_PA_APPROVED',
+        showSessionNotesTab: true,
+        hasP2PAlert: false,
+        showChartProgressTab: false,
+        showStaffingIntegrityTab: false,
+      })
+    ).toBe('billing_auth_units');
+  });
 });
 
 describe('resolveActiveClientProfileTab', () => {
@@ -86,10 +370,10 @@ describe('resolveActiveClientProfileTab', () => {
     expect(
       resolveActiveClientProfileTab(
         { contextKey: 'client-1|case-coord|staffing', tab: 'overview' },
-        'client-1|billing|billing',
-        'billing'
+        'client-1|billing|session_notes',
+        'session_notes'
       )
-    ).toBe('billing');
+    ).toBe('session_notes');
   });
 
   it('keeps a user selection while the query-mode context is unchanged', () => {

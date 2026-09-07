@@ -18,10 +18,9 @@ describe('applicant wage signing UI boundary', () => {
     );
   });
 
-  it('describes signing as pending staff final hire rather than login-ready auto-hire', () => {
-    expect(source).toMatch(/Head HR.*final hire/i);
-    expect(source).not.toMatch(/Welcome aboard — you are now an official RBT/);
-    expect(source).not.toMatch(/promoteClientRoleToRbt/);
-    expect(source).not.toMatch(/window\.location\.href\s*=\s*['"]\/rbt\/schedule/);
+  it('does not auto-hire or claim official hire from the wage signature UI', () => {
+    expect(source).toMatch(/Head HR must complete final hire review/);
+    expect(source).not.toMatch(/officially hired as an RBT/i);
+    expect(source).not.toMatch(/bypassReadinessCheck/);
   });
 });

@@ -3,7 +3,7 @@
  * Aligns with FlowMap / intake-workflow-map so writers and UI share one spine.
  *
  * ACTIVE is Bridge E only (durable first therapy Session) — never staffing accept alone.
- * External systems in copy: RAS (clinical chart / Session Studio) · Plutus (manual PA/claims tracker).
+ * External systems in copy: RAS (clinical chart / Session Studio). Billing PA and VOB are recorded in RAS.
  */
 
 export const CLIENT_STATUS_PIPELINE = [
@@ -80,25 +80,25 @@ export const STATUS_GUIDANCE: Record<PipelineStatus, StatusGuidance> = {
     status: 'CLINICAL_REVIEW_APPROVED',
     title: 'Clinical Review Approved',
     owner: 'Billing',
-    nextAction: 'Complete Verification of Benefits (VOB) + credentialing checklist.',
-    surface: 'Billing Auth tab · Billing portal',
-    sop: 'Billing verifies eligibility and benefits in RAS before any Assessment PA is logged in the Plutus manual tracker.',
+    nextAction: 'Complete Verification of Benefits (VOB) + credentialing on the VOB / Benefits tab.',
+    surface: 'Billing profile → VOB / Benefits',
+    sop: 'Billing verifies eligibility and benefits in RAS before any Assessment PA is submitted.',
   },
   VOB_COMPLETED: {
     status: 'VOB_COMPLETED',
     title: 'VOB Completed',
     owner: 'Billing',
-    nextAction: 'Submit Assessment PA (CPT 97151) in the Plutus manual tracker.',
-    surface: 'Billing Auth → Assessment PA',
-    sop: 'Log Assessment PA as submitted in RAS (manual Plutus tracker). No EDI / Plutus API in this phase.',
+    nextAction: 'Submit Assessment PA (CPT 97151) on the Assessment PA tab.',
+    surface: 'Billing profile → Assessment PA',
+    sop: 'Log Assessment PA as submitted in RAS after VOB. Clinical Support cannot schedule 97151 until this PA is approved.',
   },
   PA_SUBMITTED: {
     status: 'PA_SUBMITTED',
     title: 'Assessment PA Submitted',
     owner: 'Billing · Payer',
-    nextAction: 'Await payer decision; mark Assessment PA approved (or denied) in the Plutus tracker.',
-    surface: 'Billing Auth → Assessment PA',
-    sop: 'Billing tracks Assessment PA outcome in RAS against the Plutus manual tracker. Approval unlocks assessment scheduling.',
+    nextAction: 'Await payer decision; mark Assessment PA approved or denied on the Assessment PA tab.',
+    surface: 'Billing profile → Assessment PA',
+    sop: 'Billing records the 97151 payer outcome in RAS. Approval unlocks Clinical Support assessment scheduling.',
   },
   PA_APPROVED: {
     status: 'PA_APPROVED',

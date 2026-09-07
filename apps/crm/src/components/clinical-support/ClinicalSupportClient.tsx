@@ -1,44 +1,30 @@
 'use client';
 
-import React, { useState, useTransition } from 'react';
+import React from 'react';
 import { Card, CardContent } from '@/components/ui/Card';
-import { Button } from '@/components/ui/Button';
 import {
-  assembleClinicalSupportReport,
-  scheduleClinicalSupportAssessment,
-  submitTreatmentPacket,
-  verifyDocuments,
-} from '@/app/(dashboard)/clinical-support/actions';
-import {
-  AlertCircle,
   ArrowRight,
   CalendarClock,
   CheckCircle2,
   ClipboardCheck,
   FileCheck2,
-  FileText,
   Send,
   Sparkles,
-  UserRoundCheck,
+  UserRound,
 } from 'lucide-react';
 import Link from 'next/link';
-import { toast } from 'sonner';
 import {
+  clinicalSupportProfileHref,
   getReportReadiness,
   type ClinicalSupportClient as ClientSummary,
+  type ClinicalSupportLane,
   type ClinicalSupportQueues,
 } from './clinicalSupportWorkflow';
-
-type ActionResult =
-  | { success: boolean; error?: string }
-  | { success?: boolean; error?: string }
-  | undefined;
 
 const ET_DATE_FORMATTER = new Intl.DateTimeFormat('en-US', {
   timeZone: 'America/New_York',
   month: 'short',
   day: 'numeric',
-  year: 'numeric',
   hour: 'numeric',
   minute: '2-digit',
 });
@@ -46,7 +32,7 @@ const ET_DATE_FORMATTER = new Intl.DateTimeFormat('en-US', {
 function updatedLabel(value: string | Date) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return 'Updated recently';
-  return `Updated ${ET_DATE_FORMATTER.format(date)} ET`;
+  return ET_DATE_FORMATTER.format(date);
 }
 
 function clientName(client: ClientSummary) {
@@ -56,6 +42,7 @@ function clientName(client: ClientSummary) {
 function QueueLane({
   title,
   eyebrow,
+  subtitle,
   count,
   icon: Icon,
   accentClass,
@@ -65,6 +52,7 @@ function QueueLane({
 }: {
   title: string;
   eyebrow: string;
+  subtitle?: string;
   count: number;
   icon: React.ComponentType<{ className?: string }>;
   accentClass: string;
@@ -73,30 +61,35 @@ function QueueLane({
   children: React.ReactNode;
 }) {
   return (
-    <section className="space-y-3">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <p className={`font-mono text-[10px] font-bold uppercase tracking-[0.16em] ${accentClass}`}>
+    <section className="flex min-h-[28rem] flex-col rounded-2xl border border-white/10 bg-zinc-950/60 p-4 shadow-xl backdrop-blur-xl">
+      <div className="mb-4 flex shrink-0 items-start justify-between gap-3 border-b border-white/5 pb-3">
+        <div className="min-w-0">
+          <p
+            className={`font-mono text-[10px] font-bold uppercase tracking-[0.16em] ${accentClass}`}
+          >
             {eyebrow}
           </p>
-          <h2 className="mt-1 flex items-center gap-2 font-heading text-lg font-bold text-white">
-            <Icon className="h-4 w-4" />
-            {title}
+          <h2 className="mt-1 flex items-center gap-2 font-heading text-sm font-bold leading-snug text-white">
+            <Icon className="h-4 w-4 shrink-0" />
+            <span>{title}</span>
           </h2>
+          {subtitle && (
+            <p className="mt-1.5 text-[11px] leading-relaxed text-zinc-500">{subtitle}</p>
+          )}
         </div>
-        <span className="inline-flex min-w-8 items-center justify-center rounded-full border border-white/10 bg-white/5 px-2.5 py-1 font-mono text-xs font-black text-white">
+        <span className="inline-flex min-w-8 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/5 px-2.5 py-1 font-mono text-xs font-black text-white">
           {count}
         </span>
       </div>
 
-      <div className="grid gap-3">
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-0.5">
         {count > 0 ? (
           children
         ) : (
-          <div className="rounded-2xl border border-dashed border-white/10 bg-zinc-950/40 px-5 py-7 text-center">
-            <CheckCircle2 className="mx-auto h-6 w-6 text-emerald-400/70" />
+          <div className="flex flex-1 flex-col items-center justify-center rounded-xl border border-dashed border-white/10 bg-zinc-950/40 px-4 py-8 text-center">
+            <CheckCircle2 className="h-6 w-6 text-emerald-400/70" />
             <p className="mt-3 text-sm font-bold text-zinc-200">{emptyTitle}</p>
-            <p className="mx-auto mt-1 max-w-sm text-xs leading-relaxed text-zinc-500">
+            <p className="mx-auto mt-1 max-w-[14rem] text-xs leading-relaxed text-zinc-500">
               {emptyCopy}
             </p>
           </div>
@@ -106,13 +99,65 @@ function QueueLane({
   );
 }
 
-function MoreInQueue({
-  total,
-  shown,
+function TriageCard({
+  client,
+  lane,
+  badgeLabel,
+  badgeClass,
+  showBcba = false,
+  hoverBorderClass = 'hover:border-brand-orange-500/40',
 }: {
-  total: number;
-  shown: number;
+  client: ClientSummary;
+  lane: ClinicalSupportLane;
+  badgeLabel: string;
+  badgeClass: string;
+  showBcba?: boolean;
+  hoverBorderClass?: string;
 }) {
+  const href = clinicalSupportProfileHref(client.id, lane);
+
+  return (
+    <Link href={href} className="group block cursor-pointer">
+      <Card
+        className={`overflow-hidden rounded-2xl border border-white/10 bg-zinc-950/80 shadow-xl transition-all duration-300 hover:scale-[1.01] hover:shadow-2xl ${hoverBorderClass}`}
+      >
+        <CardContent className="space-y-3 p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h3 className="truncate font-heading text-sm font-bold text-white transition-colors group-hover:text-brand-orange-300">
+                {clientName(client)}
+              </h3>
+              <p className="mt-1 font-mono text-[10px] uppercase tracking-wider text-zinc-500">
+                {updatedLabel(client.updatedAt)} ET
+              </p>
+            </div>
+            <span
+              className={`shrink-0 rounded-full border px-2 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider ${badgeClass}`}
+            >
+              {badgeLabel}
+            </span>
+          </div>
+
+          {showBcba && (
+            <p className="flex items-center gap-1.5 truncate text-[11px] text-zinc-400">
+              <UserRound className="h-3 w-3 shrink-0 text-zinc-500" />
+              {client.bcba
+                ? `BCBA ${client.bcba.firstName} ${client.bcba.lastName}`
+                : 'BCBA unassigned'}
+            </p>
+          )}
+
+          <div className="flex items-center justify-end gap-1 border-t border-white/5 pt-3 text-[11px] font-bold text-zinc-400 transition-colors group-hover:text-brand-orange-300">
+            Review in profile
+            <ArrowRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
+          </div>
+        </CardContent>
+      </Card>
+    </Link>
+  );
+}
+
+function MoreInQueue({ total, shown }: { total: number; shown: number }) {
   if (total <= shown) return null;
   return (
     <Link
@@ -132,40 +177,8 @@ export default function ClinicalSupportClient({
   queues: ClinicalSupportQueues;
   limitPerLane?: number;
 }) {
-  const [isPending, startTransition] = useTransition();
-  const [activeAction, setActiveAction] = useState<string | null>(null);
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [scheduleInputs, setScheduleInputs] = useState<Record<string, string>>({});
-
   const visible = (clients: ClientSummary[]) =>
     typeof limitPerLane === 'number' ? clients.slice(0, limitPerLane) : clients;
-
-  const runAction = (
-    actionKey: string,
-    successMessage: string,
-    action: () => Promise<ActionResult>,
-  ) => {
-    setActiveAction(actionKey);
-    setErrors((current) => ({ ...current, [actionKey]: '' }));
-    startTransition(async () => {
-      try {
-        const result = await action();
-        if (!result?.success) {
-          const message = result?.error || 'The workflow action failed. Please try again.';
-          setErrors((current) => ({ ...current, [actionKey]: message }));
-          toast.error(message);
-          return;
-        }
-        toast.success(successMessage);
-      } catch {
-        const message = 'The workflow action could not be completed. Please try again.';
-        setErrors((current) => ({ ...current, [actionKey]: message }));
-        toast.error(message);
-      } finally {
-        setActiveAction(null);
-      }
-    });
-  };
 
   if (queues.total === 0) {
     return (
@@ -188,434 +201,136 @@ export default function ClinicalSupportClient({
   }
 
   return (
-    <div className="grid gap-8 xl:grid-cols-2">
-      <QueueLane
-        title="Clinical document verification"
-        eyebrow="Handoff 01"
-        count={queues.documentReview.length}
-        icon={ClipboardCheck}
-        accentClass="text-brand-orange-400"
-        emptyTitle="No packets need clinical verification"
-        emptyCopy="New work appears here only after Intake approves the complete packet."
-      >
-        {visible(queues.documentReview).map((client) => {
-          const actionKey = `verify-${client.id}`;
-          const packetApproved = client.intakePacket?.status === 'APPROVED';
-          const working = isPending && activeAction === actionKey;
-          return (
-            <Card
-              key={client.id}
-              className="overflow-hidden rounded-2xl border border-white/10 bg-zinc-950/80 shadow-xl transition-all duration-300 hover:scale-[1.01] hover:border-brand-orange-500/40 hover:shadow-2xl"
-            >
-              <CardContent className="space-y-4 p-5">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <Link
-                      href={`/client/${client.id}?mode=clinical`}
-                      className="cursor-pointer truncate font-heading text-base font-bold text-white transition-colors hover:text-brand-orange-300"
-                    >
-                      {clientName(client)}
-                    </Link>
-                    <p className="mt-1 font-mono text-[10px] uppercase tracking-wider text-zinc-500">
-                      {updatedLabel(client.updatedAt)}
-                    </p>
-                  </div>
-                  <span
-                    className={`shrink-0 rounded-full border px-2.5 py-1 font-mono text-[9px] font-bold uppercase tracking-wider ${
-                      packetApproved
-                        ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-400'
-                        : 'border-rose-500/20 bg-rose-500/10 text-rose-400'
-                    }`}
-                  >
-                    {packetApproved ? 'Intake approved' : 'Packet mismatch'}
-                  </span>
-                </div>
-
-                <div className="rounded-xl border border-white/5 bg-zinc-900/60 p-3 text-xs leading-relaxed text-zinc-400">
-                  Confirm medical necessity and the clinical document cross-check. This
-                  advances only to <span className="font-mono text-zinc-200">CLINICAL_REVIEW_APPROVED</span>;
-                  Billing still owns VOB and Assessment PA.
-                </div>
-
-                {!packetApproved && (
-                  <p className="flex items-start gap-2 rounded-xl border border-rose-500/20 bg-rose-500/10 p-3 text-xs text-rose-300">
-                    <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                    Client status and intake packet disagree. Resolve the packet before
-                    approving clinical review.
-                  </p>
-                )}
-                {errors[actionKey] && (
-                  <p className="flex items-start gap-2 rounded-xl border border-rose-500/20 bg-rose-500/10 p-3 text-xs text-rose-300">
-                    <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                    {errors[actionKey]}
-                  </p>
-                )}
-
-                <div className="flex flex-col gap-2 sm:flex-row">
-                  <Link
-                    href={`/client/${client.id}?mode=clinical`}
-                    className="inline-flex h-9 flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 text-xs font-bold text-zinc-300 transition-all hover:border-brand-orange-500/30 hover:text-white"
-                  >
-                    <FileText className="h-3.5 w-3.5" />
-                    Review client record
-                  </Link>
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={() =>
-                      runAction(
-                        actionKey,
-                        'Clinical review approved and handed to Billing for VOB.',
-                        () => verifyDocuments(client.id),
-                      )
-                    }
-                    disabled={!packetApproved || isPending}
-                    isLoading={working}
-                    className={`flex-1 bg-brand-orange-600 text-white hover:bg-brand-orange-500 ${
-                      !packetApproved || isPending
-                        ? 'cursor-not-allowed'
-                        : 'cursor-pointer'
-                    }`}
-                  >
-                    <UserRoundCheck className="mr-2 h-3.5 w-3.5" />
-                    Approve clinical review
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          );
-        })}
-        <MoreInQueue
-          total={queues.documentReview.length}
-          shown={visible(queues.documentReview).length}
-        />
-      </QueueLane>
-
-      <QueueLane
-        title="97151 assessment scheduling"
-        eyebrow="Handoff 02"
-        count={queues.assessmentScheduling.length}
-        icon={CalendarClock}
-        accentClass="text-amber-400"
-        emptyTitle="No assessments need scheduling"
-        emptyCopy="Assessment PA approvals appear here until a durable 97151 date is saved."
-      >
-        {visible(queues.assessmentScheduling).map((client) => {
-          const actionKey = `schedule-${client.id}`;
-          const scheduledValue = scheduleInputs[client.id] || '';
-          const working = isPending && activeAction === actionKey;
-          return (
-            <Card
-              key={client.id}
-              className="overflow-hidden rounded-2xl border border-white/10 bg-zinc-950/80 shadow-xl transition-all duration-300 hover:scale-[1.01] hover:border-amber-500/40 hover:shadow-2xl"
-            >
-              <CardContent className="space-y-4 p-5">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <Link
-                      href={`/client/${client.id}?mode=assessment_prep`}
-                      className="cursor-pointer truncate font-heading text-base font-bold text-white transition-colors hover:text-amber-300"
-                    >
-                      {clientName(client)}
-                    </Link>
-                    <p className="mt-1 font-mono text-[10px] uppercase tracking-wider text-zinc-500">
-                      {updatedLabel(client.updatedAt)}
-                    </p>
-                  </div>
-                  <span className="shrink-0 rounded-full border border-amber-500/20 bg-amber-500/10 px-2.5 py-1 font-mono text-[9px] font-bold uppercase tracking-wider text-amber-400">
-                    97151 authorized
-                  </span>
-                </div>
-
-                <div className="rounded-xl border border-white/5 bg-zinc-900/60 p-3">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
-                    Assigned BCBA
-                  </p>
-                  <p className="mt-1 text-sm font-medium text-zinc-200">
-                    {client.bcba
-                      ? `${client.bcba.firstName} ${client.bcba.lastName}`
-                      : 'Unassigned — Clinical Support owned'}
-                  </p>
-                </div>
-
-                <label className="block space-y-2">
-                  <span className="flex items-center justify-between gap-3 text-[10px] font-bold uppercase tracking-wider text-zinc-400">
-                    Assessment date &amp; time
-                    <span className="font-mono text-amber-400">America/New_York · ET</span>
-                  </span>
-                  <input
-                    type="datetime-local"
-                    value={scheduledValue}
-                    onChange={(event) =>
-                      setScheduleInputs((current) => ({
-                        ...current,
-                        [client.id]: event.target.value,
-                      }))
-                    }
-                    disabled={isPending}
-                    className={`w-full rounded-xl border border-white/10 bg-zinc-950 px-3 py-2.5 text-sm text-white outline-none [color-scheme:dark] transition-all focus:border-amber-500/60 ${
-                      isPending ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
-                    }`}
-                  />
-                </label>
-
-                <p className="text-[11px] leading-relaxed text-zinc-500">
-                  Saves a durable scheduled Session (CPT 97151) and advances the client
-                  to <span className="font-mono text-zinc-300">ASSESSMENT_SCHEDULED</span>.
-                </p>
-                {errors[actionKey] && (
-                  <p className="flex items-start gap-2 rounded-xl border border-rose-500/20 bg-rose-500/10 p-3 text-xs text-rose-300">
-                    <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                    {errors[actionKey]}
-                  </p>
-                )}
-
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={() =>
-                    runAction(
-                      actionKey,
-                      'Assessment scheduled in ET and handed to the BCBA.',
-                      // Preserve the raw datetime-local string: the server owns ET conversion.
-                      () =>
-                        scheduleClinicalSupportAssessment(
-                          client.id,
-                          scheduledValue,
-                          client.status,
-                          client.bcbaId
-                        ),
-                    )
+    <div className="overflow-x-auto pb-2">
+      <div className="flex min-w-max gap-4 lg:grid lg:min-w-0 lg:grid-cols-4 lg:gap-4">
+        <div className="w-[min(100vw-3rem,19rem)] shrink-0 lg:w-auto lg:min-w-0">
+          <QueueLane
+            title="Clinical document verification"
+            eyebrow="Handoff 01"
+            subtitle="Confirm medical necessity after Intake approves the packet."
+            count={queues.documentReview.length}
+            icon={ClipboardCheck}
+            accentClass="text-brand-orange-400"
+            emptyTitle="No packets need clinical verification"
+            emptyCopy="New work appears here only after Intake approves the complete packet."
+          >
+            {visible(queues.documentReview).map((client) => {
+              const packetApproved = client.intakePacket?.status === 'APPROVED';
+              return (
+                <TriageCard
+                  key={client.id}
+                  client={client}
+                  lane="documentReview"
+                  badgeLabel={packetApproved ? 'Intake approved' : 'Packet mismatch'}
+                  badgeClass={
+                    packetApproved
+                      ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-400'
+                      : 'border-rose-500/20 bg-rose-500/10 text-rose-400'
                   }
-                  disabled={!scheduledValue || isPending}
-                  isLoading={working}
-                  className={`w-full bg-amber-600 text-white hover:bg-amber-500 ${
-                    !scheduledValue || isPending
-                      ? 'cursor-not-allowed'
-                      : 'cursor-pointer'
-                  }`}
-                >
-                  <CalendarClock className="mr-2 h-3.5 w-3.5" />
-                  Confirm 97151 schedule
-                </Button>
-              </CardContent>
-            </Card>
-          );
-        })}
-        <MoreInQueue
-          total={queues.assessmentScheduling.length}
-          shown={visible(queues.assessmentScheduling).length}
-        />
-      </QueueLane>
+                />
+              );
+            })}
+            <MoreInQueue
+              total={queues.documentReview.length}
+              shown={visible(queues.documentReview).length}
+            />
+          </QueueLane>
+        </div>
 
-      <QueueLane
-        title="Signed report assembly"
-        eyebrow="Handoff 03"
-        count={queues.reportAssembly.length}
-        icon={FileCheck2}
-        accentClass="text-cyan-400"
-        emptyTitle="No reports need assembly"
-        emptyCopy="Scheduled assessments appear here while the treatment plan and signatures are completed."
-      >
-        {visible(queues.reportAssembly).map((client) => {
-          const actionKey = `assemble-${client.id}`;
-          const readiness = getReportReadiness(client.treatmentPlan);
-          const working = isPending && activeAction === actionKey;
-          return (
-            <Card
-              key={client.id}
-              className="overflow-hidden rounded-2xl border border-white/10 bg-zinc-950/80 shadow-xl transition-all duration-300 hover:scale-[1.01] hover:border-cyan-500/40 hover:shadow-2xl"
-            >
-              <CardContent className="space-y-4 p-5">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <Link
-                      href={`/client/${client.id}?mode=treatment_plan`}
-                      className="cursor-pointer truncate font-heading text-base font-bold text-white transition-colors hover:text-cyan-300"
-                    >
-                      {clientName(client)}
-                    </Link>
-                    <p className="mt-1 font-mono text-[10px] uppercase tracking-wider text-zinc-500">
-                      {updatedLabel(client.updatedAt)}
-                    </p>
-                  </div>
-                  <span
-                    className={`shrink-0 rounded-full border px-2.5 py-1 font-mono text-[9px] font-bold uppercase tracking-wider ${
-                      readiness.ready
-                        ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-400'
-                        : 'border-cyan-500/20 bg-cyan-500/10 text-cyan-400'
-                    }`}
-                  >
-                    {readiness.ready ? 'Ready to assemble' : 'Waiting on prerequisites'}
-                  </span>
-                </div>
+        <div className="w-[min(100vw-3rem,19rem)] shrink-0 lg:w-auto lg:min-w-0">
+          <QueueLane
+            title="97151 assessment scheduling"
+            eyebrow="Handoff 02"
+            subtitle="Schedule the authorized assessment in clinic ET."
+            count={queues.assessmentScheduling.length}
+            icon={CalendarClock}
+            accentClass="text-amber-400"
+            emptyTitle="No assessments need scheduling"
+            emptyCopy="Assessment PA approvals appear here until a durable 97151 date is saved."
+          >
+            {visible(queues.assessmentScheduling).map((client) => (
+              <TriageCard
+                key={client.id}
+                client={client}
+                lane="assessmentScheduling"
+                badgeLabel="97151 authorized"
+                badgeClass="border-amber-500/20 bg-amber-500/10 text-amber-400"
+                showBcba
+                hoverBorderClass="hover:border-amber-500/40"
+              />
+            ))}
+            <MoreInQueue
+              total={queues.assessmentScheduling.length}
+              shown={visible(queues.assessmentScheduling).length}
+            />
+          </QueueLane>
+        </div>
 
-                <div className="grid grid-cols-2 gap-2">
-                  <div
-                    className={`rounded-xl border p-3 ${
-                      readiness.planComplete
-                        ? 'border-emerald-500/20 bg-emerald-500/10'
-                        : 'border-amber-500/20 bg-amber-500/10'
-                    }`}
-                  >
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
-                      BCBA plan
-                    </p>
-                    <p
-                      className={`mt-1 text-xs font-bold ${
-                        readiness.planComplete ? 'text-emerald-400' : 'text-amber-400'
-                      }`}
-                    >
-                      {readiness.planComplete ? 'Submitted' : 'Pending'}
-                    </p>
-                  </div>
-                  <div
-                    className={`rounded-xl border p-3 ${
-                      readiness.parentSigned
-                        ? 'border-emerald-500/20 bg-emerald-500/10'
-                        : 'border-amber-500/20 bg-amber-500/10'
-                    }`}
-                  >
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
-                      Parent signature
-                    </p>
-                    <p
-                      className={`mt-1 text-xs font-bold ${
-                        readiness.parentSigned ? 'text-emerald-400' : 'text-amber-400'
-                      }`}
-                    >
-                      {readiness.parentSigned ? 'Signed' : 'Pending'}
-                    </p>
-                  </div>
-                </div>
-
-                {!readiness.ready && (
-                  <p className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-xs leading-relaxed text-amber-300">
-                    Waiting on {readiness.blockers.join(' and ')}. Report assembly cannot
-                    advance the status until both are durable.
-                  </p>
-                )}
-                {errors[actionKey] && (
-                  <p className="flex items-start gap-2 rounded-xl border border-rose-500/20 bg-rose-500/10 p-3 text-xs text-rose-300">
-                    <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                    {errors[actionKey]}
-                  </p>
-                )}
-
-                <div className="flex flex-col gap-2 sm:flex-row">
-                  <Link
-                    href={`/client/${client.id}?mode=treatment_plan`}
-                    className="inline-flex h-9 flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 text-xs font-bold text-zinc-300 transition-all hover:border-cyan-500/30 hover:text-white"
-                  >
-                    <FileText className="h-3.5 w-3.5" />
-                    Open treatment plan
-                  </Link>
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={() =>
-                      runAction(
-                        actionKey,
-                        'Report assembled and handed to Billing.',
-                        () => assembleClinicalSupportReport(client.id),
-                      )
-                    }
-                    disabled={!readiness.ready || isPending}
-                    isLoading={working}
-                    className={`flex-1 bg-cyan-600 text-white hover:bg-cyan-500 ${
-                      !readiness.ready || isPending
-                        ? 'cursor-not-allowed'
-                        : 'cursor-pointer'
-                    }`}
-                  >
-                    <FileCheck2 className="mr-2 h-3.5 w-3.5" />
-                    Assemble report
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          );
-        })}
-        <MoreInQueue
-          total={queues.reportAssembly.length}
-          shown={visible(queues.reportAssembly).length}
-        />
-      </QueueLane>
-
-      <QueueLane
-        title="Treatment PA billing handoff"
-        eyebrow="Handoff 04"
-        count={queues.billingHandoff.length}
-        icon={Send}
-        accentClass="text-emerald-400"
-        emptyTitle="No packets await Billing handoff"
-        emptyCopy="Assembled reports appear here until the manual Plutus tracker is marked submitted."
-      >
-        {visible(queues.billingHandoff).map((client) => {
-          const actionKey = `submit-${client.id}`;
-          const working = isPending && activeAction === actionKey;
-          return (
-            <Card
-              key={client.id}
-              className="overflow-hidden rounded-2xl border border-emerald-500/20 bg-zinc-950/80 shadow-xl transition-all duration-300 hover:scale-[1.01] hover:border-emerald-500/40 hover:shadow-2xl"
-            >
-              <CardContent className="space-y-4 p-5">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <Link
-                      href={`/client/${client.id}?tab=billing`}
-                      className="cursor-pointer truncate font-heading text-base font-bold text-white transition-colors hover:text-emerald-300"
-                    >
-                      {clientName(client)}
-                    </Link>
-                    <p className="mt-1 font-mono text-[10px] uppercase tracking-wider text-zinc-500">
-                      {updatedLabel(client.updatedAt)}
-                    </p>
-                  </div>
-                  <span className="shrink-0 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 font-mono text-[9px] font-bold uppercase tracking-wider text-emerald-400">
-                    Report assembled
-                  </span>
-                </div>
-
-                <div className="rounded-xl border border-emerald-500/10 bg-emerald-500/5 p-3 text-xs leading-relaxed text-zinc-400">
-                  Mark the Treatment PA tracker submitted. The PA row and client status
-                  advance together to prevent a partial Billing handoff.
-                </div>
-                {errors[actionKey] && (
-                  <p className="flex items-start gap-2 rounded-xl border border-rose-500/20 bg-rose-500/10 p-3 text-xs text-rose-300">
-                    <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                    {errors[actionKey]}
-                  </p>
-                )}
-
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={() =>
-                    runAction(
-                      actionKey,
-                      'Treatment PA marked submitted and routed to Billing.',
-                      () => submitTreatmentPacket(client.id),
-                    )
+        <div className="w-[min(100vw-3rem,19rem)] shrink-0 lg:w-auto lg:min-w-0">
+          <QueueLane
+            title="Signed report assembly"
+            eyebrow="Handoff 03"
+            subtitle="Assemble the signed treatment plan report for Billing."
+            count={queues.reportAssembly.length}
+            icon={FileCheck2}
+            accentClass="text-cyan-400"
+            emptyTitle="No reports need assembly"
+            emptyCopy="Scheduled assessments appear here while the treatment plan and signatures are completed."
+          >
+            {visible(queues.reportAssembly).map((client) => {
+              const readiness = getReportReadiness(client.treatmentPlan);
+              return (
+                <TriageCard
+                  key={client.id}
+                  client={client}
+                  lane="reportAssembly"
+                  badgeLabel={
+                    readiness.ready ? 'Ready to assemble' : 'Awaiting prerequisites'
                   }
-                  disabled={isPending}
-                  isLoading={working}
-                  className={`w-full bg-emerald-600 text-white hover:bg-emerald-500 ${
-                    isPending ? 'cursor-not-allowed' : 'cursor-pointer'
-                  }`}
-                >
-                  <Send className="mr-2 h-3.5 w-3.5" />
-                  Confirm Plutus submission
-                </Button>
-              </CardContent>
-            </Card>
-          );
-        })}
-        <MoreInQueue
-          total={queues.billingHandoff.length}
-          shown={visible(queues.billingHandoff).length}
-        />
-      </QueueLane>
+                  badgeClass={
+                    readiness.ready
+                      ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-400'
+                      : 'border-cyan-500/20 bg-cyan-500/10 text-cyan-400'
+                  }
+                  hoverBorderClass="hover:border-cyan-500/40"
+                />
+              );
+            })}
+            <MoreInQueue
+              total={queues.reportAssembly.length}
+              shown={visible(queues.reportAssembly).length}
+            />
+          </QueueLane>
+        </div>
+
+        <div className="w-[min(100vw-3rem,19rem)] shrink-0 lg:w-auto lg:min-w-0">
+          <QueueLane
+            title="Ready for billing"
+            eyebrow="Handoff 04"
+            subtitle="Route assembled reports to Billing for Treatment PA tracking."
+            count={queues.billingHandoff.length}
+            icon={Send}
+            accentClass="text-emerald-400"
+            emptyTitle="No packets await Billing handoff"
+            emptyCopy="Assembled reports appear here until Treatment PA is marked submitted in RAS."
+          >
+            {visible(queues.billingHandoff).map((client) => (
+              <TriageCard
+                key={client.id}
+                client={client}
+                lane="billingHandoff"
+                badgeLabel="Report assembled"
+                badgeClass="border-emerald-500/20 bg-emerald-500/10 text-emerald-400"
+                hoverBorderClass="hover:border-emerald-500/40"
+              />
+            ))}
+            <MoreInQueue
+              total={queues.billingHandoff.length}
+              shown={visible(queues.billingHandoff).length}
+            />
+          </QueueLane>
+        </div>
+      </div>
     </div>
   );
 }

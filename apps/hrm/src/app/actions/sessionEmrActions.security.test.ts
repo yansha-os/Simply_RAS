@@ -234,6 +234,8 @@ function claimReadyPayload(
 
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-08-12T15:00:00.000Z'));
 
   mocks.resolveActingRbtContext.mockResolvedValue({
     rbtUserId: ACTOR_ID,
@@ -684,6 +686,7 @@ describe('clockOutHrmSession authoritative close', () => {
         actualEnd: new Date('2026-08-12T15:00:00.000Z'),
       });
     mocks.prisma.eVVLog.findMany.mockResolvedValue([closedEvvLog()]);
+    mocks.tx.eVVLog.findMany.mockResolvedValue([openEvvLog()]);
     mocks.tx.session.updateMany.mockResolvedValue({ count: 0 });
 
     const result = await clockOutAction()({ sessionId: SESSION_ID });

@@ -31,7 +31,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-export function normalizeGuardianName(name: string): string {
+export function normalizeGuardianName(name?: unknown): string {
+  if (typeof name !== 'string') return '';
   return name.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
@@ -40,10 +41,10 @@ export function resolveExpectedGuardianName(opts: {
   guardianName?: string | null;
   formData?: unknown;
 }): string | null {
-  const fromClient = typeof opts.guardianName === 'string' ? opts.guardianName.trim() : '';
+  const fromClient = typeof opts?.guardianName === 'string' ? opts.guardianName.trim() : '';
   if (fromClient) return fromClient;
 
-  let form: unknown = opts.formData;
+  let form: unknown = opts?.formData;
   if (typeof form === 'string') {
     try {
       form = JSON.parse(form);
@@ -58,11 +59,11 @@ export function resolveExpectedGuardianName(opts: {
 }
 
 export function validateParentTreatmentPlanSign(input: {
-  parentSignatureName: string;
-  planReviewed: boolean;
-  expectedGuardianName: string | null;
+  parentSignatureName?: string | null;
+  planReviewed?: boolean;
+  expectedGuardianName?: string | null;
 }): ParentSignValidation {
-  if (!input.planReviewed) {
+  if (!input?.planReviewed) {
     return {
       ok: false,
       code: 'NOT_REVIEWED',
@@ -70,7 +71,7 @@ export function validateParentTreatmentPlanSign(input: {
     };
   }
 
-  const signatureName = input.parentSignatureName.trim();
+  const signatureName = typeof input?.parentSignatureName === 'string' ? input.parentSignatureName.trim() : '';
   if (!signatureName) {
     return {
       ok: false,
@@ -79,7 +80,7 @@ export function validateParentTreatmentPlanSign(input: {
     };
   }
 
-  const expected = input.expectedGuardianName?.trim() || null;
+  const expected = typeof input?.expectedGuardianName === 'string' ? input.expectedGuardianName.trim() : '';
   if (!expected) {
     return {
       ok: false,
@@ -110,6 +111,12 @@ function rowDetail(row: Record<string, unknown>, keys: string[]): string | null 
     if (typeof v === 'string' && v.trim()) return v.trim();
   }
   return null;
+}
+
+function safeHours(v: unknown): number {
+  if (typeof v === 'number' && Number.isFinite(v)) return Math.max(0, v);
+  const parsed = Number(v);
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
 }
 
 /** Read-only parent review summary from existing treatmentPlan JSON — no invented content. */
@@ -160,9 +167,9 @@ export function buildParentPlanReviewSummary(treatmentPlan: unknown): ParentPlan
       : null;
 
   return {
-    hours97153: typeof plan.hours97153 === 'number' ? plan.hours97153 : Number(plan.hours97153) || 0,
-    hours97155: typeof plan.hours97155 === 'number' ? plan.hours97155 : Number(plan.hours97155) || 0,
-    hours97156: typeof plan.hours97156 === 'number' ? plan.hours97156 : Number(plan.hours97156) || 0,
+    hours97153: safeHours(plan.hours97153),
+    hours97155: safeHours(plan.hours97155),
+    hours97156: safeHours(plan.hours97156),
     primaryLocations,
     crisisPlan: crisis,
     goals,

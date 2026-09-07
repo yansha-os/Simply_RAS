@@ -38,6 +38,7 @@ function activeDeviceSession() {
     id: '66666666-6666-4666-8666-666666666666',
     candidateId: CANDIDATE_ID,
     revokedAt: null,
+    boundAt: new Date(),
     candidate: {
       id: CANDIDATE_ID,
       userId: RBT_USER_ID,
@@ -248,5 +249,65 @@ describe.sequential('HRM applicant proxy device-session security', () => {
     const response = await proxy(applicantRequest(null, null));
 
     expectApplyRedirect(response);
+  });
+});
+
+describe.sequential('HRM staff proxy dev-tools impersonation bypass', () => {
+  it('redirects unauthenticated staff route to /login when DevTools are disabled', async () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv('NEXT_PUBLIC_ENABLE_DEV_TOOLS', 'false');
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://supabase.example.test');
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY', 'unit-test-anon-key');
+
+    const request = new NextRequest('https://hrm.example.test/ats', {
+      headers: { cookie: 'dev_impersonate_role=HR_AGENT' },
+    });
+
+    const response = await proxy(request);
+    expect(response.status).toBe(307);
+    expect(response.headers.get('location')).toBe('https://hrm.example.test/login?next=%2Fats');
+  });
+
+  it('allows access to staff route when DevTools are enabled and role cookie is present', async () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv('NEXT_PUBLIC_ENABLE_DEV_TOOLS', 'true');
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://supabase.example.test');
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY', 'unit-test-anon-key');
+
+    const request = new NextRequest('https://hrm.example.test/ats', {
+      headers: { cookie: 'dev_impersonate_role=HR_AGENT' },
+    });
+
+    const response = await proxy(request);
+    expect(response.headers.get('x-middleware-next')).toBe('1');
+  });
+
+  it('allows access to staff route when DevTools are enabled and userId cookie is present', async () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv('NEXT_PUBLIC_ENABLE_DEV_TOOLS', 'true');
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://supabase.example.test');
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY', 'unit-test-anon-key');
+
+    const request = new NextRequest('https://hrm.example.test/hr-dashboard', {
+      headers: { cookie: 'dev_impersonate_user_id=edbd9e0c-b8cb-4206-b297-ff81dc4ade88' },
+    });
+
+    const response = await proxy(request);
+    expect(response.headers.get('x-middleware-next')).toBe('1');
+  });
+
+  it('does not allow staff impersonation bypass in production', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('NEXT_PUBLIC_ENABLE_DEV_TOOLS', 'true');
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://supabase.example.test');
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY', 'unit-test-anon-key');
+
+    const request = new NextRequest('https://hrm.example.test/payroll', {
+      headers: { cookie: 'dev_impersonate_role=FINANCE' },
+    });
+
+    const response = await proxy(request);
+    expect(response.status).toBe(307);
+    expect(response.headers.get('location')).toBe('https://hrm.example.test/login?next=%2Fpayroll');
   });
 });

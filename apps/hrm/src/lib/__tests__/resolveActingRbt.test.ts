@@ -69,6 +69,7 @@ function activeDeviceSession(
     candidateId: candidateRecord.id,
     deviceFingerprint: fingerprint,
     revokedAt: null,
+    boundAt: new Date(),
     candidate: candidateRecord,
   };
 }
@@ -118,6 +119,25 @@ describe.sequential('resolveActingRbtContext candidate device-session security',
     );
     expect(mocks.findCandidateById).not.toHaveBeenCalled();
     expect(mocks.getCurrentUser).not.toHaveBeenCalled();
+  });
+
+  it('revokes a hired device session when the linked RBT account is inactive', async () => {
+    setCandidateCookies();
+    mocks.findDeviceSession.mockResolvedValue(activeDeviceSession());
+    mocks.findUser.mockResolvedValue(null);
+
+    await expect(resolveActingRbtContext()).resolves.toEqual({
+      candidateId: null,
+      rbtUserId: null,
+    });
+    expect(mocks.findUser).toHaveBeenCalledWith({
+      where: {
+        id: RBT_USER_ID,
+        role: 'RBT',
+        isActive: true,
+      },
+      select: { id: true },
+    });
   });
 
   it('accepts a fingerprint-matched active applicant session without inventing an RBT', async () => {

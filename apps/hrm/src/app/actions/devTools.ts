@@ -11,7 +11,6 @@ import {
   asRecord,
   deriveAtsStage,
   readProgressFromPacket,
-  type OnboardingProgressPatch,
 } from '@/lib/atsStage';
 import {
   DEMO_STUDIO_GUARDIAN_EMAIL as SHARED_DEMO_STUDIO_GUARDIAN_EMAIL,
@@ -133,21 +132,6 @@ export async function devSkipApplicantRequirements(
 
     const allSteps = Array.from({ length: ONBOARDING_TOTAL_STEPS }, (_, i) => i + 1);
     const packOnly = mode === 'PACK_ONLY';
-
-    const patch: OnboardingProgressPatch = {
-      tasksDone: true,
-      tasksCompletedSteps: allSteps,
-      ...(packOnly
-        ? {}
-        : {
-            availabilityDone: true,
-            simulationDone: true,
-            interviewBooked: true,
-            interviewPassed: true,
-            certUploaded: true,
-            clearedForHire: true,
-          }),
-    };
 
     const prev = readProgressFromPacket(candidate.onboardingPacket, candidate.dossier);
     const nextProgress = {
@@ -347,6 +331,9 @@ export async function devListAtsCandidates() {
         userId: true,
         createdAt: true,
         appliedRole: true,
+        onboardingPacket: {
+          select: { ls54Status: true },
+        },
       },
     });
 

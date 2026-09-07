@@ -36,7 +36,7 @@ export function OnboardingConfirmModal({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[99999] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
       style={{ position: 'fixed', top: 0, right: 0, bottom: 0, left: 0 }}
       onClick={(e) => {
         if (e.target === e.currentTarget && !pending) onCancel();
@@ -46,7 +46,7 @@ export function OnboardingConfirmModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="onboarding-confirm-title"
-        className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl"
+        className="w-full max-w-md rounded-2xl border border-[#E2D5B7] bg-[#FFFDF8] p-6 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-start justify-between gap-3">

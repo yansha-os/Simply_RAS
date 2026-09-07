@@ -52,6 +52,25 @@ describe('deriveAssessmentState', () => {
     expect(state.assessmentAt?.toISOString()).toBe('2026-08-20T14:30:00.000Z');
   });
 
+  it('reports scheduled when durable 97151 session and status agree', () => {
+    const state = deriveAssessmentState(
+      {
+        status: 'ASSESSMENT_SCHEDULED',
+        treatmentPlan: {
+          assessmentScheduledAt: '2026-08-20T14:30:00.000Z',
+        },
+      },
+      {
+        sessionId: 'sess-97151',
+        sessionScheduledStart: '2026-08-20T14:30:00.000Z',
+        hasDurableSession: true,
+      },
+    );
+
+    expect(state.phase).toBe('scheduled');
+    expect(state.durableSessionId).toBe('sess-97151');
+  });
+
   it('requires reconciliation when advanced status has no persisted date', () => {
     expect(
       deriveAssessmentState({
@@ -92,6 +111,40 @@ describe('deriveAssessmentState', () => {
       phase: 'reconcile',
       assessmentAt: null,
       dateIssue: 'invalid',
+    });
+  });
+
+  it('flags session vs treatment-plan schedule mismatch', () => {
+    expect(
+      deriveAssessmentState(
+        {
+          status: 'ASSESSMENT_SCHEDULED',
+          treatmentPlan: { assessmentScheduledAt: '2026-08-20T14:30:00.000Z' },
+        },
+        {
+          sessionId: 'sess-1',
+          sessionScheduledStart: '2026-08-21T14:30:00.000Z',
+          hasDurableSession: true,
+        },
+      ),
+    ).toMatchObject({
+      phase: 'reconcile',
+      dateIssue: 'mismatch',
+    });
+  });
+
+  it('requires reconciliation when ASSESSMENT_SCHEDULED lacks durable 97151 session', () => {
+    expect(
+      deriveAssessmentState(
+        {
+          status: 'ASSESSMENT_SCHEDULED',
+          treatmentPlan: { assessmentScheduledAt: '2026-08-20T14:30:00.000Z' },
+        },
+        { hasDurableSession: false, sessionId: null },
+      ),
+    ).toMatchObject({
+      phase: 'reconcile',
+      dateIssue: 'missing',
     });
   });
 

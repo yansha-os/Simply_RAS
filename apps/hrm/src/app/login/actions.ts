@@ -30,6 +30,10 @@ export async function login(prevState: { error?: string } | null, formData: Form
     return { error: 'Password is required.' };
   }
 
+  if (email.length > 254 || password.length > 1_024) {
+    return { error: 'Invalid email or password.' };
+  }
+
   // DEV-ONLY: email-pattern shortcuts for local portal testing. Gated behind
   // isDevToolsEnabled() (non-prod NODE_ENV + explicit flag, with a boot-time
   // assert that kills a misconfigured prod build). In a prod-configured env

@@ -204,36 +204,36 @@ export function RbtLiveTasksInbox() {
         aria-label="Loading RBT tasks"
       >
         <div className="pointer-events-none absolute right-0 top-0 h-72 w-72 rounded-full bg-[#F97316]/10 blur-3xl" />
-        <div className="relative h-24 animate-pulse rounded-3xl border border-white/10 bg-zinc-950/80 backdrop-blur-xl" />
+        <div className="relative h-24 animate-pulse rounded-3xl border border-[#E2D5B7] bg-[#FFFDF8]" />
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           {[0, 1, 2, 3].map((item) => (
             <div
               key={item}
-              className="h-24 animate-pulse rounded-2xl border border-white/10 bg-zinc-950/70 backdrop-blur-xl"
+              className="h-24 animate-pulse rounded-2xl border border-[#E2D5B7] bg-[#FFFDF8]"
             />
           ))}
         </div>
-        <div className="h-36 animate-pulse rounded-3xl border border-white/10 bg-zinc-950/70 backdrop-blur-xl" />
+        <div className="h-36 animate-pulse rounded-3xl border border-[#E2D5B7] bg-[#FFFDF8]" />
         <span className="sr-only">Loading live tasks…</span>
       </section>
     );
   }
 
   return (
-    <div className="relative max-w-5xl mx-auto space-y-6 pb-12 animate-fade-in">
+    <div className="relative max-w-5xl mx-auto space-y-6 pb-12 animate-fade-in text-slate-900">
       <div className="pointer-events-none absolute -top-24 right-0 w-[420px] h-[420px] rounded-full bg-[#F97316]/10 blur-3xl" />
 
       <div className="relative flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
           <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-2xl bg-zinc-950/80 backdrop-blur-xl border border-white/10 flex items-center justify-center shadow-lg shadow-orange-500/10">
+            <div className="w-10 h-10 rounded-2xl bg-orange-100 border border-orange-200 flex items-center justify-center shadow-sm">
               <ClipboardList className="w-5 h-5 text-[#F97316]" aria-hidden="true" />
             </div>
-            <h1 className="text-3xl font-black text-white font-heading tracking-tight">
+            <h1 className="text-3xl font-black text-slate-900 font-heading tracking-tight">
               My Tasks
             </h1>
           </div>
-          <p className="text-xs text-zinc-400 font-semibold mt-1 max-w-2xl">
+          <p className="text-xs text-slate-600 font-semibold mt-1 max-w-2xl">
             Your persisted onboarding, session-note, and case-application work. Documentation
             deadlines are shown in Eastern Time.
           </p>
@@ -243,7 +243,7 @@ export function RbtLiveTasksInbox() {
             type="button"
             onClick={() => void refresh(true, true)}
             disabled={refreshing}
-            className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-white/10 bg-zinc-950/80 px-3 py-1.5 text-[10px] font-black uppercase tracking-wide text-zinc-200 backdrop-blur-xl transition-all duration-300 hover:border-[#F97316]/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F97316]/70 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-[#E2D5B7] bg-[#FFFDF8] px-3 py-1.5 text-[10px] font-black uppercase tracking-wide text-slate-800 transition-all duration-300 hover:border-[#F97316]/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F97316]/70 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <RefreshCw
               className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`}
@@ -254,15 +254,15 @@ export function RbtLiveTasksInbox() {
           <span
             className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[10px] font-black uppercase tracking-wide ${
               issues.length > 0
-                ? 'border-amber-500/20 bg-amber-500/10 text-amber-300'
-                : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-400'
+                ? 'border-amber-300 bg-amber-100 text-amber-900'
+                : 'border-emerald-300 bg-emerald-100 text-emerald-800'
             }`}
             role="status"
             aria-live="polite"
           >
             <span
               className={`h-2 w-2 rounded-full ${
-                issues.length > 0 ? 'bg-amber-400' : 'dot-live bg-emerald-400'
+                issues.length > 0 ? 'bg-amber-500' : 'bg-emerald-500'
               }`}
               aria-hidden="true"
             />
@@ -307,23 +307,23 @@ export function RbtLiveTasksInbox() {
               key={stat.label}
               onClick={() => setFilter(stat.filter)}
               aria-pressed={active}
-              className={`cursor-pointer rounded-2xl border bg-zinc-950/80 p-4 text-left backdrop-blur-xl transition-all duration-300 hover:scale-[1.01] hover:border-[#F97316]/40 hover:shadow-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F97316]/70 ${
+              className={`cursor-pointer rounded-2xl border p-4 text-left transition-all duration-300 hover:scale-[1.01] hover:border-[#F97316]/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F97316]/70 ${
                 active
-                  ? 'border-[#F97316]/60 shadow-lg shadow-orange-500/10'
-                  : 'border-white/10'
+                  ? 'border-[#F97316]/60 bg-orange-50 shadow-md'
+                  : 'border-[#E2D5B7] bg-[#FFFDF8]'
               }`}
             >
               <div className="flex items-center justify-between mb-2">
                 <span
                   className={`text-[10px] font-mono font-bold uppercase tracking-wider ${
-                    active ? 'text-[#F97316]' : 'text-zinc-500'
+                    active ? 'text-[#C2410C]' : 'text-slate-500'
                   }`}
                 >
                   {stat.label}
                 </span>
                 <Icon className="w-3.5 h-3.5 text-[#F97316]" aria-hidden="true" />
               </div>
-              <p className="text-2xl font-black text-white font-heading">{stat.value}</p>
+              <p className="text-2xl font-black text-slate-900 font-heading">{stat.value}</p>
             </button>
           );
         })}
@@ -331,29 +331,29 @@ export function RbtLiveTasksInbox() {
 
       {issues.length > 0 ? (
         <div
-          className="relative overflow-hidden rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4 backdrop-blur-xl"
+          className="relative overflow-hidden rounded-2xl border border-amber-300 bg-amber-50 p-4"
           role="alert"
         >
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-start gap-3">
               <AlertTriangle
-                className="mt-0.5 h-5 w-5 shrink-0 text-amber-300"
+                className="mt-0.5 h-5 w-5 shrink-0 text-amber-600"
                 aria-hidden="true"
               />
               <div>
-                <p className="text-sm font-black text-amber-100">
+                <p className="text-sm font-black text-amber-900">
                   {issues.length === 1
                     ? `${issues[0].source} source unavailable`
                     : 'Some task sources are unavailable'}
                 </p>
-                <ul className="mt-1 space-y-0.5 text-xs font-medium text-amber-100/70">
+                <ul className="mt-1 space-y-0.5 text-xs font-medium text-amber-800">
                   {issues.map((issue) => (
                     <li key={`${issue.source}-${issue.message}`}>
                       {issue.source}: {issue.message}
                     </li>
                   ))}
                 </ul>
-                <p className="mt-1 text-[10px] font-bold uppercase tracking-wide text-amber-300/80">
+                <p className="mt-1 text-[10px] font-bold uppercase tracking-wide text-amber-900">
                   Loaded tasks remain visible; a clear inbox is not confirmed.
                 </p>
               </div>
@@ -362,7 +362,7 @@ export function RbtLiveTasksInbox() {
               type="button"
               onClick={() => void refresh(true, true)}
               disabled={refreshing}
-              className="inline-flex shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-amber-400/20 bg-zinc-950/40 px-3.5 py-2 text-[11px] font-black text-amber-100 transition hover:border-amber-300/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-amber-300 bg-white px-3.5 py-2 text-[11px] font-black text-amber-900 transition hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <RefreshCw
                 className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`}
@@ -379,19 +379,18 @@ export function RbtLiveTasksInbox() {
       </p>
 
       {tasks.length === 0 && issues.length === 0 ? (
-        <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-zinc-950/80 backdrop-blur-xl p-8 shadow-2xl">
-          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,_rgba(16,185,129,0.12),_transparent_55%)] pointer-events-none" />
+        <div className="relative overflow-hidden rounded-3xl border border-emerald-300 bg-[#FFFDF8] p-8 shadow-xl">
           <div className="relative flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-start gap-3">
-              <div className="w-11 h-11 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 flex items-center justify-center shrink-0">
+              <div className="w-11 h-11 rounded-2xl border border-emerald-300 bg-emerald-100 flex items-center justify-center shrink-0">
                 <CheckCircle2
-                  className="w-5 h-5 text-emerald-400"
+                  className="w-5 h-5 text-emerald-600"
                   aria-hidden="true"
                 />
               </div>
               <div>
-                <h3 className="text-lg font-black text-white font-heading">You&apos;re clear</h3>
-                <p className="text-xs text-zinc-400 font-medium mt-1 max-w-lg">
+                <h3 className="text-lg font-black text-slate-900 font-heading">You&apos;re clear</h3>
+                <p className="text-xs text-slate-600 font-medium mt-1 max-w-lg">
                   No open onboarding steps, pay holds, or active job applications. Schedule sessions
                   and apply to openings when you&apos;re ready — nothing is invented here when the
                   queues are empty.
@@ -401,7 +400,7 @@ export function RbtLiveTasksInbox() {
             <div className="relative flex flex-wrap gap-2">
               <Link
                 href="/rbt/schedule"
-                className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-[11px] font-black text-zinc-200 transition-all duration-300 hover:border-[#F97316]/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F97316]/70"
+                className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-[#E2D5B7] bg-[#F9F5EC] px-4 py-2 text-[11px] font-black text-slate-800 transition-all duration-300 hover:border-[#F97316]/40 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F97316]/70"
               >
                 Schedule <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
               </Link>
@@ -413,7 +412,7 @@ export function RbtLiveTasksInbox() {
               </Link>
               <Link
                 href="/rbt/payroll"
-                className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-[11px] font-black text-zinc-200 transition-all duration-300 hover:border-[#F97316]/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F97316]/70"
+                className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-[#E2D5B7] bg-[#F9F5EC] px-4 py-2 text-[11px] font-black text-slate-800 transition-all duration-300 hover:border-[#F97316]/40 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F97316]/70"
               >
                 Payroll
               </Link>
@@ -421,17 +420,16 @@ export function RbtLiveTasksInbox() {
           </div>
         </div>
       ) : tasks.length === 0 ? (
-        <div className="relative overflow-hidden rounded-3xl border border-amber-500/20 bg-zinc-950/80 p-8 shadow-2xl backdrop-blur-xl">
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,_rgba(245,158,11,0.12),_transparent_55%)]" />
+        <div className="relative overflow-hidden rounded-3xl border border-amber-300 bg-amber-50 p-8 shadow-md">
           <div className="relative flex items-start gap-3">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-amber-500/20 bg-amber-500/10">
-              <AlertTriangle className="h-5 w-5 text-amber-300" aria-hidden="true" />
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-amber-300 bg-white">
+              <AlertTriangle className="h-5 w-5 text-amber-600" aria-hidden="true" />
             </div>
             <div>
-              <h3 className="font-heading text-lg font-black text-white">
+              <h3 className="font-heading text-lg font-black text-slate-900">
                 Inbox status unavailable
               </h3>
-              <p className="mt-1 max-w-lg text-xs font-medium text-zinc-400">
+              <p className="mt-1 max-w-lg text-xs font-medium text-slate-700">
                 No task source returned a complete result, so this inbox cannot confirm that
                 you&apos;re clear. Retry before relying on an empty queue.
               </p>
@@ -439,18 +437,17 @@ export function RbtLiveTasksInbox() {
           </div>
         </div>
       ) : visibleTasks.length === 0 ? (
-        <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-zinc-950/80 p-8 shadow-2xl backdrop-blur-xl">
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,_rgba(249,115,22,0.1),_transparent_55%)]" />
+        <div className="relative overflow-hidden rounded-3xl border border-[#E2D5B7] bg-[#FFFDF8] p-8 shadow-xl">
           <div className="relative flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-start gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/5">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-orange-200 bg-orange-100">
                 <FileText className="h-5 w-5 text-[#F97316]" aria-hidden="true" />
               </div>
               <div>
-                <h3 className="font-heading text-lg font-black text-white">
+                <h3 className="font-heading text-lg font-black text-slate-900">
                   No {activeFilterLabel[filter]} tasks
                 </h3>
-                <p className="mt-1 max-w-lg text-xs font-medium text-zinc-400">
+                <p className="mt-1 max-w-lg text-xs font-medium text-slate-600">
                   Other task categories may still contain open work.
                 </p>
               </div>
@@ -458,7 +455,7 @@ export function RbtLiveTasksInbox() {
             <button
               type="button"
               onClick={() => setFilter('ALL')}
-              className="inline-flex cursor-pointer items-center justify-center rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-[11px] font-black text-zinc-200 transition hover:border-[#F97316]/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F97316]/70"
+              className="inline-flex cursor-pointer items-center justify-center rounded-xl border border-[#E2D5B7] bg-[#F9F5EC] px-4 py-2 text-[11px] font-black text-slate-800 transition hover:border-[#F97316]/40 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F97316]/70"
             >
               Show all tasks
             </button>
@@ -476,11 +473,11 @@ export function RbtLiveTasksInbox() {
               <li key={task.id}>
                 <Link
                   href={task.href}
-                  className="group flex cursor-pointer flex-col justify-between gap-3 rounded-3xl border border-white/10 bg-zinc-950/80 p-5 shadow-xl backdrop-blur-xl transition-all duration-300 hover:scale-[1.01] hover:border-[#F97316]/40 hover:shadow-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F97316]/70 sm:flex-row sm:items-center"
+                  className="group flex cursor-pointer flex-col justify-between gap-3 rounded-3xl border border-[#E2D5B7] bg-[#FFFDF8] p-5 shadow-sm transition-all duration-300 hover:scale-[1.01] hover:border-[#F97316]/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F97316]/70 sm:flex-row sm:items-center"
                 >
                   <div className="flex items-start gap-3 min-w-0">
                     <div
-                      className={`w-10 h-10 rounded-2xl border border-white/10 bg-white/5 flex items-center justify-center shrink-0 ${tones.icon}`}
+                      className={`w-10 h-10 rounded-2xl border border-[#E2D5B7] bg-[#F9F5EC] flex items-center justify-center shrink-0 ${tones.icon}`}
                     >
                       <Icon className="w-5 h-5" aria-hidden="true" />
                     </div>
@@ -500,7 +497,7 @@ export function RbtLiveTasksInbox() {
                             <time
                               dateTime={task.dueAt}
                               className={`truncate font-mono text-[10px] ${
-                                overdue ? 'font-black text-rose-300' : 'text-zinc-500'
+                                overdue ? 'font-black text-rose-600' : 'text-slate-500'
                               }`}
                             >
                               {overdue
@@ -508,21 +505,21 @@ export function RbtLiveTasksInbox() {
                                 : task.meta}
                             </time>
                           ) : (
-                            <span className="truncate font-mono text-[10px] text-zinc-500">
+                            <span className="truncate font-mono text-[10px] text-slate-500">
                               {task.meta}
                             </span>
                           )
                         ) : null}
                       </div>
-                      <h3 className="text-sm font-black text-white font-heading truncate">
+                      <h3 className="text-sm font-black text-slate-900 font-heading truncate">
                         {task.title}
                       </h3>
-                      <p className="text-xs text-zinc-400 font-medium mt-0.5 leading-relaxed">
+                      <p className="text-xs text-slate-600 font-medium mt-0.5 leading-relaxed">
                         {task.detail}
                       </p>
                     </div>
                   </div>
-                  <span className="shrink-0 inline-flex items-center gap-1.5 self-start sm:self-center rounded-xl border border-white/10 bg-white/5 group-hover:border-[#F97316]/50 group-hover:text-[#F97316] text-zinc-200 text-[11px] font-black px-3.5 py-2 transition-all">
+                  <span className="shrink-0 inline-flex items-center gap-1.5 self-start sm:self-center rounded-xl border border-[#E2D5B7] bg-[#F9F5EC] group-hover:border-[#F97316]/50 group-hover:text-[#F97316] text-slate-800 text-[11px] font-black px-3.5 py-2 transition-all">
                     {task.cta}
                     <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
                   </span>
@@ -543,7 +540,7 @@ export function RbtLiveTasksInbox() {
           <Link
             key={link.href}
             href={link.href}
-            className="inline-flex cursor-pointer items-center gap-1 rounded-full border border-white/10 bg-zinc-950/60 px-3 py-1.5 text-[10px] font-black uppercase tracking-wide text-zinc-400 backdrop-blur-xl transition-all duration-300 hover:border-[#F97316]/40 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F97316]/70"
+            className="inline-flex cursor-pointer items-center gap-1 rounded-full border border-[#E2D5B7] bg-[#FFFDF8] px-3 py-1.5 text-[10px] font-black uppercase tracking-wide text-slate-700 transition-all duration-300 hover:border-[#F97316]/40 hover:text-[#F97316] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F97316]/70"
           >
             {link.label}
             <ArrowRight className="w-3 h-3" aria-hidden="true" />

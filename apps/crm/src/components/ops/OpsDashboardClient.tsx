@@ -403,7 +403,7 @@ export default function OpsDashboardClient({
           evidenceLabel="VOB turnaround SLA"
           evidenceValue="Not tracked"
           evidenceNote="The schema does not persist VOB start/completion timestamps."
-          href="/portal-billing"
+          href="/portal-billing/clients"
           linkLabel="Open billing queue"
           accent={{
             text: 'text-emerald-400',

@@ -26,12 +26,15 @@ export default async function Home() {
     case 'INTAKE_PA_COORDINATOR':
       redirect('/portal-case');
     case 'CASE_COORDINATOR':
-      redirect('/case');
+      redirect('/portal-case-coord');
     case 'CLINICAL_SUPPORT':
+      redirect('/clinical-support');
     case 'CLINICAL_DIRECTOR':
     case 'BCBA':
       redirect('/portal-clinical');
     case 'BILLING':
+    case 'FINANCE':
+    case 'SESSION_NOTES_COORDINATOR':
       redirect('/portal-billing');
     default:
       redirect('/login?error=invalid_role');

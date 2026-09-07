@@ -2,6 +2,27 @@
 
 import { prisma } from '@/lib/prisma';
 import { requireStaff } from '@/lib/auth-guard';
+import type { Role } from '@repo/db';
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const MAX_MESSAGE_LENGTH = 5_000;
+const STAFF_ROLES: readonly Role[] = [
+  'CEO',
+  'CLINICAL_DIRECTOR',
+  'OPS_DIRECTOR',
+  'INTAKE_PA_COORDINATOR',
+  'CASE_COORDINATOR',
+  'SESSION_NOTES_COORDINATOR',
+  'CLINICAL_SUPPORT',
+  'BILLING',
+  'BCBA',
+  'RBT',
+  'HR',
+  'HEAD_HR',
+  'HR_AGENT',
+  'FINANCE',
+];
 
 /**
  * Staff chat identity is ALWAYS the session user (incl. dev impersonation).
@@ -20,7 +41,7 @@ export async function getStaffMembers() {
     if (!me) return [];
 
     const users = await prisma.user.findMany({
-      where: { isActive: true, NOT: { id: me } },
+      where: { isActive: true, role: { in: [...STAFF_ROLES] }, NOT: { id: me } },
       select: { id: true, firstName: true, lastName: true, role: true }
     });
     return users;
@@ -34,6 +55,7 @@ export async function getStaffMessages(receiverId: string) {
   try {
     const me = await getMe();
     if (!me) return [];
+    if (!UUID_PATTERN.test(receiverId) || receiverId === me) return [];
 
     // Most recent 200 (desc), reversed for chronological display — an
     // unbounded asc query degrades forever and drops new messages (audit M5).
@@ -76,6 +98,9 @@ export async function markStaffThreadRead(peerId: string) {
   try {
     const me = await getMe();
     if (!me) return { success: false, error: 'Not authenticated.' };
+    if (!UUID_PATTERN.test(peerId) || peerId === me) {
+      return { success: false, error: 'Invalid staff thread.' };
+    }
 
     await prisma.staffMessage.updateMany({
       where: { senderId: peerId, receiverId: me, readAt: null },
@@ -92,13 +117,30 @@ export async function sendStaffMessage(receiverId: string, content: string) {
   try {
     const me = await getMe();
     if (!me) return { success: false, error: 'Not authenticated.' };
-    if (!content.trim()) return { success: false, error: 'Message cannot be empty.' };
+    const trimmed = content.trim();
+    if (!UUID_PATTERN.test(receiverId) || receiverId === me) {
+      return { success: false, error: 'Invalid staff recipient.' };
+    }
+    if (!trimmed) return { success: false, error: 'Message cannot be empty.' };
+    if (trimmed.length > MAX_MESSAGE_LENGTH) {
+      return { success: false, error: 'Message is too long.' };
+    }
+
+    const recipient = await prisma.user.findFirst({
+      where: {
+        id: receiverId,
+        isActive: true,
+        role: { in: [...STAFF_ROLES] },
+      },
+      select: { id: true },
+    });
+    if (!recipient) return { success: false, error: 'Staff recipient not found.' };
 
     await prisma.staffMessage.create({
       data: {
         senderId: me,
-        receiverId,
-        content
+        receiverId: recipient.id,
+        content: trimmed
       }
     });
 

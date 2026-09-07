@@ -18,10 +18,7 @@ export function isSessionStudioDevHelpersEnabled() {
 }
 
 /** Demo SkillTarget / BehaviorTarget ids (t1, b2, …) — JSON-only; never SessionTrialData UUIDs. */
-export function isDemoStudioTargetId(id: string | undefined | null): boolean {
-  if (!id) return false;
-  return /^[tb]\d+$/i.test(id.trim());
-}
+export { isDemoStudioTargetId } from '@repo/db/pilot-cohort-hygiene';
 
 export type StudioTrial = {
   id: string;

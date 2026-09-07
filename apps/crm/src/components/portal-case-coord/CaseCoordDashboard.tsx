@@ -10,7 +10,6 @@ import {
   UserCheck,
   Inbox,
 } from 'lucide-react';
-
 export type CaseCoordDashboardMetrics = {
   staffingPending: number;
   openOpenings: number;
@@ -23,13 +22,10 @@ export type CaseCoordDashboardMetrics = {
 type Coord = { id: string; firstName: string; lastName: string };
 type ClientRow = {
   id: string;
-  firstName: string;
-  lastName: string;
   status: string;
   caseCoordinatorId: string | null;
   rbtId: string | null;
   rbtApproved: boolean | null;
-  guardianName: string | null;
 };
 
 function pct(part: number, whole: number) {
@@ -55,7 +51,6 @@ export default function CaseCoordDashboard({
         activeCases: metrics.activeCases,
         meetAndGreetsPending: metrics.meetAndGreetsPending,
         totalCaseload: metrics.totalCaseload,
-        staffingClients: allClients.filter((c) => c.status === 'STAFFING_PENDING'),
       };
     }
     const mine = allClients.filter((c) => c.caseCoordinatorId === selectedCoordId);
@@ -64,7 +59,6 @@ export default function CaseCoordDashboard({
       activeCases: mine.filter((c) => c.status === 'ACTIVE').length,
       meetAndGreetsPending: mine.filter((c) => c.rbtId && !c.rbtApproved).length,
       totalCaseload: mine.length,
-      staffingClients: mine.filter((c) => c.status === 'STAFFING_PENDING'),
     };
   }, [selectedCoordId, allClients, metrics]);
 
@@ -244,21 +238,14 @@ export default function CaseCoordDashboard({
           </Link>
           <div className="rounded-2xl border border-white/10 bg-zinc-950/60 px-4 py-3 backdrop-blur-xl">
             <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-emerald-400">
-              Staffing · First Session
+              Analytics only
             </p>
             <p className="mt-1 text-xs text-zinc-400">
-              Client profile → checklist (auth, BCBA, opening, RBT)
+              Staffing, openings, and first-session work happen on Clients and Job Openings.
             </p>
-            {scoped.staffingClients[0] ? (
-              <Link
-                href={`/client/${scoped.staffingClients[0].id}?mode=case-coord&tab=staffing`}
-                className="mt-2 inline-flex cursor-pointer items-center gap-1 text-[11px] font-semibold text-emerald-300 hover:text-emerald-200"
-              >
-                Open staffing tab <ArrowRight className="h-3 w-3" />
-              </Link>
-            ) : (
-              <p className="mt-2 font-mono text-[11px] text-zinc-500">No STAFFING_PENDING clients</p>
-            )}
+            <p className="mt-2 font-mono text-[11px] text-zinc-500">
+              {scoped.staffingPending} STAFFING_PENDING in this scope
+            </p>
           </div>
         </div>
       </div>
@@ -323,72 +310,25 @@ export default function CaseCoordDashboard({
         })}
       </div>
 
-      {/* Secondary: meet & greets + staffing list deep links */}
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-        <div className="rounded-2xl border border-white/10 bg-zinc-950/80 p-6 shadow-xl backdrop-blur-xl">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="font-mono text-xs font-bold uppercase tracking-wider text-amber-400">
-                Meet &amp; greets
-              </p>
-              <h3 className="mt-1 font-heading text-lg font-bold text-white">
-                Parent approval pending
-              </h3>
-            </div>
-            <span className="rounded-full border border-amber-500/20 bg-amber-500/10 px-2.5 py-1 font-mono text-[10px] font-bold text-amber-400">
-              {scoped.meetAndGreetsPending}
-            </span>
-          </div>
-          <p className="mt-2 text-xs text-zinc-400">
-            RBT linked, awaiting parent approve — manage from roster or openings.
-          </p>
-          <Link
-            href="/portal-case-coord/clients"
-            className="mt-4 inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-white/10 bg-zinc-900/80 px-3 py-2 text-xs font-bold text-zinc-200 transition-all hover:border-amber-500/40 hover:text-white"
-          >
-            Open roster <ArrowRight className="h-3.5 w-3.5" />
-          </Link>
-        </div>
-
-        <div className="rounded-2xl border border-white/10 bg-zinc-950/80 p-6 shadow-xl backdrop-blur-xl">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="font-mono text-xs font-bold uppercase tracking-wider text-brand-orange-400">
-                Staffing tabs
-              </p>
-              <h3 className="mt-1 font-heading text-lg font-bold text-white">
-                Jump to client staffing
-              </h3>
-            </div>
-            <span className="rounded-full border border-brand-orange-500/20 bg-brand-orange-500/10 px-2.5 py-1 font-mono text-[10px] font-bold text-brand-orange-400">
-              {scoped.staffingClients.length}
-            </span>
-          </div>
-
-          {scoped.staffingClients.length === 0 ? (
-            <p className="mt-4 rounded-xl border border-dashed border-white/10 px-4 py-6 text-center font-mono text-xs text-zinc-500">
-              0 STAFFING_PENDING — nothing to staff
-            </p>
-          ) : (
-            <ul className="mt-4 max-h-48 space-y-2 overflow-y-auto">
-              {scoped.staffingClients.slice(0, 8).map((c) => (
-                <li key={c.id}>
-                  <Link
-                    href={`/client/${c.id}?mode=case-coord&tab=staffing`}
-                    className="flex cursor-pointer items-center justify-between rounded-xl border border-white/5 bg-zinc-900/60 px-3 py-2.5 transition-all duration-300 hover:scale-[1.01] hover:border-brand-orange-500/40 hover:shadow-lg"
-                  >
-                    <span className="text-sm font-semibold text-white">
-                      {c.firstName} {c.lastName}
-                    </span>
-                    <span className="inline-flex items-center gap-1 font-mono text-[10px] font-bold text-brand-orange-400">
-                      Staffing <ArrowRight className="h-3 w-3" />
-                    </span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+      <div className="rounded-2xl border border-white/10 bg-zinc-950/80 p-6 shadow-xl backdrop-blur-xl md:max-w-md">
+        <p className="font-mono text-xs font-bold uppercase tracking-wider text-amber-400">
+          Meet &amp; greets
+        </p>
+        <h3 className="mt-1 font-heading text-lg font-bold text-white">
+          Parent approval pending
+        </h3>
+        <p className="mt-3 font-mono text-3xl font-black text-white">
+          {scoped.meetAndGreetsPending}
+        </p>
+        <p className="mt-2 text-xs text-zinc-400">
+          RBT linked, awaiting parent approve. Manage from the roster or openings board.
+        </p>
+        <Link
+          href="/portal-case-coord/clients"
+          className="mt-4 inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-white/10 bg-zinc-900/80 px-3 py-2 text-xs font-bold text-zinc-200 transition-all hover:border-amber-500/40 hover:text-white"
+        >
+          Open roster <ArrowRight className="h-3.5 w-3.5" />
+        </Link>
       </div>
     </div>
   );

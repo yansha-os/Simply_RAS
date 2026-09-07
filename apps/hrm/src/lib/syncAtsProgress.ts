@@ -194,8 +194,8 @@ export function invalidateApplicantCaches(candidateId?: string | null) {
 }
 
 /**
- * Flip client UI from applicant → official RBT staff after hire.
- * Safe to call repeatedly; updates local role + notifies chrome.
+ * Flip client UI chrome after a durable HIRED stage is confirmed server-side.
+ * Does NOT write role cookies — those must never grant staff access.
  */
 export function promoteClientRoleToRbt() {
   if (typeof window === 'undefined') return;
@@ -205,18 +205,12 @@ export function promoteClientRoleToRbt() {
   window.dispatchEvent(new Event('rbt_progress_synced'));
 }
 
-/** If session/progress says HIRED, promote cookie + client role to RBT. */
+/** Promote UI chrome only when AtsCandidate.stage is already HIRED. */
 export async function ensureHiredAsRbtStaff(): Promise<boolean> {
   if (typeof window === 'undefined') return false;
   try {
-    const data = await loadAtsProgress(false);
+    const data = await loadAtsProgress(true);
     if (data?.stage !== 'HIRED') return false;
-
-    // Already staff chrome — avoid re-dispatching role/progress events (nav thrash)
-    const currentRole = localStorage.getItem('hrm_active_role');
-    if (currentRole === 'RBT') {
-      return true;
-    }
 
     const { promoteHiredSessionToRbt } = await import(
       '@/app/actions/applicantSessionActions'

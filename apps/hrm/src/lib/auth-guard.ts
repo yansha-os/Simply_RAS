@@ -1,4 +1,4 @@
-import { Role } from '@repo/db';
+import type { Role } from '@repo/db';
 import { getCurrentUser } from '@/lib/auth';
 
 // ---------------------------------------------------------------------------

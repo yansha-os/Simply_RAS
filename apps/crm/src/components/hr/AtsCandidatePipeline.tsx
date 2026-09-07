@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { UserPlus, ShieldCheck, Mail, Phone, CheckCircle2, ArrowRight, Sparkles } from 'lucide-react';
+import { UserPlus, ShieldCheck, Mail } from 'lucide-react';
 import { verifyBacbCertification } from '@/lib/hr/BacbRegistryVerifier';
 import { toast } from 'sonner';
 

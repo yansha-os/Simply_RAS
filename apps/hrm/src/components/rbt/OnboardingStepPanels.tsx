@@ -219,10 +219,12 @@ export function UploadCertificatePanel({
   doc,
   alreadyDone,
   onUploaded,
+  onSkip,
 }: {
   doc: OnboardingDocDef;
   alreadyDone: boolean;
   onUploaded: (fileName: string) => void;
+  onSkip?: () => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -286,10 +288,68 @@ export function UploadCertificatePanel({
 
   return (
     <div className="space-y-4">
+      {/* PROMINENT STEP 26 OR 27 SKIP / DEFER BANNER */}
+      {(doc.step === 26 || doc.step === 27) && !alreadyDone && onSkip && (
+        <div className="p-4 bg-amber-50 rounded-2xl border-2 border-amber-400 space-y-3 shadow-md">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="font-black text-amber-950 text-xs flex items-center gap-1.5">
+              🎁 Optional Step — Defer {doc.step === 26 ? 'Mandated Reporter Certificate' : 'CPR / First Aid Certificate'} for 30 Days
+            </span>
+            <span className="text-[10px] font-mono font-bold text-amber-900 bg-amber-200/90 px-2 py-0.5 rounded-md border border-amber-300">
+              {doc.step === 26 ? '100% Free State Course' : 'AHA / Red Cross Card'}
+            </span>
+          </div>
+
+          <p className="text-[11px] text-amber-900 leading-relaxed font-medium">
+            {doc.step === 26
+              ? "If you haven't taken the free 2-hour NYS course yet, click the button below to skip this step for now. It will mark Step 26 complete so you can finish Requirement 1 and complete your onboarding!"
+              : "Active CPR and Pediatric First Aid certification (American Heart Association or Red Cross) is required for client assignments. You may upload your card now, or click below to defer for up to 30 days after hire date!"}
+          </p>
+
+          <div className="flex flex-col sm:flex-row gap-2.5 pt-1">
+            {doc.step === 26 && (
+              <a
+                href="https://www.nysmandatedreporter.org"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center justify-center gap-2 flex-1 py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs transition-all shadow-md cursor-pointer"
+              >
+                <span>👉 Open Free Portal @ nysmandatedreporter.org ↗</span>
+              </a>
+            )}
+
+            <button
+              type="button"
+              onClick={onSkip}
+              className="inline-flex items-center justify-center gap-2 flex-1 py-3 px-4 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-black text-xs transition-all shadow-lg cursor-pointer border-none"
+            >
+              <span>⏩ Skip Step {doc.step} &amp; Complete Requirement</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       <OfficialPdfBar doc={doc} />
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h4 className="text-base font-black text-slate-900">{documentLabel}</h4>
+          <h4 className="text-base font-black text-slate-900">
+            {typeof documentLabel === 'string' && documentLabel.includes('nysmandatedreporter.org') ? (
+              <span>
+                Mandated Reporter Certificate (
+                <a
+                  href="https://www.nysmandatedreporter.org"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-emerald-700 underline font-bold hover:text-emerald-800"
+                >
+                  Free @ nysmandatedreporter.org ↗
+                </a>
+                )
+              </span>
+            ) : (
+              documentLabel
+            )}
+          </h4>
           <p className="text-xs text-slate-500">PDF, JPEG, PNG, or WebP — max 10MB</p>
         </div>
         <span

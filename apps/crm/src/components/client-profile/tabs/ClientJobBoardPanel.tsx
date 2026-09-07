@@ -50,7 +50,6 @@ import {
   summarizeWeekSchedule,
   unitGridToSchedule,
   unitsToHours,
-  type DaySlot,
   type WeekSchedule,
 } from './WeeklyScheduleUnitGrid';
 import StaffingReadinessChecklist from '@/components/portal-case-coord/StaffingReadinessChecklist';
@@ -88,7 +87,7 @@ type Opening = {
   clientInitials?: string | null;
   scheduleText: string | null;
   daysOfWeek?: string | null;
-  scheduleJson?: Record<string, DaySlot> | null;
+  scheduleJson?: unknown;
   sessionLengthMinutes?: number | null;
   languagePref?: string | null;
   genderPref?: string | null;
@@ -108,7 +107,7 @@ type TreatmentPlanData = {
   preferredSchedule?: unknown;
 };
 
-type ClientJobBoardData = StaffingReadinessClient & {
+export type ClientJobBoardData = StaffingReadinessClient & {
   id: string;
   firstName: string;
   lastName: string;

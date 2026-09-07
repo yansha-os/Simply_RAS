@@ -9,6 +9,10 @@ import {
   canBindApplicantPortal,
   canUseApplicantDeviceSession,
 } from '@/lib/applicantAccessPolicy';
+import {
+  isCandidateDeviceSessionCurrent,
+  resolveFingerprintValidCandidate,
+} from '@/lib/candidateDeviceSession';
 
 const ATS_STAFF_ROLES = [
   'HEAD_HR',
@@ -83,12 +87,17 @@ export async function promoteHiredSessionToRbt() {
   try {
     const cookieStore = await cookies();
     const candidateId = cookieStore.get(SESSION_COOKIE)?.value || null;
-    if (!isUuid(candidateId)) {
+    const fingerprint = cookieStore.get(FINGERPRINT_COOKIE)?.value || null;
+    const validatedCandidate = await resolveFingerprintValidCandidate(
+      candidateId,
+      fingerprint
+    );
+    if (!validatedCandidate || validatedCandidate.stage !== 'HIRED') {
       return { success: false as const, error: 'No active session.' };
     }
 
     const candidate = await prisma.atsCandidate.findUnique({
-      where: { id: candidateId },
+      where: { id: validatedCandidate.id },
       select: {
         id: true,
         firstName: true,
@@ -164,8 +173,14 @@ export async function bindMagicLinkSession(magicLinkToken: string) {
     if (packet.magicLinkRevokedAt) {
       return { success: false as const, error: 'This link has been revoked. Ask HR for a new invite link.' };
     }
-    if (packet.magicLinkExpiresAt && packet.magicLinkExpiresAt.getTime() < Date.now()) {
-      return { success: false as const, error: 'This link has expired. Ask HR for a new invite link.' };
+    if (packet.magicLinkExpiresAt) {
+      const expiry =
+        packet.magicLinkExpiresAt instanceof Date
+          ? packet.magicLinkExpiresAt.getTime()
+          : new Date(packet.magicLinkExpiresAt).getTime();
+      if (!isNaN(expiry) && expiry < Date.now()) {
+        return { success: false as const, error: 'This link has expired. Ask HR for a new invite link.' };
+      }
     }
 
     if (!canBindApplicantPortal(packet.candidate)) {
@@ -197,11 +212,15 @@ export async function bindMagicLinkSession(magicLinkToken: string) {
             },
           },
         });
+        const liveExpiry = livePacket?.magicLinkExpiresAt
+          ? livePacket.magicLinkExpiresAt instanceof Date
+            ? livePacket.magicLinkExpiresAt.getTime()
+            : new Date(livePacket.magicLinkExpiresAt).getTime()
+          : null;
         if (
           !livePacket?.candidate ||
           livePacket.magicLinkRevokedAt ||
-          (livePacket.magicLinkExpiresAt &&
-            livePacket.magicLinkExpiresAt.getTime() < Date.now()) ||
+          (liveExpiry !== null && !isNaN(liveExpiry) && liveExpiry < Date.now()) ||
           !canBindApplicantPortal(livePacket.candidate)
         ) {
           return false;
@@ -227,6 +246,7 @@ export async function bindMagicLinkSession(magicLinkToken: string) {
             magicLinkToken,
             userAgent,
             ipAddress,
+            boundAt: now,
             lastSeenAt: now,
             revokedAt: null,
           },
@@ -318,7 +338,7 @@ export async function resolveActiveApplicantSession() {
 
     if (
       !session ||
-      session.revokedAt ||
+      !isCandidateDeviceSessionCurrent(session) ||
       !canUseApplicantDeviceSession(session.candidate)
     ) {
       await clearSessionCookies();

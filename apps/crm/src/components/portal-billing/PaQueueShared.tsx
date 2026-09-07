@@ -2,39 +2,45 @@
 
 /**
  * Shared building blocks for the Assessment / Treatment PA queues.
- * Live PARequest rows only — status flips go through the canonical billing
- * actions; denial reason + P2P live on the PA row (portal-billing/actions.ts).
+ * Cards open the client profile — VOB / PA mutations happen there, not inline.
  */
 
-import React, { useEffect, useState, useTransition } from 'react';
+import React from 'react';
 import Link from 'next/link';
 import { Card } from '@/components/ui/Card';
-import { toast } from 'sonner';
-import {
-  ArrowRight,
-  Check,
-  Loader2,
-  PhoneCall,
-  Search,
-  ShieldCheck,
-  ShieldX,
-  X,
-} from 'lucide-react';
-import {
-  markAssessmentPaSubmitted,
-  markTreatmentPaSubmitted,
-  markVobComplete,
-  recordPaApproval,
-  recordPaDenial,
-  resolvePaP2p,
-} from '@/app/(dashboard)/portal-billing/actions';
+import { ArrowRight, PhoneCall, Search } from 'lucide-react';
+import { billingPaQueueHref } from '@/lib/clientProfileTabs';
 
 export type PaKind = 'ASSESSMENT' | 'TREATMENT';
 
 export type QueueAccent = 'emerald' | 'teal' | 'amber' | 'orange' | 'sky' | 'rose';
 
-export function getPa(client: any, kind: PaKind) {
-  return client?.paRequests?.find((p: any) => p.type === kind) ?? null;
+export type PaQueueRequest = {
+  id: string;
+  type: string;
+  status: string;
+  updatedAt: string | Date;
+  effectiveDate?: string | Date | null;
+  expirationDate?: string | Date | null;
+  authNumber?: string | null;
+  approvedUnits?: number | null;
+  vobCompleted?: boolean | null;
+  providerCredentialed?: boolean | null;
+  p2pResolved?: boolean | null;
+  p2pNotes?: string | null;
+};
+
+export type PaQueueClient = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  updatedAt: string | Date;
+  paRequests?: PaQueueRequest[];
+  messages?: Array<{ isFromClient: boolean; readAt: string | Date | null }>;
+};
+
+export function getPa(client: PaQueueClient, kind: PaKind): PaQueueRequest | null {
+  return client.paRequests?.find((pa) => pa.type === kind) ?? null;
 }
 
 export function daysUntil(date: string | Date | null | undefined): number | null {
@@ -107,7 +113,7 @@ export function P2pBadge({ resolved }: { resolved: boolean }) {
 }
 
 /** Days since submission / denial — amber past 7d, red past 14d. */
-export function AgingBadge({ pa }: { pa: any }) {
+export function AgingBadge({ pa }: { pa: PaQueueRequest | null }) {
   if (!pa) return null;
   const inFlight = ['SUBMITTED', 'DENIED_CLERICAL', 'DENIED_CLINICAL'].includes(pa.status);
   if (!inFlight) return null;
@@ -128,11 +134,71 @@ export function AgingBadge({ pa }: { pa: any }) {
 
 export function EmptyColumn({ message }: { message: string }) {
   return (
-    <div className="p-8 text-center rounded-2xl border border-dashed border-white/10 bg-zinc-950/50 backdrop-blur-xl">
-      <p className="text-xs text-zinc-500 font-sans leading-relaxed">{message}</p>
-      <p className="text-[10px] text-zinc-600 font-mono mt-2 uppercase tracking-wider">
+    <div className="flex flex-1 flex-col items-center justify-center rounded-xl border border-dashed border-white/10 bg-zinc-950/40 px-4 py-8 text-center">
+      <p className="text-xs leading-relaxed text-zinc-500">{message}</p>
+      <p className="mt-2 font-mono text-[10px] uppercase tracking-wider text-zinc-600">
         Live from PARequest · no sample rows
       </p>
+    </div>
+  );
+}
+
+/** Horizontal kanban lane — matches clinical-support / intake queue boards. */
+export function QueueLane({
+  title,
+  eyebrow,
+  count,
+  icon: Icon,
+  accentClass,
+  borderClass,
+  children,
+}: {
+  title: string;
+  eyebrow: string;
+  count: number;
+  icon: React.ElementType;
+  accentClass: string;
+  borderClass: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="flex min-h-[28rem] flex-col rounded-2xl border border-white/10 bg-zinc-950/60 p-4 shadow-xl backdrop-blur-xl">
+      <div className={`mb-4 flex shrink-0 items-start justify-between gap-3 border-b pb-3 ${borderClass}`}>
+        <div className="min-w-0">
+          <p className={`font-mono text-[10px] font-bold uppercase tracking-[0.16em] ${accentClass}`}>
+            {eyebrow}
+          </p>
+          <h2 className="mt-1 flex items-center gap-2 font-heading text-sm font-bold leading-snug text-white">
+            <Icon className="h-4 w-4 shrink-0" />
+            <span>{title}</span>
+          </h2>
+        </div>
+        <span className="inline-flex min-w-8 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/5 px-2.5 py-1 font-mono text-xs font-black text-white">
+          {count}
+        </span>
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-0.5">{children}</div>
+    </section>
+  );
+}
+
+export function QueueBoard({
+  columns,
+}: {
+  columns: React.ReactNode[];
+}) {
+  return (
+    <div className="overflow-x-auto pb-2">
+      <div className="flex min-w-max gap-4 lg:grid lg:min-w-0 lg:grid-cols-3 lg:gap-4">
+        {columns.map((column, index) => (
+          <div
+            key={index}
+            className="w-[min(100vw-3rem,19rem)] shrink-0 lg:w-auto lg:min-w-0"
+          >
+            {column}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -160,7 +226,10 @@ export function QueueSearchInput({
   );
 }
 
-export function filterClientsByQuery(clients: any[], query: string) {
+export function filterClientsByQuery<T extends Pick<PaQueueClient, 'firstName' | 'lastName'>>(
+  clients: T[],
+  query: string
+): T[] {
   const q = query.trim().toLowerCase();
   if (!q) return clients;
   return clients.filter((c) =>
@@ -168,25 +237,8 @@ export function filterClientsByQuery(clients: any[], query: string) {
   );
 }
 
-const INPUT_CLS =
-  'w-full bg-zinc-900/80 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-white/25 font-mono transition-all';
-
-const BTN_BASE =
-  'inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-mono font-bold uppercase tracking-wider border transition-all duration-300 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50';
-
-const BTN = {
-  amber: `${BTN_BASE} bg-amber-500/10 text-amber-400 border-amber-500/20 hover:bg-amber-500/20 hover:border-amber-500/40`,
-  green: `${BTN_BASE} bg-green-500/10 text-green-400 border-green-500/20 hover:bg-green-500/20 hover:border-green-500/40`,
-  red: `${BTN_BASE} bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/20 hover:border-red-500/40`,
-  violet: `${BTN_BASE} bg-violet-500/10 text-violet-400 border-violet-500/20 hover:bg-violet-500/20 hover:border-violet-500/40`,
-  ghost: `${BTN_BASE} bg-transparent text-zinc-500 border-white/10 hover:text-zinc-300 hover:border-white/20`,
-};
-
-type Panel = 'approve' | 'deny' | 'p2p' | null;
-
 /**
- * One queue row: linked header (name / badges / dates) + inline PA actions.
- * Mutations mirror the canonical pipeline gates — the server re-validates all of them.
+ * Queue row: name / badges / dates only. Open the billing profile to record VOB or PA.
  */
 export function PaQueueCard({
   client,
@@ -195,362 +247,114 @@ export function PaQueueCard({
   desc,
   accent,
 }: {
-  client: any;
+  client: PaQueueClient;
   kind: PaKind;
   icon: React.ElementType;
   desc: string;
   accent: QueueAccent;
 }) {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-
-  const [panel, setPanel] = useState<Panel>(null);
-  const [isPending, startTransition] = useTransition();
-
-  // Approve form
-  const [authNumber, setAuthNumber] = useState('');
-  const [units, setUnits] = useState('');
-  const [effectiveDate, setEffectiveDate] = useState('');
-  const [expirationDate, setExpirationDate] = useState('');
-  // Deny form
-  const [isClinical, setIsClinical] = useState(false);
-  const [denialReason, setDenialReason] = useState('');
-  // P2P form
-  const [p2pNotes, setP2pNotes] = useState('');
-
   const pa = getPa(client, kind);
   const { hoverBorder, hoverText } = ACCENTS[accent];
   const unreadCount =
-    client.messages?.filter((m: any) => m.isFromClient && !m.readAt).length || 0;
+    client.messages?.filter((message) => message.isFromClient && !message.readAt).length || 0;
 
   const vobDone = pa ? !!pa.vobCompleted && !!pa.providerCredentialed : false;
-  const showVob = kind === 'ASSESSMENT' && (!pa || !vobDone) && pa?.status !== 'APPROVED';
-  const showSubmit =
-    kind === 'ASSESSMENT'
-      ? !!pa && vobDone && pa.status === 'NOT_STARTED'
-      : (!pa && client.status === 'REPORT_ASSEMBLED') || pa?.status === 'NOT_STARTED';
-  const decidable =
-    !!pa && ['SUBMITTED', 'DENIED_CLERICAL', 'DENIED_CLINICAL'].includes(pa.status);
-  const p2pPending = pa?.status === 'DENIED_CLINICAL' && !pa?.p2pResolved;
+  const needsVob = kind === 'ASSESSMENT' && (!pa || !vobDone) && pa?.status !== 'APPROVED';
+  const billingHref = billingPaQueueHref(client.id, kind, needsVob);
 
   const expDays = daysUntil(pa?.expirationDate);
   const fmt = (d: string | Date | null | undefined) =>
-    mounted && d ? new Date(d).toLocaleDateString() : '—';
-
-  const run = (fn: () => Promise<{ success: boolean; error?: string }>, okMsg: string) => {
-    startTransition(async () => {
-      const result = await fn();
-      if (result.success) {
-        toast.success(okMsg);
-        setPanel(null);
-      } else {
-        toast.error(result.error || 'Action failed. Please try again.');
-      }
-    });
-  };
-
-  const handleSubmitPa = () =>
-    run(
-      () =>
-        kind === 'ASSESSMENT'
-          ? markAssessmentPaSubmitted(client.id)
-          : markTreatmentPaSubmitted(client.id),
-      `${kind === 'ASSESSMENT' ? 'Assessment' : 'Treatment'} PA marked submitted.`
-    );
-
-  const handleApprove = () => {
-    if (!authNumber.trim()) return void toast.error('Auth number is required.');
-    if (!units || Number(units) <= 0) return void toast.error('Approved units must be positive.');
-    if (!effectiveDate || !expirationDate)
-      return void toast.error('Effective and expiration dates are required.');
-    if (p2pPending)
-      return void toast.error('Resolve the Peer-to-Peer review before recording an approval.');
-    run(
-      () =>
-        recordPaApproval(pa.id, {
-          authNumber,
-          approvedUnits: Number(units),
-          effectiveDate,
-          expirationDate,
-        }),
-      'PA approval recorded.'
-    );
-  };
-
-  const handleDeny = () => {
-    if (!denialReason.trim()) return void toast.error('A denial reason is required.');
-    run(
-      () => recordPaDenial(pa.id, { isClinical, reason: denialReason }),
-      `Denial logged${isClinical ? ' — P2P opened for the BCBA' : ''}.`
-    );
-  };
-
-  const handleP2p = () => {
-    if (!p2pNotes.trim()) return void toast.error('P2P resolution notes are required.');
-    run(() => resolvePaP2p(pa.id, p2pNotes), 'P2P resolution logged.');
-  };
+    d ? new Date(d).toLocaleDateString('en-US', { timeZone: 'America/New_York' }) : '—';
 
   return (
-    <Card
-      className={`bg-zinc-950/80 backdrop-blur-xl border border-white/10 ${hoverBorder} transition-all duration-300 group mb-3 shadow-xl rounded-2xl overflow-hidden hover:shadow-2xl ${panel ? '' : 'hover:scale-[1.01]'}`}
-    >
-      <Link href={`/client/${client.id}?tab=billing`} className="block p-4 pb-3 cursor-pointer">
-        <div className="flex justify-between items-start gap-3">
-          <div className="min-w-0 space-y-1.5">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h4
-                className={`font-heading font-bold text-white ${hoverText} transition-colors text-sm truncate`}
-              >
-                {client.firstName} {client.lastName}
-              </h4>
-              {unreadCount > 0 && (
-                <span className="bg-rose-500/90 text-white text-[10px] font-bold px-2 py-0.5 rounded-full leading-none shadow-md">
-                  {unreadCount} new
-                </span>
-              )}
-            </div>
-            <p className="text-xs text-zinc-400 font-sans leading-relaxed">{desc}</p>
-            <div className="flex flex-wrap gap-1.5 pt-0.5">
-              {pa?.status && <PaStatusBadge status={pa.status} />}
-              {!pa && kind === 'TREATMENT' && <PaStatusBadge status="NOT_STARTED" />}
-              {pa?.status === 'DENIED_CLINICAL' && <P2pBadge resolved={!!pa.p2pResolved} />}
-              <AgingBadge pa={pa} />
-              {expDays !== null && pa?.status === 'APPROVED' && (
-                <span
-                  className={`${BADGE_BASE} ${
-                    expDays <= 15
-                      ? 'bg-red-500/10 text-red-400 border-red-500/20'
-                      : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
-                  }`}
+    <Link href={billingHref} className="group mb-3 block cursor-pointer">
+      <Card
+        className={`overflow-hidden rounded-2xl border border-white/10 bg-zinc-950/80 shadow-xl backdrop-blur-xl transition-all duration-300 hover:scale-[1.01] hover:shadow-2xl ${hoverBorder}`}
+      >
+        <div className="space-y-3 p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 space-y-1.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <h4
+                  className={`truncate font-heading text-sm font-bold text-white transition-colors ${hoverText}`}
                 >
-                  {expDays < 0 ? `Expired ${Math.abs(expDays)}d ago` : `Expires in ${expDays}d`}
-                </span>
-              )}
-            </div>
-            {pa && (
-              <div className="text-[10px] font-mono text-zinc-500 space-y-0.5 pt-1">
-                <p>
-                  PA {String(pa.id).slice(0, 8).toUpperCase()}
-                  {pa.status === 'SUBMITTED' && ` · Submitted ${fmt(pa.updatedAt)}`}
-                  {pa.status === 'APPROVED' && ` · Decided ${fmt(pa.updatedAt)}`}
-                  {pa.status?.startsWith('DENIED') && ` · Denied ${fmt(pa.updatedAt)}`}
-                </p>
-                {pa.authNumber && (
-                  <p>
-                    Auth #{pa.authNumber}
-                    {pa.approvedUnits != null ? ` · ${pa.approvedUnits} units` : ''}
-                    {pa.effectiveDate && pa.expirationDate
-                      ? ` · ${fmt(pa.effectiveDate)} → ${fmt(pa.expirationDate)}`
-                      : ''}
-                  </p>
+                  {client.firstName} {client.lastName}
+                </h4>
+                {unreadCount > 0 && (
+                  <span className="rounded-full bg-rose-500/90 px-2 py-0.5 text-[10px] font-bold leading-none text-white shadow-md">
+                    {unreadCount} new
+                  </span>
                 )}
               </div>
-            )}
+              <p className="font-sans text-xs leading-relaxed text-zinc-400">{desc}</p>
+              <div className="flex flex-wrap gap-1.5 pt-0.5">
+                {pa?.status && <PaStatusBadge status={pa.status} />}
+                {!pa && kind === 'TREATMENT' && <PaStatusBadge status="NOT_STARTED" />}
+                {pa?.status === 'DENIED_CLINICAL' && <P2pBadge resolved={!!pa.p2pResolved} />}
+                <AgingBadge pa={pa} />
+                {expDays !== null && pa?.status === 'APPROVED' && (
+                  <span
+                    className={`${BADGE_BASE} ${
+                      expDays <= 15
+                        ? 'bg-red-500/10 text-red-400 border-red-500/20'
+                        : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                    }`}
+                  >
+                    {expDays < 0 ? `Expired ${Math.abs(expDays)}d ago` : `Expires in ${expDays}d`}
+                  </span>
+                )}
+              </div>
+              {pa && (
+                <div className="space-y-0.5 pt-1 font-mono text-[10px] text-zinc-500">
+                  <p>
+                    PA {String(pa.id).slice(0, 8).toUpperCase()}
+                    {pa.status === 'SUBMITTED' && ` · Submitted ${fmt(pa.updatedAt)}`}
+                    {pa.status === 'APPROVED' && ` · Decided ${fmt(pa.updatedAt)}`}
+                    {pa.status?.startsWith('DENIED') && ` · Denied ${fmt(pa.updatedAt)}`}
+                  </p>
+                  {pa.authNumber && (
+                    <p>
+                      Auth #{pa.authNumber}
+                      {pa.approvedUnits != null ? ` · ${pa.approvedUnits} units` : ''}
+                      {pa.effectiveDate && pa.expirationDate
+                        ? ` · ${fmt(pa.effectiveDate)} → ${fmt(pa.expirationDate)}`
+                        : ''}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+            <div
+              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-zinc-900/80 text-zinc-400 shadow-sm transition-all group-hover:border-white/20 ${hoverText}`}
+            >
+              <Icon className="h-4 w-4" />
+            </div>
           </div>
-          <div
-            className={`w-8 h-8 rounded-xl bg-zinc-900/80 border border-white/10 flex items-center justify-center text-zinc-400 ${hoverText} group-hover:border-white/20 transition-all shrink-0 shadow-sm`}
-          >
-            <Icon className="w-4 h-4" />
+
+          {pa?.p2pNotes && (pa.status?.startsWith('DENIED') || pa.p2pResolved) && (
+            <div
+              className={`rounded-r-lg border-l-2 bg-zinc-950 p-2.5 ${pa.p2pResolved ? 'border-violet-500' : 'border-red-500'}`}
+            >
+              <p className="mb-0.5 font-mono text-[9px] font-bold uppercase tracking-wider text-zinc-500">
+                {pa.p2pResolved ? 'P2P resolution notes' : 'Denial reason'}
+              </p>
+              <p className="text-xs italic leading-relaxed text-zinc-300">“{pa.p2pNotes}”</p>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between border-t border-white/5 pt-3">
+            <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+              Updated {fmt(client.updatedAt)}
+            </span>
+            <span
+              className={`inline-flex items-center gap-1 font-mono text-[10px] text-zinc-500 ${hoverText}`}
+            >
+              Open profile
+              <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+            </span>
           </div>
         </div>
-      </Link>
-
-      {pa?.p2pNotes && (pa.status?.startsWith('DENIED') || pa.p2pResolved) && (
-        <div
-          className={`mx-4 mb-3 bg-zinc-950 border-l-2 ${pa.p2pResolved ? 'border-violet-500' : 'border-red-500'} p-2.5 rounded-r-lg`}
-        >
-          <p className="text-[9px] text-zinc-500 font-mono font-bold uppercase tracking-wider mb-0.5">
-            {pa.p2pResolved ? 'P2P resolution notes' : 'Denial reason'}
-          </p>
-          <p className="text-xs text-zinc-300 italic leading-relaxed">“{pa.p2pNotes}”</p>
-        </div>
-      )}
-
-      <div className="px-4 pb-4 space-y-3">
-        {(showVob || showSubmit || decidable || p2pPending) && (
-          <div className="flex flex-wrap gap-2 border-t border-white/5 pt-3">
-            {showVob && (
-              <button
-                type="button"
-                disabled={isPending}
-                className={BTN.amber}
-                onClick={() => run(() => markVobComplete(client.id), 'VOB & credentialing recorded.')}
-              >
-                {isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <ShieldCheck className="w-3 h-3" />}
-                VOB &amp; creds done
-              </button>
-            )}
-            {showSubmit && (
-              <button type="button" disabled={isPending} className={BTN.amber} onClick={handleSubmitPa}>
-                {isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
-                Mark submitted
-              </button>
-            )}
-            {decidable && (
-              <>
-                <button
-                  type="button"
-                  disabled={isPending || p2pPending}
-                  title={p2pPending ? 'Resolve P2P before approving' : undefined}
-                  className={BTN.green}
-                  onClick={() => setPanel(panel === 'approve' ? null : 'approve')}
-                >
-                  <Check className="w-3 h-3" />
-                  Approve
-                </button>
-                <button
-                  type="button"
-                  disabled={isPending}
-                  className={BTN.red}
-                  onClick={() => setPanel(panel === 'deny' ? null : 'deny')}
-                >
-                  <ShieldX className="w-3 h-3" />
-                  Deny
-                </button>
-              </>
-            )}
-            {p2pPending && (
-              <button
-                type="button"
-                disabled={isPending}
-                className={BTN.violet}
-                onClick={() => setPanel(panel === 'p2p' ? null : 'p2p')}
-              >
-                <PhoneCall className="w-3 h-3" />
-                Log P2P outcome
-              </button>
-            )}
-          </div>
-        )}
-
-        {panel === 'approve' && (
-          <div className="rounded-xl border border-green-500/20 bg-green-500/5 p-3 space-y-2 animate-fade-in-up">
-            <p className="text-[10px] font-mono font-bold uppercase tracking-wider text-green-400">
-              Record payer approval
-            </p>
-            <input
-              className={INPUT_CLS}
-              placeholder="Auth number"
-              value={authNumber}
-              onChange={(e) => setAuthNumber(e.target.value)}
-            />
-            <div className="grid grid-cols-3 gap-2">
-              <input
-                className={INPUT_CLS}
-                type="number"
-                min={1}
-                placeholder="Units"
-                value={units}
-                onChange={(e) => setUnits(e.target.value)}
-              />
-              <input
-                className={INPUT_CLS}
-                type="date"
-                title="Effective date"
-                value={effectiveDate}
-                onChange={(e) => setEffectiveDate(e.target.value)}
-              />
-              <input
-                className={INPUT_CLS}
-                type="date"
-                title="Expiration date"
-                value={expirationDate}
-                onChange={(e) => setExpirationDate(e.target.value)}
-              />
-            </div>
-            <div className="flex gap-2">
-              <button type="button" disabled={isPending} className={BTN.green} onClick={handleApprove}>
-                {isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
-                Save approval
-              </button>
-              <button type="button" className={BTN.ghost} onClick={() => setPanel(null)}>
-                <X className="w-3 h-3" />
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
-
-        {panel === 'deny' && (
-          <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-3 space-y-2 animate-fade-in-up">
-            <p className="text-[10px] font-mono font-bold uppercase tracking-wider text-red-400">
-              Log payer denial
-            </p>
-            <div className="flex gap-2">
-              {[
-                { v: false, label: 'Clerical (resubmit fix)' },
-                { v: true, label: 'Clinical (opens P2P)' },
-              ].map((opt) => (
-                <button
-                  key={String(opt.v)}
-                  type="button"
-                  onClick={() => setIsClinical(opt.v)}
-                  className={`${BTN_BASE} ${
-                    isClinical === opt.v
-                      ? 'bg-red-500/15 text-red-300 border-red-500/40'
-                      : 'bg-transparent text-zinc-500 border-white/10 hover:text-zinc-300'
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-            <textarea
-              className={`${INPUT_CLS} min-h-[64px] resize-y font-sans`}
-              placeholder="Denial reason from the payer (required)"
-              value={denialReason}
-              onChange={(e) => setDenialReason(e.target.value)}
-            />
-            <div className="flex gap-2">
-              <button type="button" disabled={isPending} className={BTN.red} onClick={handleDeny}>
-                {isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <ShieldX className="w-3 h-3" />}
-                Save denial
-              </button>
-              <button type="button" className={BTN.ghost} onClick={() => setPanel(null)}>
-                <X className="w-3 h-3" />
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
-
-        {panel === 'p2p' && (
-          <div className="rounded-xl border border-violet-500/20 bg-violet-500/5 p-3 space-y-2 animate-fade-in-up">
-            <p className="text-[10px] font-mono font-bold uppercase tracking-wider text-violet-400">
-              Peer-to-Peer resolution
-            </p>
-            <textarea
-              className={`${INPUT_CLS} min-h-[64px] resize-y font-sans`}
-              placeholder="Outcome of the P2P call with the payer's medical director (required)"
-              value={p2pNotes}
-              onChange={(e) => setP2pNotes(e.target.value)}
-            />
-            <div className="flex gap-2">
-              <button type="button" disabled={isPending} className={BTN.violet} onClick={handleP2p}>
-                {isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <PhoneCall className="w-3 h-3" />}
-                Mark P2P resolved
-              </button>
-              <button type="button" className={BTN.ghost} onClick={() => setPanel(null)}>
-                <X className="w-3 h-3" />
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
-
-        <div className="flex items-center justify-between border-t border-white/5 pt-3">
-          <span className="text-[10px] text-zinc-500 font-mono uppercase font-bold tracking-wider">
-            Updated {mounted ? new Date(client.updatedAt).toLocaleDateString() : '—'}
-          </span>
-          <Link
-            href={`/client/${client.id}?tab=billing`}
-            className={`inline-flex items-center gap-1 text-[10px] font-mono text-zinc-500 ${hoverText} cursor-pointer`}
-          >
-            Open billing
-            <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
-          </Link>
-        </div>
-      </div>
-    </Card>
+      </Card>
+    </Link>
   );
 }

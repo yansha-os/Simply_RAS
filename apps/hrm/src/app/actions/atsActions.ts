@@ -6,7 +6,6 @@ import { HR_ROLES, requireRole, requireStaff } from '@/lib/auth-guard';
 import { getCurrentUser } from '@/lib/auth';
 import { newMagicLinkExpiry } from '@/lib/magicLinkExpiry';
 import { resolveActingRbtContext } from '@/lib/resolveActingRbt';
-import { isDevToolsEnabled } from '@/lib/devToolsGate';
 import {
   formatManagerEtDate,
   formatManagerEtTimestamp,
@@ -38,6 +37,7 @@ import { hireCandidateDomain } from '@/lib/hiringDomain';
 
 const PACKET_PROGRESS_SELECT = {
   magicLinkToken: true,
+  ls54Status: true,
   tasksDone: true,
   tasksCompletedSteps: true,
   availabilityDone: true,
@@ -80,6 +80,17 @@ const STAGE_ORDER: AtsStage[] = [
   'OFFER',
   'HIRED',
 ];
+const ATS_STAGE_VALUES = new Set<AtsStage>([
+  ...STAGE_ORDER,
+  'HELP_DESK',
+  'REJECTED',
+]);
+const ATS_ACTIVATION_VALUES = new Set<AtsActivationStatus>([
+  'PENDING_HR_REVIEW',
+  'INVITATION_SENT',
+  'ACTIVE',
+  'REJECTED',
+]);
 
 const APPLICANT_PROGRESS_KEYS = new Set([
   'availabilityGrid',
@@ -112,6 +123,30 @@ function invalidProgressUpdate() {
     success: false as const,
     code: 'INVALID_PROGRESS_UPDATE' as const,
     error: 'This progress update is not allowed.',
+  };
+}
+
+async function authorizeCandidateProgress(candidateId: string): Promise<
+  | { ok: true; isStaff: boolean }
+  | { ok: false; error: string }
+> {
+  const user = await getCurrentUser();
+  const isStaff = Boolean(
+    user &&
+      user.isActive !== false &&
+      ATS_STAFF_ROLES.includes(user.role as Role)
+  );
+  if (isStaff) return { ok: true, isStaff: true };
+
+  const context = await resolveActingRbtContext();
+  if (context.candidateId === candidateId) {
+    return { ok: true, isStaff: false };
+  }
+  return {
+    ok: false,
+    error: user
+      ? 'FORBIDDEN: Not your applicant record.'
+      : 'UNAUTHORIZED: Authentication or an active applicant session is required.',
   };
 }
 
@@ -209,6 +244,11 @@ function hasDurableCertificateEvidence(formData: unknown): boolean {
     typeof coach.certStoragePath === 'string' &&
     coach.certStoragePath.length > 0
   );
+}
+
+function hasDurableSimulationEvidence(formData: unknown): boolean {
+  const sim = asRecord(asRecord(formData).simulationAttempt);
+  return sim.passed === true || sim.completed === true;
 }
 
 function crmBaseUrl() {
@@ -882,8 +922,35 @@ export async function addAtsCandidate(data: {
   try {
     await requireRole(ATS_STAFF_ROLES);
 
-    const email = data.email.toLowerCase().trim();
-    const nameParts = data.name.trim().split(/\s+/);
+    const name = String(data.name || '').trim();
+    const email = String(data.email || '').toLowerCase().trim();
+    const phone = data.phone === undefined ? '' : String(data.phone).trim();
+    const experienceYears = data.experienceYears ?? 0;
+    if (name.length < 2 || name.length > 160) {
+      return { success: false, error: 'Candidate name must be between 2 and 160 characters.' };
+    }
+    if (
+      email.length > 254 ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+    ) {
+      return { success: false, error: 'Enter a valid candidate email address.' };
+    }
+    if (phone.length > 32) {
+      return { success: false, error: 'Candidate phone must be 32 characters or fewer.' };
+    }
+    if (
+      !Number.isFinite(experienceYears) ||
+      !Number.isInteger(experienceYears) ||
+      experienceYears < 0 ||
+      experienceYears > 80
+    ) {
+      return { success: false, error: 'Experience years must be a whole number from 0 to 80.' };
+    }
+    if (!['RBT', 'BCBA', 'ADMIN'].includes(data.roleApplied)) {
+      return { success: false, error: 'Candidate role is invalid.' };
+    }
+
+    const nameParts = name.split(/\s+/);
     const firstName = nameParts[0] || 'Applicant';
     const lastName = nameParts.slice(1).join(' ') || 'Candidate';
     const appliedRole =
@@ -903,11 +970,11 @@ export async function addAtsCandidate(data: {
         firstName,
         lastName,
         email,
-        phone: data.phone || null,
+        phone: phone || null,
         appliedRole,
         stage: 'APPLIED',
         activationStatus: 'PENDING_HR_REVIEW',
-        dossier: { experienceYears: data.experienceYears || 0 },
+        dossier: { experienceYears },
         onboardingPacket: {
           create: {
             magicLinkToken: crypto.randomUUID(),
@@ -931,44 +998,87 @@ export async function addAtsCandidate(data: {
 export async function setAtsStage(
   candidateId: string,
   stage: AtsStage,
-  activationStatus?: AtsActivationStatus
+  activationStatus?: AtsActivationStatus,
+  expectedCurrentStage?: AtsStage
 ) {
   try {
     await requireRole(ATS_STAFF_ROLES);
 
+    if (!ATS_STAGE_VALUES.has(stage)) {
+      return { success: false, error: 'Invalid ATS stage.' };
+    }
     if (stage === 'HIRED') {
       return {
         success: false,
         error: 'HIRED is restricted to the canonical hiring action.',
       };
     }
+    if (
+      (activationStatus && !ATS_ACTIVATION_VALUES.has(activationStatus)) ||
+      (stage !== 'REJECTED' && activationStatus === 'REJECTED')
+    ) {
+      return { success: false, error: 'Invalid ATS activation state.' };
+    }
 
     const data: { stage: string; activationStatus?: string } = { stage };
     if (activationStatus) data.activationStatus = activationStatus;
     if (stage === 'REJECTED') data.activationStatus = 'REJECTED';
 
-    const candidate = await prisma.atsCandidate.update({
-      where: { id: candidateId },
-      data,
-      include: { onboardingPacket: { select: PACKET_PROGRESS_SELECT } },
-    });
+    const result = await prisma.$transaction(
+      async (tx) => {
+        const current = await tx.atsCandidate.findUnique({
+          where: { id: candidateId },
+          select: { stage: true },
+        });
+        if (!current) {
+          return { success: false as const, error: 'Candidate not found.' };
+        }
+        if (expectedCurrentStage && current.stage !== expectedCurrentStage) {
+          return {
+            success: false as const,
+            error: 'Candidate stage changed. Reload the ATS board before advancing.',
+          };
+        }
+        if (current.stage === 'HIRED') {
+          return {
+            success: false as const,
+            error: 'A hired candidate cannot be moved by the generic stage action.',
+          };
+        }
+        if (current.stage === 'REJECTED' && stage !== 'REJECTED') {
+          return {
+            success: false as const,
+            error: 'A rejected candidate cannot be reactivated by the generic stage action.',
+          };
+        }
 
-    if (stage === 'REJECTED') {
-      const revokedAt = new Date();
-      await Promise.all([
-        prisma.applicantDeviceSession.updateMany({
-          where: { candidateId, revokedAt: null },
-          data: { revokedAt },
-        }),
-        prisma.candidateOnboardingPacket.updateMany({
-          where: { candidateId },
-          data: { magicLinkRevokedAt: revokedAt },
-        }),
-      ]);
-    }
+        const candidate = await tx.atsCandidate.update({
+          where: { id: candidateId },
+          data,
+          include: { onboardingPacket: { select: PACKET_PROGRESS_SELECT } },
+        });
+
+        if (stage === 'REJECTED') {
+          const revokedAt = new Date();
+          await Promise.all([
+            tx.applicantDeviceSession.updateMany({
+              where: { candidateId, revokedAt: null },
+              data: { revokedAt },
+            }),
+            tx.candidateOnboardingPacket.updateMany({
+              where: { candidateId },
+              data: { magicLinkRevokedAt: revokedAt },
+            }),
+          ]);
+        }
+        return { success: true as const, candidate };
+      },
+      { isolationLevel: 'Serializable' }
+    );
+    if (!result.success) return result;
 
     revalidatePath('/ats');
-    return { success: true, candidate: toCandidateRow(candidate) };
+    return { success: true, candidate: toCandidateRow(result.candidate) };
   } catch (error: unknown) {
     console.error('Error setting ATS stage:', error instanceof Error ? error.message : error);
     return { success: false, error: readErrorMessage(error) || 'Failed to update stage.' };
@@ -995,7 +1105,12 @@ export async function advanceAtsStage(candidateId: string) {
       };
     }
 
-    return setAtsStage(candidateId, next);
+    return setAtsStage(
+      candidateId,
+      next,
+      undefined,
+      current.stage as AtsStage
+    );
   } catch (error: unknown) {
     return { success: false, error: readErrorMessage(error) || 'Failed to advance stage.' };
   }
@@ -1011,9 +1126,16 @@ export async function inviteCandidate(candidateId: string) {
       async (tx) => {
         const candidate = await tx.atsCandidate.findUnique({
           where: { id: candidateId },
-          select: { id: true, onboardingPacket: { select: { id: true } } },
+          select: {
+            id: true,
+            stage: true,
+            onboardingPacket: { select: { id: true } },
+          },
         });
         if (!candidate) return null;
+        if (candidate.stage === 'HIRED' || candidate.stage === 'REJECTED') {
+          return { terminalStage: candidate.stage } as const;
+        }
 
         if (candidate.onboardingPacket) {
           await tx.candidateOnboardingPacket.update({
@@ -1057,6 +1179,12 @@ export async function inviteCandidate(candidateId: string) {
       { isolationLevel: 'Serializable' }
     );
     if (!updated) return { success: false, error: 'Candidate not found.' };
+    if ('terminalStage' in updated) {
+      return {
+        success: false,
+        error: `A ${updated.terminalStage.toLowerCase()} candidate cannot be invited again.`,
+      };
+    }
 
     const magicLinkUrl = `${hrmBaseUrl()}/magic-link/${token}`;
 
@@ -1161,27 +1289,11 @@ export async function updateCandidateProgress(
   patch: OnboardingProgressPatch
 ) {
   try {
-    const user = await getCurrentUser();
-    if (!user) {
-      return { success: false, error: 'UNAUTHORIZED: Authentication required.' };
-    }
+    const access = await authorizeCandidateProgress(candidateId);
+    if (!access.ok) return { success: false, error: access.error };
 
-    const isStaff = ATS_STAFF_ROLES.includes(user.role as Role);
-    const isApplicantSide = user.role === 'APPLICANT' || user.role === 'RBT';
-    if (!isStaff && !isApplicantSide) {
-      return { success: false, error: 'FORBIDDEN: Not allowed to update progress.' };
-    }
-
-    const validatedPatch = validateProgressPatch(patch, isStaff);
+    const validatedPatch = validateProgressPatch(patch, access.isStaff);
     if (!validatedPatch.ok) return invalidProgressUpdate();
-
-    if (!isStaff) {
-      // Applicant-side callers may only touch their own record (IDOR, Blocker 0a).
-      const ctx = await resolveActingRbtContext();
-      if (ctx.candidateId !== candidateId && !isDevToolsEnabled()) {
-        return { success: false, error: 'FORBIDDEN: Not your applicant record.' };
-      }
-    }
 
     const candidate = await prisma.atsCandidate.findUnique({
       where: { id: candidateId },
@@ -1249,8 +1361,9 @@ export async function updateCandidateProgress(
     const tasksDone =
       tasksCompletedSteps.length === ONBOARDING_TOTAL_STEPS;
     const availabilityDone = validatedAvailability.ok;
-    // No durable simulation-attempt record exists yet. Never promote a client flag.
-    const simulationDone = false;
+    const simulationDone = hasDurableSimulationEvidence(
+      candidate.onboardingPacket?.formData
+    );
     const interviewBooked =
       candidate.interview !== null &&
       ['SCHEDULED', 'IN_PROGRESS', 'COMPLETED'].includes(
@@ -1332,7 +1445,11 @@ export async function updateCandidateProgress(
     const dossier = asRecord(candidate.dossier);
 
     const updated = await prisma.atsCandidate.update({
-      where: { id: candidateId },
+      where: {
+        id: candidateId,
+        stage: candidate.stage,
+        activationStatus: candidate.activationStatus,
+      },
       data: {
         stage: nextStage,
         dossier: {
@@ -1382,23 +1499,8 @@ export async function getOnboardingProgress(candidateId: string): Promise<{
   error?: string;
 }> {
   try {
-    const user = await getCurrentUser();
-    if (!user) {
-      return { success: false, error: 'UNAUTHORIZED: Authentication required.' };
-    }
-
-    const isStaff = ATS_STAFF_ROLES.includes(user.role as Role);
-    const isApplicantSide = user.role === 'APPLICANT' || user.role === 'RBT';
-    if (!isStaff && !isApplicantSide) {
-      return { success: false, error: 'FORBIDDEN: Not allowed to read progress.' };
-    }
-    if (!isStaff) {
-      // Applicant-side callers may only read their own record (IDOR, Blocker 0a).
-      const ctx = await resolveActingRbtContext();
-      if (ctx.candidateId !== candidateId && !isDevToolsEnabled()) {
-        return { success: false, error: 'FORBIDDEN: Not your applicant record.' };
-      }
-    }
+    const access = await authorizeCandidateProgress(candidateId);
+    if (!access.ok) return { success: false, error: access.error };
 
     const candidate = await prisma.atsCandidate.findUnique({
       where: { id: candidateId },

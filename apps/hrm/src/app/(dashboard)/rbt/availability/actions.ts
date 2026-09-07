@@ -9,6 +9,7 @@ import { isDevToolsEnabled } from '@/lib/devToolsGate';
 import { prisma } from '@/lib/prisma';
 import { resolveActingRbtContext } from '@/lib/resolveActingRbt';
 import { canUseApplicantDeviceSession } from '@/lib/applicantAccessPolicy';
+import { isCandidateDeviceSessionCurrent } from '@/lib/candidateDeviceSession';
 import {
   asRecord,
   deriveAtsStage,
@@ -146,6 +147,7 @@ async function requireAvailabilityActor(): Promise<AvailabilityActorGate> {
       },
       select: {
         revokedAt: true,
+        boundAt: true,
         candidate: {
           select: {
             id: true,
@@ -159,7 +161,7 @@ async function requireAvailabilityActor(): Promise<AvailabilityActorGate> {
 
     if (
       !applicantSession ||
-      applicantSession.revokedAt ||
+      !isCandidateDeviceSessionCurrent(applicantSession) ||
       applicantSession.candidate.appliedRole !== 'RBT' ||
       !canUseApplicantDeviceSession(applicantSession.candidate)
     ) {
@@ -284,7 +286,11 @@ export async function saveMyRbtAvailability(
     const dossier = asRecord(candidate.dossier);
 
     const updated = await prisma.atsCandidate.update({
-      where: { id: gate.candidateId },
+      where: {
+        id: gate.candidateId,
+        stage: candidate.stage,
+        activationStatus: candidate.activationStatus,
+      },
       data: {
         stage: nextStage,
         dossier: {

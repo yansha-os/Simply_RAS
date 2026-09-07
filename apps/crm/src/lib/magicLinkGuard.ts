@@ -29,7 +29,7 @@ type PacketAuthFields = {
 
 /** Link liveness only (no fingerprint) — also used by the magic-link page. */
 export function magicLinkStatus(packet: PacketAuthFields): { ok: true } | { ok: false; error: string } {
-  if (!packet.magicLinkToken) {
+  if (!packet?.magicLinkToken) {
     return { ok: false, error: 'This link is no longer active. Please contact the clinic for a new link.' };
   }
   if (packet.magicLinkRevokedAt) {
@@ -37,8 +37,14 @@ export function magicLinkStatus(packet: PacketAuthFields): { ok: true } | { ok: 
   }
   // NULL expiry = legacy link issued before expiry tracking; a fresh window is
   // stamped whenever staff generate/reset a link.
-  if (packet.magicLinkExpiresAt && packet.magicLinkExpiresAt.getTime() < Date.now()) {
-    return { ok: false, error: 'This link has expired. Please contact the clinic for a new link.' };
+  if (packet.magicLinkExpiresAt) {
+    const expiryTime =
+      packet.magicLinkExpiresAt instanceof Date
+        ? packet.magicLinkExpiresAt.getTime()
+        : new Date(packet.magicLinkExpiresAt).getTime();
+    if (!isNaN(expiryTime) && expiryTime < Date.now()) {
+      return { ok: false, error: 'This link has expired. Please contact the clinic for a new link.' };
+    }
   }
   return { ok: true };
 }

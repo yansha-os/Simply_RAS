@@ -22,6 +22,8 @@ import {
   CASE_COORD_ROLES,
   CLINICAL_ROLES,
   INTAKE_ROLES,
+  SESSION_NOTES_CONVERSION_ROLES,
+  SESSION_NOTES_ROLES,
   requirePersistedStaff,
 } from '../auth-guard';
 
@@ -55,8 +57,6 @@ describe('requirePersistedStaff', () => {
         'CLINICAL_DIRECTOR',
         'OPS_DIRECTOR',
         'INTAKE_PA_COORDINATOR',
-        'CASE_COORDINATOR',
-        'CLINICAL_SUPPORT',
       ],
     },
     {
@@ -81,7 +81,18 @@ describe('requirePersistedStaff', () => {
         'OPS_DIRECTOR',
         'CASE_COORDINATOR',
         'CLINICAL_SUPPORT',
-        'INTAKE_PA_COORDINATOR',
+      ],
+    },
+    {
+      portal: 'session notes',
+      roles: SESSION_NOTES_ROLES,
+      expected: [
+        'CEO',
+        'CLINICAL_DIRECTOR',
+        'OPS_DIRECTOR',
+        'BILLING',
+        'FINANCE',
+        'SESSION_NOTES_COORDINATOR',
       ],
     },
     {
@@ -93,6 +104,18 @@ describe('requirePersistedStaff', () => {
         'OPS_DIRECTOR',
         'BCBA',
         'CLINICAL_SUPPORT',
+      ],
+    },
+    {
+      portal: 'session notes conversion',
+      roles: SESSION_NOTES_CONVERSION_ROLES,
+      expected: [
+        'CEO',
+        'CLINICAL_DIRECTOR',
+        'OPS_DIRECTOR',
+        'BILLING',
+        'FINANCE',
+        'SESSION_NOTES_COORDINATOR',
       ],
     },
   ])('enforces the canonical $portal role matrix', async ({ roles, expected }) => {

@@ -80,9 +80,13 @@ Enclosed clinical EMR / Artemis replacement (after notes SoT + Bridges E–G):
 
 → [docs/superpowers/specs/2026-08-11-aba-emr-artemis-replacement-roadmap.md](./superpowers/specs/2026-08-11-aba-emr-artemis-replacement-roadmap.md)
 
-Artemis cohort dual-run → RAS-only cutover (ops checklist):
+RAS sandbox → cold cutover (ops checklist):
 
-→ [docs/superpowers/specs/2026-08-11-artemis-dual-run-cutover-checklist.md](./superpowers/specs/2026-08-11-artemis-dual-run-cutover-checklist.md)
+→ [docs/superpowers/specs/2026-08-11-ras-sandbox-cutover-checklist.md](./superpowers/specs/2026-08-11-ras-sandbox-cutover-checklist.md)
+
+Artemis exit & enclosed system (master roadmap — workflow, roles, Phase 0–4):
+
+→ [docs/superpowers/specs/2026-08-19-artemis-exit-enclosed-system-roadmap.md](./superpowers/specs/2026-08-19-artemis-exit-enclosed-system-roadmap.md)
 
 Whole-project production-readiness audit (scorecard, blockers, phased path to prod):
 

@@ -15,6 +15,8 @@ const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 type CredentialFields = {
   credentialType: string;
+  credentialNumber: string | null;
+  payerName: string | null;
   expirationDate: string | null;
 };
 
@@ -31,9 +33,15 @@ function validateId(id: string, label: string) {
 }
 
 function parseCredentialFields(input: CredentialFields):
-  | { ok: true; credentialType: string; expirationDate: Date | null }
+  | {
+      ok: true;
+      credentialType: string;
+      credentialNumber: string | null;
+      payerName: string;
+      expirationDate: Date | null;
+    }
   | { ok: false; error: string } {
-  const credentialType = input.credentialType.trim();
+  const credentialType = input.credentialType.trim().toUpperCase();
   if (!credentialType) {
     return { ok: false, error: 'Credential type is required.' };
   }
@@ -41,9 +49,24 @@ function parseCredentialFields(input: CredentialFields):
     return { ok: false, error: 'Credential type must be 80 characters or fewer.' };
   }
 
+  const credentialNumber = input.credentialNumber?.trim() || null;
+  const payerName = input.payerName?.trim() || 'ALL_PAYERS';
+  if ((credentialNumber?.length ?? 0) > 100 || payerName.length > 120) {
+    return { ok: false, error: 'Credential number or payer name is too long.' };
+  }
+  if (
+    ['NPI', 'BACB_LICENSE', 'CAQH', 'MEDICAID_PROVIDER_ID'].includes(credentialType) &&
+    !credentialNumber
+  ) {
+    return { ok: false, error: `${credentialType} requires a credential number.` };
+  }
+  if (credentialType === 'NPI' && !/^\d{10}$/.test(credentialNumber ?? '')) {
+    return { ok: false, error: 'NPI must contain exactly 10 digits.' };
+  }
+
   const expirationInput = input.expirationDate?.trim() ?? '';
   if (!expirationInput) {
-    return { ok: true, credentialType, expirationDate: null };
+    return { ok: true, credentialType, credentialNumber, payerName, expirationDate: null };
   }
   if (!DATE_ONLY_RE.test(expirationInput)) {
     return { ok: false, error: 'Expiration date must use YYYY-MM-DD.' };
@@ -57,7 +80,7 @@ function parseCredentialFields(input: CredentialFields):
     return { ok: false, error: 'Expiration date is invalid.' };
   }
 
-  return { ok: true, credentialType, expirationDate };
+  return { ok: true, credentialType, credentialNumber, payerName, expirationDate };
 }
 
 function toDateOnly(value: Date | null) {
@@ -142,6 +165,8 @@ export async function createStaffCredential(input: CreateCredentialInput) {
       data: {
         userId: activeStaff.id,
         credentialType: fields.credentialType,
+        credentialNumber: fields.credentialNumber,
+        payerName: fields.payerName,
         expirationDate: fields.expirationDate,
         isCredentialed: true,
       },
@@ -190,6 +215,8 @@ export async function updateStaffCredential(input: UpdateCredentialInput) {
       where: { id: existing.id },
       data: {
         credentialType: fields.credentialType,
+        credentialNumber: fields.credentialNumber,
+        payerName: fields.payerName,
         expirationDate: fields.expirationDate,
       },
     });
@@ -264,25 +291,10 @@ export async function deleteStaffCredential(id: string) {
     const idError = validateId(id, 'Credential');
     if (idError) return { success: false as const, error: idError };
 
-    const existing = await prisma.staffCredential.findUnique({
-      where: { id },
-      select: { id: true, userId: true },
-    });
-    if (!existing) {
-      return { success: false as const, error: 'Credential record was not found.' };
-    }
-
-    await prisma.staffCredential.delete({ where: { id: existing.id } });
-    await writeAuditLog({
-      actorUserId: gate.user.id,
-      action: 'DELETE',
-      entityType: 'STAFF_CREDENTIAL',
-      entityId: existing.id,
-      meta: { targetUserId: existing.userId },
-    });
-    revalidatePath(CREDENTIALS_PATH);
-
-    return { success: true as const };
+    return {
+      success: false as const,
+      error: 'Credential records are retained for audit history. Revoke the record instead.',
+    };
   } catch (error) {
     console.error(
       'deleteStaffCredential failed:',

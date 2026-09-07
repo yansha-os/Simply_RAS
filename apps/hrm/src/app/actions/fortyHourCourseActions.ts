@@ -14,17 +14,18 @@ import {
   canUploadOnboardingCertificate,
   canUseApplicantDeviceSession,
 } from '@/lib/applicantAccessPolicy';
+import { isCandidateDeviceSessionCurrent } from '@/lib/candidateDeviceSession';
+import {
+  applicantDocumentMagicBytesMatchMime,
+  isAllowedApplicantDocumentMime,
+  isCandidateDocumentStoragePath,
+  normalizeMimeType,
+} from '@/lib/uploadValidation';
 
 const SESSION_COOKIE = 'ras_device_session_token';
 const FINGERPRINT_COOKIE = 'device_fingerprint';
 const BUCKET = 'ats-applicant-docs';
 const MAX_BYTES = 10 * 1024 * 1024;
-const ALLOWED_MIME = new Set([
-  'application/pdf',
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-]);
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -125,6 +126,7 @@ async function resolveApplicantId(): Promise<
     },
     select: {
       revokedAt: true,
+      boundAt: true,
       candidate: {
         select: {
           stage: true,
@@ -135,7 +137,7 @@ async function resolveApplicantId(): Promise<
   });
   if (
     !session ||
-    session.revokedAt ||
+    !isCandidateDeviceSessionCurrent(session) ||
     !canUseApplicantDeviceSession(session.candidate)
   ) {
     return { ok: false, error: 'Applicant session is not active on this device.' };
@@ -184,6 +186,9 @@ export async function markFortyHourCoachStep(
   next: Exclude<FortyHourCoachStep, 'NOT_STARTED' | 'UPLOADED'>
 ) {
   try {
+    if (!['REGISTERED', 'IN_PROGRESS', 'CERT_READY'].includes(next)) {
+      return { success: false as const, error: 'Invalid course progress step.' };
+    }
     const session = await resolveApplicantId();
     if (!session.ok) return { success: false as const, error: session.error };
 
@@ -263,6 +268,9 @@ export async function markFortyHourCoachStep(
 }
 
 export async function uploadFortyHourCertificate(formData: FormData) {
+  let storageClient: Awaited<ReturnType<typeof getStorageClient>> | null = null;
+  let uploadedStoragePath: string | null = null;
+  let databaseCommitted = false;
   try {
     const session = await resolveApplicantId();
     if (!session.ok) return { success: false as const, error: session.error };
@@ -274,8 +282,8 @@ export async function uploadFortyHourCertificate(formData: FormData) {
     if (file.size <= 0 || file.size > MAX_BYTES) {
       return { success: false as const, error: 'File must be between 1 byte and 10MB.' };
     }
-    const mime = file.type || 'application/pdf';
-    if (!ALLOWED_MIME.has(mime)) {
+    const mime = normalizeMimeType(file.type);
+    if (!isAllowedApplicantDocumentMime(mime)) {
       return {
         success: false as const,
         error: 'Only PDF, JPEG, PNG, or WebP certificates are allowed.',
@@ -311,8 +319,15 @@ export async function uploadFortyHourCertificate(formData: FormData) {
     }
 
     const storage = await getStorageClient();
+    storageClient = storage;
     const storagePath = `${session.candidateId}/40hr-cert-${crypto.randomUUID()}.${extForMime(mime)}`;
     const buffer = Buffer.from(await file.arrayBuffer());
+    if (!applicantDocumentMagicBytesMatchMime(buffer, mime)) {
+      return {
+        success: false as const,
+        error: 'Certificate content does not match its declared type.',
+      };
+    }
     const { data: uploaded, error: uploadError } = await storage.storage
       .from(BUCKET)
       .upload(storagePath, buffer, { contentType: mime, upsert: false });
@@ -327,6 +342,7 @@ export async function uploadFortyHourCertificate(formData: FormData) {
         error: 'Certificate upload could not be stored. Please try again.',
       };
     }
+    uploadedStoragePath = uploaded.path;
 
     const now = new Date().toISOString();
     const prevCoach = readCoach(
@@ -360,7 +376,11 @@ export async function uploadFortyHourCertificate(formData: FormData) {
     });
 
     await prisma.atsCandidate.update({
-      where: { id: session.candidateId },
+      where: {
+        id: session.candidateId,
+        stage: candidate.stage,
+        activationStatus: candidate.activationStatus,
+      },
       data: {
         stage: nextStage,
         dossier: {
@@ -378,6 +398,20 @@ export async function uploadFortyHourCertificate(formData: FormData) {
         },
       },
     });
+    databaseCommitted = true;
+
+    if (
+      prevCoach.certStoragePath &&
+      prevCoach.certStoragePath !== uploaded.path &&
+      isCandidateDocumentStoragePath(session.candidateId, prevCoach.certStoragePath)
+    ) {
+      const { error: removalError } = await storage.storage
+        .from(BUCKET)
+        .remove([prevCoach.certStoragePath]);
+      if (removalError) {
+        console.error('Failed to remove replaced 40-hour certificate:', removalError.message);
+      }
+    }
 
     revalidatePath('/rbt/documents');
     revalidatePath('/ats');
@@ -388,6 +422,14 @@ export async function uploadFortyHourCertificate(formData: FormData) {
       warning: undefined,
     };
   } catch (error) {
+    if (!databaseCommitted && storageClient && uploadedStoragePath) {
+      const { error: cleanupError } = await storageClient.storage
+        .from(BUCKET)
+        .remove([uploadedStoragePath]);
+      if (cleanupError) {
+        console.error('Failed to clean up uncommitted 40-hour certificate:', cleanupError.message);
+      }
+    }
     console.error(
       'uploadFortyHourCertificate failed:',
       error instanceof Error ? error.message : 'Unknown'

@@ -1,12 +1,12 @@
 /**
- * DB-backed StaffCredential lookups (P2 credential soft gate).
+ * DB-backed StaffCredential lookups (Phase 3 billing enclosed).
  * Pure rollup logic lives in staffCredentials.ts (unit-tested, no prisma).
- * Never throws — a failed lookup returns null/[] so credential checks can
- * never block a sign or convert.
  */
 
 import { prisma } from '@/lib/prisma';
+import { endOfClinicDayForDateOnly } from '@/lib/clinicTimezone';
 import {
+  evaluateCredentialHardStop,
   summarizeStaffCredentials,
   type StaffCredentialStatus,
 } from '@/lib/staffCredentials';
@@ -43,27 +43,92 @@ export async function getCredentialStatus(userId: string): Promise<StaffCredenti
   }
 }
 
+function npiFromCredentials(
+  credentials: Array<{
+    credentialType: string;
+    credentialNumber: string | null;
+    isCredentialed: boolean;
+    expirationDate: Date | null;
+  }>,
+): string {
+  const now = new Date();
+  const row = credentials.find(
+    (c) =>
+      c.credentialType.toUpperCase() === 'NPI' &&
+      c.isCredentialed &&
+      /^\d{10}$/.test(c.credentialNumber?.trim() ?? '') &&
+      (!c.expirationDate || endOfClinicDayForDateOnly(c.expirationDate) >= now),
+  );
+  return row?.credentialNumber?.trim() || '';
+}
+
+/** Rendering / supervising NPI from StaffCredential rows (Plutus export). */
+export async function getStaffNpi(userId: string | null | undefined): Promise<string> {
+  if (!userId) return '';
+  try {
+    const credentials = await prisma.staffCredential.findMany({
+      where: { userId },
+      select: {
+        credentialType: true,
+        credentialNumber: true,
+        isCredentialed: true,
+        expirationDate: true,
+      },
+    });
+    return npiFromCredentials(credentials);
+  } catch {
+    return '';
+  }
+}
+
 /**
- * Warn-only credential lines for the people on a note: the supervising BCBA
- * and the session RBT. Empty array = all clear (or lookup failed — soft gate).
+ * Phase 3 hard stop for ACTIVE clients — expired/missing BACB license blocks
+ * claim-ready submit, BCBA sign, and Plutus convert.
+ */
+export async function assertNoteCredentialHardStop(input: {
+  clientStatus: string;
+  bcbaUserId?: string | null;
+  rbtUserId?: string | null;
+}): Promise<
+  | { ok: true; warnings: string[] }
+  | { ok: false; code: 'CREDENTIAL_HARD_STOP'; error: string; blockers: string[] }
+> {
+  const [rbtStatus, bcbaStatus] = await Promise.all([
+    input.rbtUserId ? getCredentialStatus(input.rbtUserId) : Promise.resolve(null),
+    input.bcbaUserId ? getCredentialStatus(input.bcbaUserId) : Promise.resolve(null),
+  ]);
+
+  const verdict = evaluateCredentialHardStop({
+    clientStatus: input.clientStatus,
+    rbtStatus,
+    bcbaStatus,
+  });
+
+  if (!verdict.ok) {
+    return {
+      ok: false,
+      code: verdict.code,
+      blockers: verdict.blockers,
+      error: `Credential hard stop — resolve before billing handoff: ${verdict.blockers.join(' · ')}`,
+    };
+  }
+  return { ok: true, warnings: verdict.warnings };
+}
+
+/**
+ * Post-commit warn lines for converted notes (non-blocking on non-ACTIVE).
+ * @deprecated Prefer assertNoteCredentialHardStop pre-flight for enforcement.
  */
 export async function collectNoteCredentialWarnings(input: {
   bcbaUserId?: string | null;
   rbtUserId?: string | null;
+  clientStatus?: string;
 }): Promise<string[]> {
-  const warnings: string[] = [];
-  const roles: Array<{ label: string; userId: string | null | undefined }> = [
-    { label: 'Supervising BCBA', userId: input.bcbaUserId },
-    { label: 'Session RBT', userId: input.rbtUserId },
-  ];
-
-  for (const { label, userId } of roles) {
-    if (!userId) continue;
-    const status = await getCredentialStatus(userId);
-    if (!status || status.overall === 'ACTIVE' || status.overall === 'NOT_TRACKED') continue;
-    const who = status.displayName ? `${label} ${status.displayName}` : label;
-    warnings.push(`${who}: ${status.warnings.join(', ') || 'credential issue on file'}`);
-  }
-
-  return warnings;
+  const verdict = await assertNoteCredentialHardStop({
+    clientStatus: input.clientStatus ?? 'ACTIVE',
+    bcbaUserId: input.bcbaUserId,
+    rbtUserId: input.rbtUserId,
+  });
+  if (!verdict.ok) return verdict.blockers;
+  return verdict.warnings;
 }

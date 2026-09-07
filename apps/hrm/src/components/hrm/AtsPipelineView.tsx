@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/Button';
 import {
   Users,
@@ -15,10 +16,13 @@ import {
   ShieldCheck,
   ChevronRight,
   ExternalLink,
+  LifeBuoy,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { getAtsCandidates, advanceAtsStage, inviteCandidate, hireCandidate } from '@/app/actions/atsActions';
+import { listHelpTickets, claimHelpTicket, forwardHelpTicketToHeadHr, type HelpTicketDto } from '@/app/actions/helpDeskActions';
+import { useHrmRole } from '@/lib/useHrmRole';
 import { CACHE_KEYS, cachedFetch, getCachedStale, invalidateCache } from '@/lib/clientDataCache';
 import {
   activationStatusLabel,
@@ -78,7 +82,15 @@ function calculateDaysIdle(
 }
 
 export default function AtsPipelineView() {
+  const router = useRouter();
+  const { role } = useHrmRole();
+  const isHrAgent = role === 'HR_AGENT';
+
   const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [helpTickets, setHelpTickets] = useState<HelpTicketDto[]>([]);
+  const [unclaimedSectionOpen, setUnclaimedSectionOpen] = useState(true);
+  const [claimedSectionOpen, setClaimedSectionOpen] = useState(true);
+  const [isClaimingTicketId, setIsClaimingTicketId] = useState<string | null>(null);
   const [candidateSnapshotAt, setCandidateSnapshotAt] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -87,6 +99,13 @@ export default function AtsPipelineView() {
   const [activeInviteCandidate, setActiveInviteCandidate] = useState<Candidate | null>(null);
   const [selectedProfileCandidate, setSelectedProfileCandidate] = useState<Candidate | null>(null);
   const [copiedLink, setCopiedLink] = useState(false);
+
+  const refreshHelpTickets = React.useCallback(async () => {
+    const res = await listHelpTickets({ activeOnly: true });
+    if (res.success && res.data) {
+      setHelpTickets(res.data);
+    }
+  }, []);
 
   const refreshCandidates = React.useCallback(async (force = false) => {
     const refresh = await cachedFetch(
@@ -136,10 +155,12 @@ export default function AtsPipelineView() {
     const onSync = () => {
       invalidateCache(CACHE_KEYS.atsCandidates);
       void loadCandidates(true);
+      void refreshHelpTickets();
     };
     const onFocus = () => {
       const hit = getCachedStale(CACHE_KEYS.atsCandidates);
       if (!hit?.fresh) void loadCandidates(true);
+      void refreshHelpTickets();
     };
     window.addEventListener('rbt_progress_synced', onSync);
     window.addEventListener('focus', onFocus);
@@ -147,7 +168,36 @@ export default function AtsPipelineView() {
       window.removeEventListener('rbt_progress_synced', onSync);
       window.removeEventListener('focus', onFocus);
     };
-  }, [refreshCandidates]);
+  }, [refreshCandidates, refreshHelpTickets]);
+
+  React.useEffect(() => {
+    queueMicrotask(() => void refreshHelpTickets());
+  }, [refreshHelpTickets]);
+
+  const handleClaimTicket = async (ticketId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setIsClaimingTicketId(ticketId);
+    const res = await claimHelpTicket(ticketId);
+    setIsClaimingTicketId(null);
+    if (!res.success) {
+      toast.error(res.error || 'Failed to claim ticket');
+      return;
+    }
+    toast.success('Ticket claimed! Opening Help Tickets console...');
+    router.push(`/ats/help-tickets?ticketId=${ticketId}`);
+  };
+
+  const handleForwardTicket = async (ticketId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const res = await forwardHelpTicketToHeadHr(ticketId);
+    if (!res.success) {
+      toast.error(res.error || 'Failed to forward ticket');
+      return;
+    }
+    toast.success('Ticket forwarded to Head HR for executive review!');
+    setHelpTickets((prev) => prev.filter((t) => t.id !== ticketId));
+    void refreshHelpTickets();
+  };
 
   const handleAdvanceStage = async (id: string) => {
     const current = candidates.find((c) => c.id === id);
@@ -179,9 +229,20 @@ export default function AtsPipelineView() {
   };
 
   const handleApproveAndInvite = async (candidate: Candidate) => {
+    // Eager optimistic update so card instantly moves to PHONE_SCREEN column
+    setCandidates((prev) =>
+      prev.map((c) =>
+        c.id === candidate.id
+          ? { ...c, stage: 'PHONE_SCREEN' as AtsStage, activationStatus: 'INVITATION_SENT' }
+          : c
+      )
+    );
+
     const res = await inviteCandidate(candidate.id);
     if (!res.success) {
       toast.error(res.error || 'Invite failed');
+      // Rollback on failure
+      void refreshCandidates(true);
       return;
     }
 
@@ -231,8 +292,43 @@ export default function AtsPipelineView() {
     return matchesSearch && c.roleApplied === roleFilter;
   });
 
-  const hasHelpDesk = filteredCandidates.some((c) => c.stage === 'HELP_DESK');
-  const stages = getAtsPipelineColumns({ includeHelpDesk: hasHelpDesk });
+  const defaultStages = getAtsPipelineColumns({ includeHelpDesk: false });
+
+  const stages: Array<{
+    key: string;
+    title: string;
+    shortLabel: string;
+    badgeClass: string;
+    isHelpDeskCol?: boolean;
+  }> = isHrAgent
+    ? [
+        {
+          key: 'APPLIED',
+          title: 'Applied',
+          shortLabel: 'HR Review',
+          badgeClass: 'border-blue-500/30 bg-blue-500/10 text-blue-400',
+        },
+        {
+          key: 'PHONE_SCREEN',
+          title: 'In Progress',
+          shortLabel: 'Onboarding',
+          badgeClass: 'border-amber-500/30 bg-amber-500/10 text-amber-400',
+        },
+        {
+          key: 'INTERVIEW',
+          title: 'Interview',
+          shortLabel: 'Booked',
+          badgeClass: 'border-purple-500/30 bg-purple-500/10 text-purple-400',
+        },
+        {
+          key: 'HELP_TICKETS',
+          title: 'Help Tickets',
+          shortLabel: 'Unclaimed & Active',
+          badgeClass: 'border-rose-500/40 bg-rose-500/10 text-rose-400',
+          isHelpDeskCol: true,
+        },
+      ]
+    : defaultStages;
 
   return (
     <div className="relative space-y-8">
@@ -512,188 +608,376 @@ export default function AtsPipelineView() {
                   suppressHydrationWarning
                   className="shrink-0 rounded-full bg-white/10 px-2 py-0.5 font-mono"
                 >
-                  {stageCandidates.length}
+                  {stage.isHelpDeskCol ? helpTickets.length : stageCandidates.length}
                 </span>
               </div>
 
-              <div className="relative flex-1 space-y-3">
-                {stageCandidates.map((c) => {
-                  const count = c.reqCount || 0;
-                  const act = activationStatusLabel(c.activationStatus);
-                  const certDone = c.certDone === true || c.certUploaded === true;
-                  const idle = calculateDaysIdle(c.updatedAt, candidateSnapshotAt);
-                  const isStalled = idle !== null && idle >= 5;
-
-                  return (
-                    <div
-                      key={c.id}
-                      className="group space-y-2.5 rounded-xl border border-white/10 bg-zinc-900/80 p-3.5 shadow-md backdrop-blur-sm transition-all duration-300 hover:scale-[1.01] hover:border-brand-orange-500/40 hover:shadow-2xl"
-                    >
-                      <Link
-                        href={`/ats/applicant/${c.id}`}
-                        className="block cursor-pointer"
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <h4 className="truncate text-xs font-extrabold text-white transition-colors group-hover:text-brand-orange-400">
-                              {c.name}
-                            </h4>
-                            <p className="mt-0.5 flex items-center gap-1 truncate font-mono text-[11px] text-zinc-400">
-                              <Mail className="h-3 w-3 shrink-0 text-zinc-500" /> {c.email}
-                            </p>
-                          </div>
-                          <span className="shrink-0 rounded border border-brand-orange-500/20 bg-brand-orange-500/10 px-2 py-0.5 text-[9px] font-extrabold uppercase text-brand-orange-400">
-                            {c.roleApplied}
-                          </span>
-                        </div>
-
-                        <div className="mt-2.5 space-y-1 rounded-lg border border-white/5 bg-zinc-950/80 p-2">
-                          <div className="flex items-center justify-between font-mono text-[10px]">
-                            <span className="text-zinc-400">Requirements:</span>
-                            <span className="font-extrabold text-emerald-400">
-                              {count}/5 Done ({count * 20}%)
-                            </span>
-                          </div>
-                          <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-800">
-                            <div
-                              className="h-full bg-gradient-to-r from-amber-500 to-emerald-500 transition-all duration-500"
-                              style={{ width: `${(count / 5) * 100}%` }}
-                            />
-                          </div>
-
-                          <div className="grid grid-cols-5 gap-1 pt-1 text-center font-mono text-[8px]">
-                            <span
-                              className={`rounded px-0.5 py-0.5 font-bold transition-all ${
-                                c.reqTasks
-                                  ? 'border border-emerald-500/30 bg-emerald-500/20 text-emerald-300'
-                                  : 'border border-rose-500/30 bg-rose-500/20 text-rose-300'
-                              }`}
-                              title="E-Signatures & onboarding forms"
-                            >
-                              Forms
-                            </span>
-                            <span
-                              className={`rounded px-0.5 py-0.5 font-bold transition-all ${
-                                c.reqSim
-                                  ? 'border border-emerald-500/30 bg-emerald-500/20 text-emerald-300'
-                                  : 'border border-rose-500/30 bg-rose-500/20 text-rose-300'
-                              }`}
-                              title="ABA clinical trial simulator"
-                            >
-                              Sim
-                            </span>
-                            <span
-                              className={`rounded px-0.5 py-0.5 font-bold transition-all ${
-                                c.reqAvail
-                                  ? 'border border-emerald-500/30 bg-emerald-500/20 text-emerald-300'
-                                  : 'border border-rose-500/30 bg-rose-500/20 text-rose-300'
-                              }`}
-                              title="Weekly work availability"
-                            >
-                              Avail
-                            </span>
-                            <span
-                              className={`rounded px-0.5 py-0.5 font-bold transition-all ${
-                                c.reqInterview
-                                  ? 'border border-emerald-500/30 bg-emerald-500/20 text-emerald-300'
-                                  : c.interviewBooked
-                                    ? 'border border-blue-500/30 bg-blue-500/20 text-blue-300'
-                                    : 'border border-rose-500/30 bg-rose-500/20 text-rose-300'
-                              }`}
-                              title={
-                                c.reqInterview
-                                  ? 'Interview evaluated'
-                                  : c.interviewBooked
-                                    ? 'Slot booked — awaiting evaluation'
-                                    : 'Interview required'
-                              }
-                            >
-                              Int
-                            </span>
-                            <span
-                              className={`rounded px-0.5 py-0.5 font-bold transition-all ${
-                                certDone
-                                  ? 'border border-emerald-500/30 bg-emerald-500/20 text-emerald-300'
-                                  : 'border border-rose-500/30 bg-rose-500/20 text-rose-300'
-                              }`}
-                              title="40-hour RBT course"
-                            >
-                              40-Hr
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="mt-2 flex items-center justify-between border-t border-white/5 pt-1 font-mono text-[10px] text-zinc-400">
-                          <span className="flex items-center gap-1">
-                            <Phone className="h-2.5 w-2.5 text-zinc-500" /> {c.phone || '—'}
-                          </span>
-                          <span className="flex items-center gap-1.5">
-                            {isStalled && (
-                              <span
-                                suppressHydrationWarning
-                                title={`No activity for ${idle} days — candidate may be stalled`}
-                                className={`rounded-full border px-1.5 py-0.5 text-[9px] font-extrabold ${
-                                  idle >= 10
-                                    ? 'border-rose-500/30 bg-rose-500/10 text-rose-400'
-                                    : 'border-amber-500/30 bg-amber-500/10 text-amber-400'
-                                }`}
-                              >
-                                ⏳ {idle}d idle
-                              </span>
-                            )}
-                            <span
-                              className={`text-[9px] font-bold ${
-                                act.tone === 'active'
-                                  ? 'text-emerald-400'
-                                  : act.tone === 'invited'
-                                    ? 'text-amber-400'
-                                    : 'text-zinc-400'
-                              }`}
-                            >
-                              {act.label}
-                            </span>
-                          </span>
-                        </div>
-                      </Link>
-
-                      <div className="flex gap-2 pt-0.5">
-                        <Link
-                          href={`/ats/applicant/${c.id}`}
-                          className="flex flex-1 cursor-pointer items-center justify-center gap-1 rounded-lg border border-white/10 bg-zinc-950/60 py-1.5 text-[11px] font-bold text-zinc-200 transition-all hover:border-brand-orange-500/40 hover:text-white"
+              {stage.isHelpDeskCol ? (
+                <div className="relative flex-1 space-y-3 font-sans">
+                  {/* SECTION 1: UNCLAIMED TICKETS */}
+                  {(() => {
+                    const unclaimed = helpTickets.filter(
+                      (t) => !t.claimedByUserId || t.status === 'OPEN'
+                    );
+                    return (
+                      <div className="rounded-xl border border-amber-500/20 bg-zinc-900/60 overflow-hidden">
+                        <button
+                          type="button"
+                          onClick={() => setUnclaimedSectionOpen((prev) => !prev)}
+                          className="w-full p-2.5 bg-amber-500/10 hover:bg-amber-500/20 flex items-center justify-between transition-colors cursor-pointer text-left"
                         >
-                          Dossier <ChevronRight className="h-3 w-3" />
-                        </Link>
-                        {stage.key === 'INTERVIEW' && (
-                          <Link
-                            href={`/ats/applicant/${c.id}?tab=INTERVIEW`}
-                            className="flex flex-1 cursor-pointer items-center justify-center gap-1 rounded-lg border border-purple-500/30 bg-purple-500/10 py-1.5 text-[11px] font-bold text-purple-300 transition-all hover:border-purple-400/50 hover:text-purple-200"
-                          >
-                            Interview
-                          </Link>
-                        )}
-                        {stage.key === 'APPLIED' && (
-                          <button
-                            type="button"
-                            onClick={() => setSelectedProfileCandidate(c)}
-                            className="flex flex-1 cursor-pointer items-center justify-center gap-1 rounded-lg border border-brand-orange-500/30 bg-brand-orange-500/10 py-1.5 text-[11px] font-bold text-brand-orange-400 transition-all hover:border-brand-orange-500/50"
-                          >
-                            Quick review
-                          </button>
+                          <div className="flex items-center gap-2">
+                            <span className="text-amber-400 font-extrabold text-xs uppercase tracking-wider font-mono">
+                              🙋 Unclaimed Tickets
+                            </span>
+                            <span className="bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full text-[10px] font-mono font-bold">
+                              {unclaimed.length}
+                            </span>
+                          </div>
+                          <span className="text-zinc-400 text-[10px] font-mono font-bold">
+                            {unclaimedSectionOpen ? '▼ Minimize' : '▶ Expand'}
+                          </span>
+                        </button>
+
+                        {unclaimedSectionOpen && (
+                          <div className="p-2.5 space-y-2.5">
+                            {unclaimed.length === 0 ? (
+                              <p className="text-[10px] font-mono text-zinc-500 text-center py-2 italic">
+                                No unclaimed tickets in queue.
+                              </p>
+                            ) : (
+                              unclaimed.map((t) => (
+                                <div
+                                  key={t.id}
+                                  className="group space-y-2 rounded-xl border border-amber-500/20 bg-zinc-900/90 p-3 shadow-md backdrop-blur-sm transition-all duration-300 hover:scale-[1.01] hover:border-amber-500/50 hover:shadow-xl"
+                                >
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div className="min-w-0">
+                                      <h4 className="truncate text-xs font-extrabold text-white transition-colors group-hover:text-amber-400">
+                                        {t.candidateName || 'Applicant'}
+                                      </h4>
+                                      <p className="mt-0.5 flex items-center gap-1 truncate font-mono text-[10px] text-zinc-400">
+                                        <Mail className="h-3 w-3 shrink-0 text-zinc-500" /> {t.candidateEmail || 'Candidate'}
+                                      </p>
+                                    </div>
+                                    <span className="shrink-0 rounded border border-amber-500/40 bg-amber-500/20 text-amber-300 px-2 py-0.5 text-[9px] font-extrabold uppercase font-mono animate-pulse">
+                                      🙋 Unclaimed
+                                    </span>
+                                  </div>
+
+                                  <div className="mt-1.5 space-y-1 rounded-lg border border-white/5 bg-zinc-950/90 p-2 text-xs text-zinc-300 font-mono">
+                                    <div className="flex items-center justify-between text-[10px] text-amber-400 font-bold">
+                                      <span className="truncate max-w-[140px]">{t.categoryLabel || t.category}</span>
+                                      <span className="shrink-0 font-mono">#{t.ticketNumber}</span>
+                                    </div>
+                                    <p className="line-clamp-2 text-[11px] text-zinc-300 font-sans leading-snug">
+                                      {t.subject || t.message || 'Help ticket open'}
+                                    </p>
+                                  </div>
+
+                                  <div className="flex gap-2 pt-1">
+                                    <button
+                                      type="button"
+                                      onClick={(e) => handleClaimTicket(t.id, e)}
+                                      disabled={isClaimingTicketId === t.id}
+                                      className="flex flex-1 cursor-pointer items-center justify-center gap-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 py-1.5 text-[11px] font-black transition-all shadow-sm border-none"
+                                    >
+                                      <span>{isClaimingTicketId === t.id ? 'Claiming...' : '🙋 Claim Ticket'}</span>
+                                    </button>
+                                    <Link
+                                      href={`/ats/help-tickets?ticketId=${t.id}`}
+                                      className="flex flex-1 cursor-pointer items-center justify-center gap-1 rounded-lg border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 py-1.5 text-[11px] font-bold text-amber-300 transition-all text-center"
+                                    >
+                                      <span>Fix Ticket →</span>
+                                    </Link>
+                                  </div>
+                                </div>
+                              ))
+                            )}
+                          </div>
                         )}
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })()}
 
-                {stageCandidates.length === 0 && (
-                  <div className="flex min-h-[140px] flex-col items-center justify-center rounded-xl border border-dashed border-white/10 bg-zinc-900/30 px-4 py-8 text-center backdrop-blur-sm">
-                    <p className="text-xs font-medium text-zinc-500">No applicants</p>
-                    <p className="mt-1 font-mono text-[10px] text-zinc-600">
-                      Stage empty — not a demo placeholder
-                    </p>
-                  </div>
-                )}
-              </div>
+                  {/* SECTION 2: PERSONAL CLAIMED TICKETS */}
+                  {(() => {
+                    const claimed = helpTickets.filter(
+                      (t) => t.claimedByUserId || t.status === 'CLAIMED' || t.status === 'IN_PROGRESS'
+                    );
+                    return (
+                      <div className="rounded-xl border border-blue-500/20 bg-zinc-900/60 overflow-hidden">
+                        <button
+                          type="button"
+                          onClick={() => setClaimedSectionOpen((prev) => !prev)}
+                          className="w-full p-2.5 bg-blue-500/10 hover:bg-blue-500/20 flex items-center justify-between transition-colors cursor-pointer text-left"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="text-blue-400 font-extrabold text-xs uppercase tracking-wider font-mono">
+                              🛠️ Personal Claimed Tickets
+                            </span>
+                            <span className="bg-blue-500/20 text-blue-300 border border-blue-500/30 px-2 py-0.5 rounded-full text-[10px] font-mono font-bold">
+                              {claimed.length}
+                            </span>
+                          </div>
+                          <span className="text-zinc-400 text-[10px] font-mono font-bold">
+                            {claimedSectionOpen ? '▼ Minimize' : '▶ Expand'}
+                          </span>
+                        </button>
+
+                        {claimedSectionOpen && (
+                          <div className="p-2.5 space-y-2.5">
+                            {claimed.length === 0 ? (
+                              <p className="text-[10px] font-mono text-zinc-500 text-center py-2 italic">
+                                No claimed tickets yet.
+                              </p>
+                            ) : (
+                              claimed.map((t) => (
+                                <div
+                                  key={t.id}
+                                  className="group space-y-2 rounded-xl border border-blue-500/20 bg-zinc-900/90 p-3 shadow-md backdrop-blur-sm transition-all duration-300 hover:scale-[1.01] hover:border-blue-500/50 hover:shadow-xl"
+                                >
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div className="min-w-0">
+                                      <h4 className="truncate text-xs font-extrabold text-white transition-colors group-hover:text-blue-400">
+                                        {t.candidateName || 'Applicant'}
+                                      </h4>
+                                      <p className="mt-0.5 flex items-center gap-1 truncate font-mono text-[10px] text-zinc-400">
+                                        <Mail className="h-3 w-3 shrink-0 text-zinc-500" /> {t.candidateEmail || 'Candidate'}
+                                      </p>
+                                    </div>
+                                    <span className="shrink-0 rounded border border-blue-500/40 bg-blue-500/20 text-blue-300 px-2 py-0.5 text-[9px] font-extrabold uppercase font-mono">
+                                      🛠️ Claimed
+                                    </span>
+                                  </div>
+
+                                  <div className="mt-1.5 space-y-1 rounded-lg border border-white/5 bg-zinc-950/90 p-2 text-xs text-zinc-300 font-mono">
+                                    <div className="flex items-center justify-between text-[10px] text-blue-400 font-bold">
+                                      <span className="truncate max-w-[140px]">{t.categoryLabel || t.category}</span>
+                                      <span className="shrink-0 font-mono">#{t.ticketNumber}</span>
+                                    </div>
+                                    <p className="line-clamp-2 text-[11px] text-zinc-300 font-sans leading-snug">
+                                      {t.subject || t.message || 'Help ticket open'}
+                                    </p>
+                                  </div>
+
+                                  <div className="flex gap-2 pt-1">
+                                    <Link
+                                      href={`/ats/help-tickets?ticketId=${t.id}`}
+                                      className="flex flex-1 cursor-pointer items-center justify-center gap-1 rounded-lg border border-blue-500/40 bg-blue-500/10 hover:bg-blue-500/20 py-1.5 text-[11px] font-bold text-blue-300 transition-all text-center"
+                                    >
+                                      <span>Fix Ticket →</span>
+                                    </Link>
+
+                                    {t.status !== 'ESCALATED_HEAD_HR' && (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => handleForwardTicket(t.id, e)}
+                                        className="flex flex-1 cursor-pointer items-center justify-center gap-1 rounded-lg border border-purple-500/40 bg-purple-500/20 hover:bg-purple-500/30 py-1.5 text-[11px] font-bold text-purple-300 transition-all text-center"
+                                      >
+                                        <span>⏩ Forward</span>
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                  {helpTickets.length === 0 && (
+                    <div className="flex min-h-[160px] flex-col items-center justify-center rounded-xl border border-dashed border-white/10 bg-zinc-900/30 px-4 py-8 text-center backdrop-blur-sm">
+                      <LifeBuoy className="w-7 h-7 text-zinc-600 mb-2 animate-pulse" />
+                      <p className="text-xs font-bold text-zinc-400">No active help tickets</p>
+                      <p className="mt-1 font-mono text-[10px] text-zinc-500">
+                        All candidate questions &amp; help tickets resolved!
+                      </p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="relative flex-1 space-y-3">
+                  {stageCandidates.map((c) => {
+                    const count = c.reqCount || 0;
+                    const act = activationStatusLabel(c.activationStatus);
+                    const certDone = c.certDone === true || c.certUploaded === true;
+                    const idle = calculateDaysIdle(c.updatedAt, candidateSnapshotAt);
+                    const isStalled = idle !== null && idle >= 5;
+
+                    return (
+                      <div
+                        key={c.id}
+                        className="group space-y-2.5 rounded-xl border border-white/10 bg-zinc-900/80 p-3.5 shadow-md backdrop-blur-sm transition-all duration-300 hover:scale-[1.01] hover:border-brand-orange-500/40 hover:shadow-2xl"
+                      >
+                        <Link
+                          href={`/ats/applicant/${c.id}`}
+                          className="block cursor-pointer"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <h4 className="truncate text-xs font-extrabold text-white transition-colors group-hover:text-brand-orange-400">
+                                {c.name}
+                              </h4>
+                              <p className="mt-0.5 flex items-center gap-1 truncate font-mono text-[11px] text-zinc-400">
+                                <Mail className="h-3 w-3 shrink-0 text-zinc-500" /> {c.email}
+                              </p>
+                            </div>
+                            <span className="shrink-0 rounded border border-brand-orange-500/20 bg-brand-orange-500/10 px-2 py-0.5 text-[9px] font-extrabold uppercase text-brand-orange-400">
+                              {c.roleApplied}
+                            </span>
+                          </div>
+
+                          <div className="mt-2.5 space-y-1 rounded-lg border border-white/5 bg-zinc-950/80 p-2">
+                            <div className="flex items-center justify-between font-mono text-[10px]">
+                              <span className="text-zinc-400">Requirements:</span>
+                              <span className="font-extrabold text-emerald-400">
+                                {count}/5 Done ({count * 20}%)
+                              </span>
+                            </div>
+                            <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-800">
+                              <div
+                                className="h-full bg-gradient-to-r from-amber-500 to-emerald-500 transition-all duration-500"
+                                style={{ width: `${(count / 5) * 100}%` }}
+                              />
+                            </div>
+
+                            <div className="grid grid-cols-5 gap-1 pt-1 text-center font-mono text-[8px]">
+                              <span
+                                className={`rounded px-0.5 py-0.5 font-bold transition-all ${
+                                  c.reqTasks
+                                    ? 'border border-emerald-500/30 bg-emerald-500/20 text-emerald-300'
+                                    : 'border border-rose-500/30 bg-rose-500/20 text-rose-300'
+                                }`}
+                                title="E-Signatures & onboarding forms"
+                              >
+                                Forms
+                              </span>
+                              <span
+                                className={`rounded px-0.5 py-0.5 font-bold transition-all ${
+                                  c.reqSim
+                                    ? 'border border-emerald-500/30 bg-emerald-500/20 text-emerald-300'
+                                    : 'border border-rose-500/30 bg-rose-500/20 text-rose-300'
+                                }`}
+                                title="ABA clinical trial simulator"
+                              >
+                                Sim
+                              </span>
+                              <span
+                                className={`rounded px-0.5 py-0.5 font-bold transition-all ${
+                                  c.reqAvail
+                                    ? 'border border-emerald-500/30 bg-emerald-500/20 text-emerald-300'
+                                    : 'border border-rose-500/30 bg-rose-500/20 text-rose-300'
+                                }`}
+                                title="Weekly work availability"
+                              >
+                                Avail
+                              </span>
+                              <span
+                                className={`rounded px-0.5 py-0.5 font-bold transition-all ${
+                                  c.reqInterview
+                                    ? 'border border-emerald-500/30 bg-emerald-500/20 text-emerald-300'
+                                    : c.interviewBooked
+                                      ? 'border border-blue-500/30 bg-blue-500/20 text-blue-300'
+                                      : 'border border-rose-500/30 bg-rose-500/20 text-rose-300'
+                                }`}
+                                title={
+                                  c.reqInterview
+                                    ? 'Interview evaluated'
+                                    : c.interviewBooked
+                                      ? 'Slot booked — awaiting evaluation'
+                                      : 'Interview required'
+                                }
+                              >
+                                Int
+                              </span>
+                              <span
+                                className={`rounded px-0.5 py-0.5 font-bold transition-all ${
+                                  certDone
+                                    ? 'border border-emerald-500/30 bg-emerald-500/20 text-emerald-300'
+                                    : 'border border-rose-500/30 bg-rose-500/20 text-rose-300'
+                                }`}
+                                title="40-hour RBT course"
+                              >
+                                40-Hr
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="mt-2 flex items-center justify-between border-t border-white/5 pt-1 font-mono text-[10px] text-zinc-400">
+                            <span className="flex items-center gap-1">
+                              <Phone className="h-2.5 w-2.5 text-zinc-500" /> {c.phone || '—'}
+                            </span>
+                            <span className="flex items-center gap-1.5">
+                              {isStalled && (
+                                <span
+                                  suppressHydrationWarning
+                                  title={`No activity for ${idle} days — candidate may be stalled`}
+                                  className={`rounded-full border px-1.5 py-0.5 text-[9px] font-extrabold ${
+                                    idle >= 10
+                                      ? 'border-rose-500/30 bg-rose-500/10 text-rose-400'
+                                      : 'border-amber-500/30 bg-amber-500/10 text-amber-400'
+                                  }`}
+                                >
+                                  ⏳ {idle}d idle
+                                </span>
+                              )}
+                              <span
+                                className={`text-[9px] font-bold ${
+                                  act.tone === 'active'
+                                    ? 'text-emerald-400'
+                                    : act.tone === 'invited'
+                                      ? 'text-amber-400'
+                                      : 'text-zinc-400'
+                                }`}
+                              >
+                                {act.label}
+                              </span>
+                            </span>
+                          </div>
+                        </Link>
+
+                        <div className="flex gap-2 pt-0.5">
+                          <Link
+                            href={`/ats/applicant/${c.id}`}
+                            className="flex flex-1 cursor-pointer items-center justify-center gap-1 rounded-lg border border-white/10 bg-zinc-950/60 py-1.5 text-[11px] font-bold text-zinc-200 transition-all hover:border-brand-orange-500/40 hover:text-white"
+                          >
+                            Dossier <ChevronRight className="h-3 w-3" />
+                          </Link>
+                          {stage.key === 'INTERVIEW' && (
+                            <Link
+                              href={`/ats/applicant/${c.id}?tab=INTERVIEW`}
+                              className="flex flex-1 cursor-pointer items-center justify-center gap-1 rounded-lg border border-purple-500/30 bg-purple-500/10 py-1.5 text-[11px] font-bold text-purple-300 transition-all hover:border-purple-400/50 hover:text-purple-200"
+                            >
+                              Interview
+                            </Link>
+                          )}
+                          {stage.key === 'APPLIED' && (
+                            <button
+                              type="button"
+                              onClick={() => setSelectedProfileCandidate(c)}
+                              className="flex flex-1 cursor-pointer items-center justify-center gap-1 rounded-lg border border-brand-orange-500/30 bg-brand-orange-500/10 py-1.5 text-[11px] font-bold text-brand-orange-400 transition-all hover:border-brand-orange-500/50"
+                            >
+                              Quick review
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {stageCandidates.length === 0 && (
+                    <div className="flex min-h-[140px] flex-col items-center justify-center rounded-xl border border-dashed border-white/10 bg-zinc-900/30 px-4 py-8 text-center backdrop-blur-sm">
+                      <p className="text-xs font-medium text-zinc-500">No applicants</p>
+                      <p className="mt-1 font-mono text-[10px] text-zinc-600">
+                        Stage empty — not a demo placeholder
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           );
         })}

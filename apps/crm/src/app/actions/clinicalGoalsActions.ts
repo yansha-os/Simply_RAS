@@ -10,15 +10,14 @@ import {
   SKILL_TARGET_STATUSES,
   type ClinicalGoalsSnapshot,
   type SkillTargetStatus,
+  type SessionStudioSyncStatus,
+  type SyncTargetsResult,
 } from '@/lib/clinicalGoals';
-
-export type { ClinicalGoalsSnapshot };
 
 const SYNC_ROLES = new Set([
   'BCBA',
   'CLINICAL_DIRECTOR',
   'CLINICAL_SUPPORT',
-  'CASE_COORDINATOR',
   'CEO',
   'OPS_DIRECTOR',
 ]);
@@ -58,48 +57,6 @@ export async function getClinicalGoalsSnapshot(
     return { success: false, error: 'Failed to load clinical goals.' };
   }
 }
-
-export type StudioSkillTargetRow = {
-  id: string;
-  domain: string;
-  title: string;
-  measurementType: string;
-  targetStatus: string;
-  masteryCriteria: string | null;
-  updatedAt: string;
-};
-
-export type StudioBehaviorTargetRow = {
-  id: string;
-  behaviorName: string;
-  measurementType: string;
-};
-
-export type SessionStudioSyncStatus = {
-  skillCount: number;
-  behaviorCount: number;
-  /** Lowercased titles currently present as durable SkillTarget rows */
-  skillTitles: string[];
-  /** Lowercased behavior names currently present as durable BehaviorTarget rows */
-  behaviorNames: string[];
-  /** Durable SkillTarget rows (for per-target status management) */
-  skillTargets: StudioSkillTargetRow[];
-  /** Durable BehaviorTarget rows (read-only — no status column in schema) */
-  behaviorTargets: StudioBehaviorTargetRow[];
-};
-
-export type SyncTargetsResult = {
-  success: true;
-  skillsCreated: number;
-  skillsUpdated: number;
-  behaviorsCreated: number;
-  behaviorsUpdated: number;
-  skippedEmpty: number;
-  /** Durable SkillTarget count after sync */
-  skillTargetsTotal: number;
-  /** Durable BehaviorTarget count after sync */
-  behaviorTargetsTotal: number;
-};
 
 /**
  * Lightweight read: durable Session Studio SkillTarget / BehaviorTarget counts + titles.
@@ -233,78 +190,84 @@ export async function syncTreatmentPlanTargetsToSessionStudio(
       client.behaviorTargets.map((b) => [b.behaviorName.trim().toLowerCase(), b.id]),
     );
 
-    let skillsCreated = 0;
-    let skillsUpdated = 0;
-    let behaviorsCreated = 0;
-    let behaviorsUpdated = 0;
+    const counts = await prisma.$transaction(async (tx) => {
+      let skillsCreated = 0;
+      let skillsUpdated = 0;
+      let behaviorsCreated = 0;
+      let behaviorsUpdated = 0;
 
-    for (const payload of skillPayloads) {
-      const key = payload.title.toLowerCase();
-      const existingId = skillByTitle.get(key);
-      if (existingId) {
-        await prisma.skillTarget.update({
-          where: { id: existingId },
-          data: {
-            domain: payload.domain,
-            description: payload.description,
-            measurementType: payload.measurementType,
-            targetStatus: payload.targetStatus,
-            masteryCriteria: payload.masteryCriteria,
-            baselineData: payload.baselineData,
-          },
-        });
-        skillsUpdated += 1;
-      } else {
-        const created = await prisma.skillTarget.create({
-          data: {
-            id: crypto.randomUUID(),
-            clientId: client.id,
-            domain: payload.domain,
-            title: payload.title,
-            description: payload.description,
-            measurementType: payload.measurementType,
-            targetStatus: payload.targetStatus,
-            masteryCriteria: payload.masteryCriteria,
-            baselineData: payload.baselineData,
-          },
-        });
-        skillByTitle.set(key, created.id);
-        skillsCreated += 1;
+      for (const payload of skillPayloads) {
+        const key = payload.title.toLowerCase();
+        const existingId = skillByTitle.get(key);
+        if (existingId) {
+          const updated = await tx.skillTarget.updateMany({
+            where: { id: existingId, clientId: client.id },
+            data: {
+              domain: payload.domain,
+              description: payload.description,
+              measurementType: payload.measurementType,
+              targetStatus: payload.targetStatus,
+              masteryCriteria: payload.masteryCriteria,
+              baselineData: payload.baselineData,
+            },
+          });
+          if (updated.count !== 1) throw new Error('SKILL_TARGET_STALE');
+          skillsUpdated += 1;
+        } else {
+          const created = await tx.skillTarget.create({
+            data: {
+              id: crypto.randomUUID(),
+              clientId: client.id,
+              domain: payload.domain,
+              title: payload.title,
+              description: payload.description,
+              measurementType: payload.measurementType,
+              targetStatus: payload.targetStatus,
+              masteryCriteria: payload.masteryCriteria,
+              baselineData: payload.baselineData,
+            },
+          });
+          skillByTitle.set(key, created.id);
+          skillsCreated += 1;
+        }
       }
-    }
 
-    for (const payload of behaviorPayloads) {
-      const key = payload.behaviorName.toLowerCase();
-      const existingId = behaviorByName.get(key);
-      if (existingId) {
-        await prisma.behaviorTarget.update({
-          where: { id: existingId },
-          data: {
-            definition: payload.definition,
-            measurementType: payload.measurementType,
-            antecedents: payload.antecedents,
-            consequences: payload.consequences,
-            replacementBehavior: payload.replacementBehavior,
-          },
-        });
-        behaviorsUpdated += 1;
-      } else {
-        const created = await prisma.behaviorTarget.create({
-          data: {
-            id: crypto.randomUUID(),
-            clientId: client.id,
-            behaviorName: payload.behaviorName,
-            definition: payload.definition,
-            measurementType: payload.measurementType,
-            antecedents: payload.antecedents,
-            consequences: payload.consequences,
-            replacementBehavior: payload.replacementBehavior,
-          },
-        });
-        behaviorByName.set(key, created.id);
-        behaviorsCreated += 1;
+      for (const payload of behaviorPayloads) {
+        const key = payload.behaviorName.toLowerCase();
+        const existingId = behaviorByName.get(key);
+        if (existingId) {
+          const updated = await tx.behaviorTarget.updateMany({
+            where: { id: existingId, clientId: client.id },
+            data: {
+              definition: payload.definition,
+              measurementType: payload.measurementType,
+              antecedents: payload.antecedents,
+              consequences: payload.consequences,
+              replacementBehavior: payload.replacementBehavior,
+            },
+          });
+          if (updated.count !== 1) throw new Error('BEHAVIOR_TARGET_STALE');
+          behaviorsUpdated += 1;
+        } else {
+          const created = await tx.behaviorTarget.create({
+            data: {
+              id: crypto.randomUUID(),
+              clientId: client.id,
+              behaviorName: payload.behaviorName,
+              definition: payload.definition,
+              measurementType: payload.measurementType,
+              antecedents: payload.antecedents,
+              consequences: payload.consequences,
+              replacementBehavior: payload.replacementBehavior,
+            },
+          });
+          behaviorByName.set(key, created.id);
+          behaviorsCreated += 1;
+        }
       }
-    }
+
+      return { skillsCreated, skillsUpdated, behaviorsCreated, behaviorsUpdated };
+    }, { isolationLevel: 'Serializable' });
 
     const skillTargetsTotal = skillByTitle.size;
     const behaviorTargetsTotal = behaviorByName.size;
@@ -314,10 +277,7 @@ export async function syncTreatmentPlanTargetsToSessionStudio(
 
     return {
       success: true,
-      skillsCreated,
-      skillsUpdated,
-      behaviorsCreated,
-      behaviorsUpdated,
+      ...counts,
       skippedEmpty: Math.max(0, skippedEmpty),
       skillTargetsTotal,
       behaviorTargetsTotal,

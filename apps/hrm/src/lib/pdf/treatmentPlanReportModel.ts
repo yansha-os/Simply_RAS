@@ -276,11 +276,11 @@ function buildBehaviorGoals(
 }
 
 export function buildTreatmentPlanReportModel(input: {
-  client: any;
+  client: unknown;
   treatmentPlan: unknown;
   generatedAt?: Date;
 }): TreatmentPlanReportModel {
-  const client = input.client ?? {};
+  const client = asRecord(input.client) ?? {};
   const plan = asRecord(input.treatmentPlan) ?? {};
   const skillTargets = asArray(client.skillTargets);
   const behaviorTargets = asArray(client.behaviorTargets);

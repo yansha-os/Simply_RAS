@@ -1,38 +1,71 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
+import type { ClientStatus } from '@prisma/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Users, Search, AlertCircle, ExternalLink, Filter } from 'lucide-react';
 import Link from 'next/link';
 import CaseCoordActionItems from './CaseCoordActionItems';
+
+type StatusFilter = 'ALL' | 'STAFFING_PENDING' | 'ACTIVE';
+
+type CoordinatorOption = {
+  id: string;
+  firstName: string;
+  lastName: string;
+};
+
+type CaseCoordClient = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  guardianName: string | null;
+  status: ClientStatus;
+  caseCoordinatorId: string | null;
+  rbtId: string | null;
+  rbtApproved: boolean;
+  bcba: { firstName: string; lastName: string } | null;
+  rbt: { firstName: string; lastName: string; email: string } | null;
+};
 
 export default function CaseCoordClientsView({
   coordinators,
   allClients,
   initialStatusFilter = 'ALL',
 }: {
-  coordinators: any[];
-  allClients: any[];
-  initialStatusFilter?: string;
+  coordinators: CoordinatorOption[];
+  allClients: CaseCoordClient[];
+  initialStatusFilter?: StatusFilter;
 }) {
   const [selectedCoordId, setSelectedCoordId] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>(initialStatusFilter);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(initialStatusFilter);
 
-  const myClients = selectedCoordId
-    ? allClients.filter(c => c.caseCoordinatorId === selectedCoordId)
-    : allClients;
+  const { myClients, meetAndGreetQueue, filteredClients } = useMemo(() => {
+    const scopedClients: CaseCoordClient[] = [];
+    const meetAndGreet: CaseCoordClient[] = [];
+    const filtered: CaseCoordClient[] = [];
+    const normalizedSearch = searchQuery.trim().toLowerCase();
 
-  const meetAndGreetQueue = myClients.filter(c => c.rbtId && !c.rbtApproved);
+    for (const client of allClients) {
+      if (selectedCoordId && client.caseCoordinatorId !== selectedCoordId) continue;
+      scopedClients.push(client);
+      if (client.rbtId && !client.rbtApproved) meetAndGreet.push(client);
 
-  const filteredClients = myClients.filter(client => {
-    const matchesSearch = `${client.firstName} ${client.lastName} ${client.guardianName || ''}`
-      .toLowerCase()
-      .includes(searchQuery.toLowerCase());
-    
-    if (statusFilter === 'ALL') return matchesSearch;
-    return matchesSearch && client.status === statusFilter;
-  });
+      const matchesSearch = `${client.firstName} ${client.lastName} ${client.guardianName ?? ''}`
+        .toLowerCase()
+        .includes(normalizedSearch);
+      if (matchesSearch && (statusFilter === 'ALL' || client.status === statusFilter)) {
+        filtered.push(client);
+      }
+    }
+
+    return {
+      myClients: scopedClients,
+      meetAndGreetQueue: meetAndGreet,
+      filteredClients: filtered,
+    };
+  }, [allClients, searchQuery, selectedCoordId, statusFilter]);
 
   return (
     <div className="space-y-8">
@@ -147,7 +180,7 @@ export default function CaseCoordClientsView({
               <Filter className="w-3.5 h-3.5 mr-1 text-zinc-500" />
               <select
                 value={statusFilter}
-                onChange={e => setStatusFilter(e.target.value)}
+                onChange={e => setStatusFilter(e.target.value as StatusFilter)}
                 className="bg-transparent text-white outline-none cursor-pointer font-medium"
               >
                 <option value="ALL">All Statuses</option>

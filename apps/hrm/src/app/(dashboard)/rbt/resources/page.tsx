@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { BookOpen, ExternalLink, ShieldCheck, Bookmark, FileText, Award, Sparkles } from 'lucide-react';
+import { BookOpen, ExternalLink, Bookmark, Award } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function RbtResourcesPage() {

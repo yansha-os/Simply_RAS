@@ -36,7 +36,8 @@ export async function DevToolsWrapper() {
     'CASE_COORDINATOR',
     'CLINICAL_SUPPORT',
     'BILLING',
-    'BCBA'
+    'FINANCE',
+    'BCBA',
   ];
 
   return (

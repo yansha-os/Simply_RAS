@@ -13,6 +13,10 @@ import {
 import { requireStaffOrParent, newMagicLinkExpiry } from '@/lib/magicLinkGuard'
 import { updateClientCaseCoordinator } from '@/app/actions/hr'
 import { writeAuditLog } from '@/lib/auditLog'
+import { clearClinicalReviewApprovals } from '@/lib/clinicalReviewApprovals'
+import { notifyCaseTeam, notifyClient } from '@/lib/notificationDispatcher'
+import { notifyIntakeSentToClinicalHandoff } from '@/lib/intakeWorkflowNotifications'
+import { parsePacketFormData } from '@/lib/safeParseJson'
 import {
   assertSingleConditionalWrite,
   buildDocumentCorrectionPatch,
@@ -415,6 +419,9 @@ export async function sendToClinical(
         )
         if (!ready.ok) return policyFailure(ready)
         const packet = client!.intakePacket!
+        const refreshedFormData = clearClinicalReviewApprovals(
+          parsePacketFormData(packet.formData),
+        )
 
         await prisma.$transaction(
           async (tx) => {
@@ -425,7 +432,10 @@ export async function sendToClinical(
                 status: 'SUBMITTED',
                 updatedAt: packet.updatedAt,
               },
-              data: { status: 'APPROVED' },
+              data: {
+                status: 'APPROVED',
+                formData: refreshedFormData as Prisma.InputJsonValue,
+              },
             })
             assertSingleConditionalWrite(packetUpdate.count)
 
@@ -448,6 +458,7 @@ export async function sendToClinical(
           packetId,
           clientId,
         })
+        await notifyIntakeSentToClinicalHandoff(clientId)
         revalidateIntakeSurfaces(clientId)
         return { success: true }
       } catch (error) {
@@ -636,6 +647,15 @@ export async function rejectDocument(
           clientId,
           meta: { documentKey },
         })
+
+        // Notify client portal of requested document correction
+        await notifyClient(clientId, {
+          title: 'Document update requested',
+          message: `Your care coordinator requested an update to your uploaded documents (${documentKey}). Please review and replace.`,
+          type: 'WARNING',
+          linkUrl: '/magic-link/?section=docs',
+        }).catch(() => {})
+
         revalidateIntakeSurfaces(clientId)
         return { success: true }
       } catch (error) {
@@ -719,6 +739,15 @@ export async function rejectFormFieldsBulk(
           clientId,
           meta: { correctionCount: normalized.value.length },
         })
+
+        // Notify client portal of requested form corrections
+        await notifyClient(clientId, {
+          title: 'Intake information update requested',
+          message: `Your care coordinator requested updates on ${normalized.value.length} field(s). Please review and resubmit.`,
+          type: 'WARNING',
+          linkUrl: '/magic-link/?section=sec-a',
+        }).catch(() => {})
+
         revalidateIntakeSurfaces(clientId)
         return { success: true }
       } catch (error) {
@@ -881,6 +910,39 @@ export async function sendClientMessage(
         senderType: gate.via,
       },
     })
+
+    // Workflow Notification Routing:
+    // If sent by parent -> notify assigned case coordinator, BCBA & intake team
+    // If sent by staff -> notify client in their magic link portal
+    if (gate.via === 'parent') {
+      const clientWithPacket = await prisma.client.findUnique({
+        where: { id: clientId },
+        select: { firstName: true, lastName: true, guardianName: true },
+      })
+      const childName = clientWithPacket
+        ? `${clientWithPacket.firstName} ${clientWithPacket.lastName}`
+        : 'Client'
+      await notifyCaseTeam(
+        clientId,
+        {
+          title: `New message from ${clientWithPacket?.guardianName || 'Family'} (${childName})`,
+          message: content.slice(0, 140),
+          type: 'INFO',
+          linkUrl: `/client/${clientId}?tab=messages`,
+        },
+        true
+      ).catch(() => {})
+    } else {
+      const staffName =
+        `${gate.user.firstName} ${gate.user.lastName}`.trim() ||
+        'Care Coordinator'
+      await notifyClient(clientId, {
+        title: `New message from ${staffName}`,
+        message: content.slice(0, 140),
+        type: 'INFO',
+        linkUrl: '/magic-link/?tab=messages',
+      }).catch(() => {})
+    }
 
     revalidatePath(`/client/${clientId}`)
     revalidatePath('/magic-link/[id]', 'page')

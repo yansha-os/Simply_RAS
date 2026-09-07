@@ -12,6 +12,10 @@
     "./session-note-attestation": {
       "types": "./src/session-note-attestation.ts",
       "default": "./src/session-note-attestation.ts"
+    },
+    "./pilot-cohort-hygiene": {
+      "types": "./src/pilot-cohort-hygiene.ts",
+      "default": "./src/pilot-cohort-hygiene.ts"
     }
   },
   "scripts": {

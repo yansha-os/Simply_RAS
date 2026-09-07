@@ -154,6 +154,8 @@ describe('clinicWallClockToUtc — datetime-local strings as clinic wall-clock',
     expect(clinicWallClockToUtc('2026-01-32T10:00')).toBeNull();
     expect(clinicWallClockToUtc('2026-01-15T24:00')).toBeNull();
     expect(clinicWallClockToUtc('2026-01-15T10:60')).toBeNull();
+    expect(clinicWallClockToUtc('2026-02-31T10:00')).toBeNull();
+    expect(clinicWallClockToUtc('2026-03-08T02:30')).toBeNull();
   });
 });
 

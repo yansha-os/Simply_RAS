@@ -1,4 +1,4 @@
--- Migration: StaffMessage table (staff-to-staff chat / case-coord messaging)
+-- eMigration: StaffMessage table (staff-to-staff chat / case-coord messaging)
 -- Generated: 2026-08-12
 -- Run in Supabase SQL Editor. Idempotent.
 --

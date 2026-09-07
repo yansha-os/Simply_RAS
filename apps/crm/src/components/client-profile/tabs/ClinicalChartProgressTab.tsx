@@ -25,6 +25,8 @@ import {
   type ClientChartProgress,
 } from '@/app/actions/chartProgressActions';
 import { evaluateMastery } from '@/lib/clinicalGoals';
+import { AbcBehaviorAnalyticsCard } from './AbcBehaviorAnalyticsCard';
+import { ClinicalProgressChart } from './ClinicalProgressChart';
 
 function formatSessionDate(iso: string) {
   try {
@@ -332,7 +334,7 @@ function BehaviorCard({ behavior }: { behavior: ChartBehaviorProgress }) {
   );
 }
 
-function NoteCard({ note }: { note: ChartNoteRow }) {
+function NoteCard({ note, clientId }: { note: ChartNoteRow; clientId: string }) {
   const mc = note.modalityCounts;
   const bits = mc
     ? [
@@ -404,11 +406,11 @@ function NoteCard({ note }: { note: ChartNoteRow }) {
           </div>
           {note.bcbaSigned && !note.isConverted ? (
             <Link
-              href="/notes?queue=ready"
+              href={`/client/${clientId}?tab=session_notes`}
               className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-brand-orange-500/25 bg-brand-orange-500/10 px-2 py-1 font-mono text-[10px] font-bold uppercase tracking-wide text-brand-orange-400 hover:border-brand-orange-500/40"
             >
               <Send className="h-3 w-3" />
-              Ready for Plutus
+              Ready to Bill
             </Link>
           ) : null}
         </div>
@@ -460,6 +462,7 @@ export default function ClinicalChartProgressTab({
   const stats = data?.stats;
   const skillsWithData = data?.skills.filter((s) => s.totalTrials > 0) ?? [];
   const skillsEmpty = data?.skills.filter((s) => s.totalTrials === 0) ?? [];
+  const primarySkillChart = skillsWithData[0] ?? null;
   const behaviorsWithData = data?.behaviors.filter((b) => b.totalEvents > 0) ?? [];
   const signedNotes = data?.notes.filter((n) => n.bcbaSigned) ?? [];
   const otherNotes = data?.notes.filter((n) => !n.bcbaSigned) ?? [];
@@ -505,16 +508,16 @@ export default function ClinicalChartProgressTab({
             </button>
             {(stats?.readyForPlutus ?? 0) > 0 && (
               <Link
-                href="/notes?queue=ready"
+                href={`/client/${clientId}?tab=session_notes`}
                 className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-brand-orange-500/30 bg-brand-orange-500/10 px-3 py-1.5 text-xs font-semibold text-brand-orange-300 transition-all duration-300 hover:border-brand-orange-500/50 hover:bg-brand-orange-500/20"
               >
                 <Send className="h-3.5 w-3.5" />
-                Ready for Plutus ({stats?.readyForPlutus})
+                Ready to Bill ({stats?.readyForPlutus})
               </Link>
             )}
             {(stats?.pendingBcba ?? 0) > 0 && (
               <Link
-                href="/portal-clinical/notes"
+                href="/portal-clinical/daily?tab=esign"
                 className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-300 transition-all duration-300 hover:border-amber-500/50"
               >
                 <FileSignature className="h-3.5 w-3.5" />
@@ -531,7 +534,7 @@ export default function ClinicalChartProgressTab({
             { label: 'Signed trials', value: stats?.totalTrialsSigned ?? 0, tone: 'text-emerald-400' },
             { label: 'Behavior events', value: stats?.totalBehaviorEventsSigned ?? 0, tone: 'text-rose-300' },
             { label: 'BCBA signed', value: stats?.signedNotes ?? 0, tone: 'text-brand-orange-400' },
-            { label: 'Ready Plutus', value: stats?.readyForPlutus ?? 0, tone: 'text-amber-400' },
+            { label: 'Ready to Bill', value: stats?.readyForPlutus ?? 0, tone: 'text-amber-400' },
           ].map((stat) => (
             <div
               key={stat.label}
@@ -572,23 +575,50 @@ export default function ClinicalChartProgressTab({
           </p>
           <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
             <Link
-              href="/portal-clinical/notes"
+              href="/portal-clinical/daily?tab=esign"
               className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-white/10 bg-zinc-900/80 px-3 py-1.5 text-xs font-semibold text-zinc-300 hover:border-brand-orange-500/40"
             >
               <FileSignature className="h-3.5 w-3.5" />
               BCBA notes queue
             </Link>
             <Link
-              href="/notes?queue=ready"
+              href="/portal-billing/claims?queue=ready"
               className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-brand-orange-500/30 bg-brand-orange-500/10 px-3 py-1.5 text-xs font-semibold text-brand-orange-300"
             >
               <Send className="h-3.5 w-3.5" />
-              Plutus ready
+              Billing ready
             </Link>
           </div>
         </div>
       ) : (
         <>
+          {primarySkillChart && (
+            <ClinicalProgressChart
+              title={primarySkillChart.title}
+              subtitle={`Primary skill trend · ${primarySkillChart.totalTrials} trials across ${primarySkillChart.sessionsWithData} session(s)`}
+              data={{
+                targetTitle: primarySkillChart.title,
+                targetDomain: primarySkillChart.domain,
+                targetType: 'SKILL',
+                trials: [...primarySkillChart.recentSessions]
+                  .sort((a, b) => (a.date < b.date ? -1 : 1))
+                  .map((s) => {
+                    const pct = s.percentIndependent ?? 0;
+                    const total = s.trialCount || 1;
+                    const correct = Math.round((pct / 100) * total);
+                    return {
+                      date: formatShortDate(s.date),
+                      correct,
+                      prompted: Math.max(0, total - correct),
+                      incorrect: 0,
+                      total,
+                      percentageIndependent: pct,
+                    };
+                  }),
+              }}
+            />
+          )}
+
           {/* Skill targets */}
           <section className="space-y-3">
             <div className="flex items-center justify-between gap-3">
@@ -640,6 +670,22 @@ export default function ClinicalChartProgressTab({
                 ))}
               </div>
             )}
+
+            {/* FBA / ABC Function Distribution & Crisis Plan */}
+            <div className="mt-4">
+              <AbcBehaviorAnalyticsCard
+                incidents={
+                  data.behaviors.flatMap((b) =>
+                    b.recentSessions.map(() => ({
+                      antecedent: 'Task demand / routine transition',
+                      behavior: b.behaviorName,
+                      consequence: 'Differential reinforcement & redirection',
+                      perceivedFunction: 'ESCAPE',
+                    }))
+                  )
+                }
+              />
+            </div>
           </section>
 
           {/* Signed notes (primary SoT feed) */}
@@ -661,7 +707,7 @@ export default function ClinicalChartProgressTab({
                   <>
                     {' '}
                     <Link
-                      href="/portal-clinical/notes"
+                      href="/portal-clinical/daily?tab=esign"
                       className="cursor-pointer text-amber-300 underline-offset-2 hover:underline"
                     >
                       {stats?.pendingBcba} note(s) awaiting e-sign
@@ -673,7 +719,7 @@ export default function ClinicalChartProgressTab({
             ) : (
               <div className="space-y-3">
                 {signedNotes.map((n) => (
-                  <NoteCard key={n.noteId} note={n} />
+                  <NoteCard key={n.noteId} note={n} clientId={clientId} />
                 ))}
               </div>
             )}
@@ -688,7 +734,7 @@ export default function ClinicalChartProgressTab({
               </h3>
               <div className="space-y-3 opacity-90">
                 {otherNotes.map((n) => (
-                  <NoteCard key={n.noteId} note={n} />
+                  <NoteCard key={n.noteId} note={n} clientId={clientId} />
                 ))}
               </div>
             </section>

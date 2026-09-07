@@ -21,7 +21,7 @@ type PendingOnboard = {
   id: string;
   bacbVerified: boolean;
   backgroundCleared: boolean;
-  artemisAccountSetup: boolean;
+  clinicalEmrProvisioned: boolean;
   payrollComplete: boolean;
   payerCredentialed: boolean;
   rbt: { firstName: string; lastName: string };
@@ -172,9 +172,9 @@ export default function CasePipelineClient({
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span>RAS Clinical Chart:</span>
-                    <span className={onboard.artemisAccountSetup ? "text-green-600" : "text-amber-600 font-bold"}>
-                      {onboard.artemisAccountSetup ? 'Tested' : 'Pending'}
+                    <span>Clinical EMR provisioned:</span>
+                    <span className={onboard.clinicalEmrProvisioned ? "text-green-600" : "text-amber-600 font-bold"}>
+                      {onboard.clinicalEmrProvisioned ? 'Complete' : 'Pending'}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">

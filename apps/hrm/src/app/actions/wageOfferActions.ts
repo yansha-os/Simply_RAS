@@ -14,6 +14,7 @@ import {
   type Ls54Status,
 } from '@/lib/onboardingDocuments';
 import { canUseApplicantDeviceSession } from '@/lib/applicantAccessPolicy';
+import { isCandidateDeviceSessionCurrent } from '@/lib/candidateDeviceSession';
 
 const HEAD_HR_ROLES = [
   'HEAD_HR',
@@ -146,6 +147,7 @@ async function resolveApplicantId(): Promise<
     },
     select: {
       revokedAt: true,
+      boundAt: true,
       candidate: {
         select: {
           stage: true,
@@ -156,7 +158,7 @@ async function resolveApplicantId(): Promise<
   });
   if (
     !session ||
-    session.revokedAt ||
+    !isCandidateDeviceSessionCurrent(session) ||
     !canUseApplicantDeviceSession(session.candidate)
   ) {
     return { ok: false, error: 'Applicant session is not active on this device.' };
@@ -713,6 +715,7 @@ export async function signWageOffer(input: {
           },
           select: {
             revokedAt: true,
+            boundAt: true,
             candidate: {
               select: {
                 id: true,
@@ -724,7 +727,7 @@ export async function signWageOffer(input: {
         });
         if (
           !liveSession ||
-          liveSession.revokedAt ||
+          !isCandidateDeviceSessionCurrent(liveSession) ||
           !canUseApplicantDeviceSession(liveSession.candidate)
         ) {
           return {
@@ -911,35 +914,75 @@ export async function declineWageOffer(reason?: string) {
   try {
     const session = await resolveApplicantId();
     if (!session.ok) return { success: false as const, error: session.error };
+    const meta = await clientMeta();
+    const result = await serializableTransaction(
+      async (tx) => {
+        const packet = await tx.candidateOnboardingPacket.findUnique({
+          where: { candidateId: session.candidateId },
+          select: {
+            id: true,
+            ls54Status: true,
+            ls54Version: true,
+            ls54SignedAt: true,
+          },
+        });
+        if (!packet || !['SENT', 'IN_DISCUSSION'].includes(packet.ls54Status)) {
+          return { success: false as const, error: 'No wage offer to decline.' };
+        }
 
-    const packet = await prisma.candidateOnboardingPacket.findUnique({
-      where: { candidateId: session.candidateId },
-    });
-    if (!packet || !['SENT', 'IN_DISCUSSION'].includes(packet.ls54Status)) {
-      return { success: false as const, error: 'No wage offer to decline.' };
-    }
+        const now = new Date();
+        const declined = await tx.candidateOnboardingPacket.updateMany({
+          where: {
+            id: packet.id,
+            ls54Status: packet.ls54Status,
+            ls54Version: packet.ls54Version,
+            ls54SignedAt: null,
+          },
+          data: {
+            ls54Status: 'DECLINED',
+            ls54DeclinedAt: now,
+          },
+        });
+        if (declined.count !== 1) {
+          throw new WageNoticeRaceError(
+            'Wage notice state changed during decline.'
+          );
+        }
 
-    const now = new Date();
-    await prisma.candidateOnboardingPacket.update({
-      where: { candidateId: session.candidateId },
-      data: {
-        ls54Status: 'DECLINED',
-        ls54DeclinedAt: now,
+        await writeAuditEvent(
+          {
+            candidateId: session.candidateId,
+            actionType: 'LS54_DECLINED',
+            fingerprint: session.fingerprint,
+            quizAnswers: {
+              reason: String(reason || '').slice(0, 500),
+              version: packet.ls54Version,
+            },
+            noticeVersion: packet.ls54Version,
+          },
+          tx,
+          meta,
+          now
+        );
+        return { success: true as const };
       },
-    });
-
-    await writeAuditEvent({
-      candidateId: session.candidateId,
-      actionType: 'LS54_DECLINED',
-      fingerprint: session.fingerprint,
-      quizAnswers: { reason: String(reason || '').slice(0, 500), version: packet.ls54Version },
-    });
+      true
+    );
+    if (!result.success) return result;
 
     revalidatePath('/rbt', 'layout');
     revalidatePath('/ats');
-    return { success: true as const };
+    return result;
   } catch (error) {
     console.error('declineWageOffer failed:', error instanceof Error ? error.message : 'Unknown');
+    if (error instanceof WageNoticeRaceError || isSerializableConflict(error)) {
+      return {
+        success: false as const,
+        code: 'WAGE_NOTICE_STALE' as const,
+        error:
+          'The wage notice changed while it was being declined. Reload to view the current outcome.',
+      };
+    }
     return { success: false as const, error: 'Failed to decline wage offer.' };
   }
 }
@@ -948,159 +991,255 @@ export async function discussWageOffer(message?: string) {
   try {
     const session = await resolveApplicantId();
     if (!session.ok) return { success: false as const, error: session.error };
-
-    const packet = await prisma.candidateOnboardingPacket.findUnique({
-      where: { candidateId: session.candidateId },
-    });
-    if (!packet || !['SENT', 'IN_DISCUSSION', 'DECLINED'].includes(packet.ls54Status)) {
-      return { success: false as const, error: 'No wage offer available to discuss.' };
-    }
-
-    const candidate = await prisma.atsCandidate.findUnique({
-      where: { id: session.candidateId },
-      select: { firstName: true, lastName: true },
-    });
-    const senderName = candidate
-      ? `${candidate.firstName} ${candidate.lastName}`.trim()
-      : 'Applicant';
     const bodyText =
-      message?.trim() ||
+      message?.trim().slice(0, 4000) ||
       'I would like to discuss the wage notice / hourly rate with Head HR before signing.';
-
-    // Route to the Head HR who prepared/sent this LS-54 — not the unclaimed queue.
-    let assigneeId: string | null = null;
-    let assigneeName: string | null = null;
-    if (isUuid(packet.ls54PreparedByUserId)) {
-      const preparer = await prisma.user.findUnique({
-        where: { id: packet.ls54PreparedByUserId },
-        select: { id: true, firstName: true, lastName: true, isActive: true },
-      });
-      if (preparer && preparer.isActive !== false) {
-        assigneeId = preparer.id;
-        assigneeName = `${preparer.firstName} ${preparer.lastName}`.trim();
-      }
-    }
-
-    const existingWageTicket = await prisma.atsHelpTicket.findFirst({
-      where: {
-        candidateId: session.candidateId,
-        subject: { startsWith: '[WAGE_OFFER]' },
-        status: { in: ['OPEN', 'CLAIMED', 'IN_PROGRESS'] },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    let ticketId: string;
-
-    if (existingWageTicket) {
-      const updated = await prisma.atsHelpTicket.update({
-        where: { id: existingWageTicket.id },
-        data: {
-          status: assigneeId ? 'CLAIMED' : existingWageTicket.status === 'OPEN' ? 'OPEN' : existingWageTicket.status,
-          claimedByUserId: assigneeId ?? existingWageTicket.claimedByUserId,
-          priority: 'HIGH',
-          messages: {
-            create: {
-              senderType: 'CANDIDATE',
-              body: JSON.stringify({
-                text: bodyText,
-                type: 'TEXT',
-                senderName,
-                category: 'WAGE_OFFER',
-              }),
+    const meta = await clientMeta();
+    const result = await serializableTransaction(
+      async (tx) => {
+        if (session.fingerprint) {
+          const liveSession = await tx.applicantDeviceSession.findUnique({
+            where: {
+              candidateId_deviceFingerprint: {
+                candidateId: session.candidateId,
+                deviceFingerprint: session.fingerprint,
+              },
             },
-          },
-        },
-      });
-      ticketId = updated.id;
+            select: {
+              revokedAt: true,
+              boundAt: true,
+              candidate: {
+                select: { stage: true, activationStatus: true },
+              },
+            },
+          });
+          if (
+            !liveSession ||
+            !isCandidateDeviceSessionCurrent(liveSession) ||
+            !canUseApplicantDeviceSession(liveSession.candidate)
+          ) {
+            return {
+              success: false as const,
+              error: 'Applicant session is no longer active on this device.',
+            };
+          }
+        }
 
-      if (assigneeId && existingWageTicket.claimedByUserId !== assigneeId) {
-        await prisma.atsHelpMessage.create({
-          data: {
-            ticketId,
-            senderType: 'SYSTEM',
-            senderUserId: assigneeId,
-            body: JSON.stringify({
-              text: `Auto-assigned to ${assigneeName || 'the Head HR who sent this wage notice'} (LS-54 preparer).`,
-              type: 'TEXT',
-              senderName: 'System',
-              category: 'WAGE_OFFER',
-            }),
+        const [packet, candidate] = await Promise.all([
+          tx.candidateOnboardingPacket.findUnique({
+            where: { candidateId: session.candidateId },
+            select: {
+              id: true,
+              ls54Status: true,
+              ls54Version: true,
+              ls54SignedAt: true,
+              ls54PreparedByUserId: true,
+            },
+          }),
+          tx.atsCandidate.findUnique({
+            where: { id: session.candidateId },
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              stage: true,
+            },
+          }),
+        ]);
+        if (
+          !packet ||
+          !candidate ||
+          !['SENT', 'IN_DISCUSSION', 'DECLINED'].includes(packet.ls54Status) ||
+          !['OFFER', 'HELP_DESK'].includes(candidate.stage)
+        ) {
+          return {
+            success: false as const,
+            error: 'No wage offer available to discuss.',
+          };
+        }
+
+        const moved = await tx.candidateOnboardingPacket.updateMany({
+          where: {
+            id: packet.id,
+            ls54Status: packet.ls54Status,
+            ls54Version: packet.ls54Version,
+            ls54SignedAt: null,
           },
+          data: { ls54Status: 'IN_DISCUSSION' },
         });
-      }
-    } else {
-      const ticket = await prisma.atsHelpTicket.create({
-        data: {
-          candidateId: session.candidateId,
-          subject: '[WAGE_OFFER] Wage offer discussion (LS-54)',
-          status: assigneeId ? 'CLAIMED' : 'OPEN',
-          claimedByUserId: assigneeId,
-          priority: 'HIGH',
-          messages: {
-            create: [
-              {
-                senderType: 'CANDIDATE',
+        if (moved.count !== 1) {
+          throw new WageNoticeRaceError(
+            'Wage notice state changed during discussion request.'
+          );
+        }
+
+        if (candidate.stage !== 'HELP_DESK') {
+          const staged = await tx.atsCandidate.updateMany({
+            where: { id: candidate.id, stage: candidate.stage },
+            data: { stage: 'HELP_DESK' },
+          });
+          if (staged.count !== 1) {
+            throw new WageNoticeRaceError(
+              'Candidate stage changed during discussion request.'
+            );
+          }
+        }
+
+        const senderName = `${candidate.firstName} ${candidate.lastName}`.trim();
+        let assigneeId: string | null = null;
+        let assigneeName: string | null = null;
+        if (isUuid(packet.ls54PreparedByUserId)) {
+          const preparer = await tx.user.findUnique({
+            where: { id: packet.ls54PreparedByUserId },
+            select: { id: true, firstName: true, lastName: true, isActive: true },
+          });
+          if (preparer && preparer.isActive !== false) {
+            assigneeId = preparer.id;
+            assigneeName = `${preparer.firstName} ${preparer.lastName}`.trim();
+          }
+        }
+        if (!assigneeId) {
+          const headHr = await tx.user.findFirst({
+            where: { role: 'HEAD_HR', isActive: true },
+            select: { id: true, firstName: true, lastName: true },
+          });
+          if (headHr) {
+            assigneeId = headHr.id;
+            assigneeName = `${headHr.firstName} ${headHr.lastName}`.trim();
+          }
+        }
+
+        const existingWageTicket = await tx.atsHelpTicket.findFirst({
+          where: {
+            candidateId: session.candidateId,
+            subject: { contains: '[WAGE_OFFER]' },
+            status: { in: ['OPEN', 'CLAIMED', 'IN_PROGRESS', 'ESCALATED_HEAD_HR'] },
+          },
+          orderBy: { createdAt: 'desc' },
+        });
+        let ticketId: string;
+        if (existingWageTicket) {
+          const updated = await tx.atsHelpTicket.update({
+            where: { id: existingWageTicket.id },
+            data: {
+              status: 'ESCALATED_HEAD_HR',
+              claimedByUserId: assigneeId ?? existingWageTicket.claimedByUserId,
+              priority: 'HEAD_HR_REQUESTED',
+              messages: {
+                create: {
+                  senderType: 'CANDIDATE',
+                  body: JSON.stringify({
+                    text: bodyText,
+                    type: 'TEXT',
+                    senderName,
+                    category: 'WAGE_OFFER',
+                  }),
+                },
+              },
+            },
+          });
+          ticketId = updated.id;
+          if (assigneeId && existingWageTicket.claimedByUserId !== assigneeId) {
+            await tx.atsHelpMessage.create({
+              data: {
+                ticketId,
+                senderType: 'SYSTEM',
+                senderUserId: assigneeId,
                 body: JSON.stringify({
-                  text: bodyText,
+                  text: `Auto-assigned to ${assigneeName || 'the Head HR who sent this wage notice'} (LS-54 preparer).`,
                   type: 'TEXT',
-                  senderName,
+                  senderName: 'System',
                   category: 'WAGE_OFFER',
                 }),
               },
-              ...(assigneeId
-                ? [
-                    {
-                      senderType: 'SYSTEM' as const,
-                      senderUserId: assigneeId,
-                      body: JSON.stringify({
-                        text: `Auto-assigned to ${assigneeName || 'the Head HR who sent this wage notice'} (LS-54 preparer).`,
-                        type: 'TEXT',
-                        senderName: 'System',
-                        category: 'WAGE_OFFER',
-                      }),
-                    },
-                  ]
-                : []),
-            ],
+            });
+          }
+        } else {
+          const ticket = await tx.atsHelpTicket.create({
+            data: {
+              candidateId: session.candidateId,
+              subject: '[WAGE_OFFER] Wage offer discussion (LS-54)',
+              status: 'ESCALATED_HEAD_HR',
+              claimedByUserId: assigneeId,
+              priority: 'HEAD_HR_REQUESTED',
+              messages: {
+                create: [
+                  {
+                    senderType: 'CANDIDATE',
+                    body: JSON.stringify({
+                      text: bodyText,
+                      type: 'TEXT',
+                      senderName,
+                      category: 'WAGE_OFFER',
+                    }),
+                  },
+                  ...(assigneeId
+                    ? [{
+                        senderType: 'SYSTEM' as const,
+                        senderUserId: assigneeId,
+                        body: JSON.stringify({
+                          text: `Auto-assigned to ${assigneeName || 'the Head HR who sent this wage notice'} (LS-54 preparer).`,
+                          type: 'TEXT',
+                          senderName: 'System',
+                          category: 'WAGE_OFFER',
+                        }),
+                      }]
+                    : []),
+                ],
+              },
+            },
+          });
+          ticketId = ticket.id;
+        }
+
+        const now = new Date();
+        await writeAuditEvent(
+          {
+            candidateId: session.candidateId,
+            actionType: 'LS54_DISCUSSION',
+            fingerprint: session.fingerprint,
+            quizAnswers: {
+              ticketId,
+              version: packet.ls54Version,
+              assignedToUserId: assigneeId,
+            },
+            noticeVersion: packet.ls54Version,
           },
-        },
-      });
-      ticketId = ticket.id;
-    }
-
-    await prisma.atsCandidate.update({
-      where: { id: session.candidateId },
-      data: { stage: 'HELP_DESK' },
-    });
-
-    await prisma.candidateOnboardingPacket.update({
-      where: { candidateId: session.candidateId },
-      data: { ls54Status: 'IN_DISCUSSION' },
-    });
-
-    await writeAuditEvent({
-      candidateId: session.candidateId,
-      actionType: 'LS54_DISCUSSION',
-      fingerprint: session.fingerprint,
-      quizAnswers: {
-        ticketId,
-        version: packet.ls54Version,
-        assignedToUserId: assigneeId,
+          tx,
+          meta,
+          now
+        );
+        return {
+          success: true as const,
+          data: { ticketId, assignedToUserId: assigneeId },
+        };
       },
-    });
+      true
+    );
+    if (!result.success) return result;
 
     revalidatePath('/rbt', 'layout');
     revalidatePath('/ats');
     revalidatePath('/ats/help-tickets');
     revalidatePath('/rbt/help-desk');
-    return {
-      success: true as const,
-      data: { ticketId, assignedToUserId: assigneeId },
-    };
+    return result;
   } catch (error) {
     console.error('discussWageOffer failed:', error instanceof Error ? error.message : 'Unknown');
+    if (error instanceof WageNoticeRaceError || isSerializableConflict(error)) {
+      return {
+        success: false as const,
+        code: 'WAGE_NOTICE_STALE' as const,
+        error:
+          'The wage notice changed while the discussion was opening. Reload to view the current outcome.',
+      };
+    }
     return { success: false as const, error: 'Failed to open wage discussion.' };
   }
+}
+
+export async function ensureWageSignedCandidateHired() {
+  // Auto-hire on LS-54 signature is disabled. Final hire requires authorized
+  // staff + evaluateHireReadiness (OFFER stage, certs, interview, clearance).
+  return { success: false as const };
 }
 

@@ -3,6 +3,8 @@ export type IntakeAddressParts = {
   city: string;
   state: string;
   zip: string;
+  lat?: number | null;
+  lng?: number | null;
 };
 
 type AddressLookupLogMetadata =
@@ -45,12 +47,27 @@ const TRAILING_STATE_CODE = /^(.*?)(?:,\s*|\s+)([A-Za-z]{2})$/;
  * an address is either reduced to ZIP precision or reported unavailable.
  */
 export function resolvePrivateIntakeAddress(
-  input: string
+  input?: string | null
 ): PrivateIntakeAddressResult {
+  if (typeof input !== 'string') {
+    return {
+      status: 'UNAVAILABLE',
+      precision: 'NONE',
+      postalCode: null,
+      coordinates: null,
+      outboundUrl: null,
+      addressParts: null,
+      logMetadata: {
+        eventCode: 'INTAKE_ADDRESS_LOOKUP_UNAVAILABLE',
+        precision: 'NONE',
+      },
+    };
+  }
+
   const normalized = input.trim();
   const zipMatch = normalized.match(TRAILING_US_ZIP);
 
-  if (!zipMatch || zipMatch.index === undefined) {
+  if (!normalized || !zipMatch || zipMatch.index === undefined) {
     return {
       status: 'UNAVAILABLE',
       precision: 'NONE',

@@ -264,7 +264,7 @@ export async function listClinicalReviewQueue() {
         detail: `${cpt} · ${when}${note.billableUnits != null ? ` · ${note.billableUnits} units` : ''}`,
         updatedAt: (note.rbtSignedAt ?? note.createdAt).toISOString(),
         href: chartOrEmrHref(client.id, client.status),
-        secondaryHref: '/portal-clinical/notes',
+        secondaryHref: '/portal-clinical/daily?tab=esign',
         secondaryLabel: 'Unsigned notes queue',
         meta: {
           noteId: note.id,

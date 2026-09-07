@@ -66,4 +66,22 @@ describe('resolvePrivateIntakeAddress', () => {
     expect(result.postalCode).toBe('10001');
     expect(result.addressParts?.zip).toBe('10001');
   });
+
+  describe('1% edge cases & defensive resilience', () => {
+    it('handles null, undefined, and non-string inputs safely without throwing', () => {
+      const res1 = resolvePrivateIntakeAddress(null);
+      expect(res1.status).toBe('UNAVAILABLE');
+      expect(res1.postalCode).toBeNull();
+
+      const res2 = resolvePrivateIntakeAddress(undefined);
+      expect(res2.status).toBe('UNAVAILABLE');
+
+      // @ts-expect-error Exercises the PHI-safe fallback for untyped external input.
+      const res3 = resolvePrivateIntakeAddress(12345);
+      expect(res3.status).toBe('UNAVAILABLE');
+
+      const res4 = resolvePrivateIntakeAddress('');
+      expect(res4.status).toBe('UNAVAILABLE');
+    });
+  });
 });

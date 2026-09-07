@@ -282,13 +282,21 @@ export type MatchResult = {
 };
 
 export function scoreJobMatch(input: MatchInput): MatchResult {
-  const rbtZip = normalizeZip(input.rbtZip);
-  const clientZip = normalizeZip(input.clientZip);
+  const safePreferredBoroughs = Array.isArray(input?.preferredBoroughs)
+    ? input.preferredBoroughs
+    : [];
+  const maxTravelMiles =
+    typeof input?.maxTravelMiles === 'number' && Number.isFinite(input.maxTravelMiles)
+      ? Math.max(1, input.maxTravelMiles)
+      : 15;
+
+  const rbtZip = normalizeZip(input?.rbtZip);
+  const clientZip = normalizeZip(input?.clientZip);
   const commute = estimateCommute(
     rbtZip,
     clientZip,
-    input.clientBorough,
-    input.transportation
+    input?.clientBorough || null,
+    input?.transportation || null
   );
 
   let score = 70;
@@ -300,9 +308,9 @@ export function scoreJobMatch(input: MatchInput): MatchResult {
     reasons.push(`Same ZIP as listing (${clientZip})`);
   }
 
-  if (input.clientBorough && input.preferredBoroughs.length > 0) {
-    const hit = input.preferredBoroughs.some(
-      (b) => b.toLowerCase() === input.clientBorough!.toLowerCase()
+  if (input?.clientBorough && safePreferredBoroughs.length > 0) {
+    const hit = safePreferredBoroughs.some(
+      (b) => typeof b === 'string' && b.toLowerCase() === input.clientBorough!.toLowerCase()
     );
     if (hit) {
       score += 16;
@@ -316,7 +324,7 @@ export function scoreJobMatch(input: MatchInput): MatchResult {
   const withinRadius =
     commute.distanceMiles == null
       ? false
-      : commute.distanceMiles <= input.maxTravelMiles;
+      : commute.distanceMiles <= maxTravelMiles;
 
   if (commute.distanceMiles != null) {
     if (!(rbtZip && clientZip && rbtZip === clientZip)) {
@@ -328,10 +336,10 @@ export function scoreJobMatch(input: MatchInput): MatchResult {
         reasons.push(`~${commute.distanceMiles} mi commute`);
       } else if (withinRadius) {
         score += 2;
-        reasons.push(`Within your ${input.maxTravelMiles} mi radius`);
+        reasons.push(`Within your ${maxTravelMiles} mi radius`);
       } else {
         score -= 20;
-        reasons.push(`Beyond your ${input.maxTravelMiles} mi travel max`);
+        reasons.push(`Beyond your ${maxTravelMiles} mi travel max`);
       }
     }
 

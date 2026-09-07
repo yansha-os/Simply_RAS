@@ -14,5 +14,17 @@ export const prisma =
 
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
 
-export * from '@prisma/client';
+export type {
+  CaseApplicationStatus,
+  ClaimOutcome,
+  Client,
+  ClientMessage,
+  DocumentType,
+  DualRunMode,
+  IntakePacket,
+  PARequest,
+  Prisma,
+  Role,
+  User,
+} from '@prisma/client';
 export * from './devStudioSeed';

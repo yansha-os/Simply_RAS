@@ -2,11 +2,12 @@
 
 import React, { useActionState, useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { login } from './actions';
-import { ShieldCheck, ArrowRight, UserCheck, Key, Lock, Sparkles } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 
 const initialState = {
   error: '',
@@ -16,12 +17,6 @@ export default function LoginPage() {
   const [state, formAction, isPending] = useActionState(login, initialState);
   const [emailInput, setEmailInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
-
-  const fillQuickDemo = (demoEmail: string) => {
-    if (process.env.NEXT_PUBLIC_ENABLE_DEV_TOOLS !== 'true') return;
-    setEmailInput(demoEmail);
-    setPasswordInput('');
-  };
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-[#FFFDF9] via-white to-[#FFF4EA] text-slate-900 px-4 relative overflow-hidden">
@@ -34,7 +29,7 @@ export default function LoginPage() {
         <div className="text-center space-y-2">
           <Link href="/" className="inline-block group">
             <div className="w-20 h-20 rounded-full bg-white border-2 border-orange-200 shadow-2xl flex items-center justify-center p-2 mx-auto group-hover:scale-105 transition-transform">
-              <img src="/logo.png" alt="Rise & Shine ABA Logo" className="w-full h-full object-contain rounded-full" />
+              <Image src="/logo.png" alt="Rise & Shine ABA Logo" width={64} height={64} priority className="w-full h-full object-contain rounded-full" />
             </div>
           </Link>
 

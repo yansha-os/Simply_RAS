@@ -38,13 +38,13 @@ export function AreaChartWidget({
   const lineD = `M ${points.join(' L ')}`;
 
   return (
-    <div className="p-5 bg-zinc-950/80 backdrop-blur-xl border border-white/10 rounded-2xl space-y-3 shadow-xl overflow-hidden max-w-full">
+    <div className="p-5 bg-[#FFFDF8] dark:bg-zinc-950/80 backdrop-blur-xl border border-[#E2D5B7] dark:border-white/10 rounded-2xl space-y-3 shadow-md overflow-hidden max-w-full">
       <div className="flex justify-between items-start">
         <div>
-          <h4 className="text-sm font-bold text-white font-heading">{title}</h4>
-          {subtitle && <p className="text-xs text-zinc-400 mt-0.5">{subtitle}</p>}
+          <h4 className="text-sm font-bold text-slate-900 dark:text-white font-heading">{title}</h4>
+          {subtitle && <p className="text-xs text-slate-600 dark:text-zinc-400 mt-0.5">{subtitle}</p>}
         </div>
-        <div className="flex items-center gap-1 font-mono text-[11px] font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20">
+        <div className="flex items-center gap-1 font-mono text-[11px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20">
           <span>+14.2%</span>
         </div>
       </div>
@@ -63,9 +63,9 @@ export function AreaChartWidget({
           </defs>
 
           {/* Grid Lines */}
-          <line x1={paddingX} y1={paddingY} x2={width - paddingX} y2={paddingY} stroke="rgba(255,255,255,0.05)" strokeDasharray="3 3" />
-          <line x1={paddingX} y1={height / 2} x2={width - paddingX} y2={height / 2} stroke="rgba(255,255,255,0.05)" strokeDasharray="3 3" />
-          <line x1={paddingX} y1={height - paddingY} x2={width - paddingX} y2={height - paddingY} stroke="rgba(255,255,255,0.08)" />
+          <line x1={paddingX} y1={paddingY} x2={width - paddingX} y2={paddingY} stroke="currentColor" className="text-[#E2D5B7]/60 dark:text-white/5" strokeDasharray="3 3" />
+          <line x1={paddingX} y1={height / 2} x2={width - paddingX} y2={height / 2} stroke="currentColor" className="text-[#E2D5B7]/60 dark:text-white/5" strokeDasharray="3 3" />
+          <line x1={paddingX} y1={height - paddingY} x2={width - paddingX} y2={height - paddingY} stroke="currentColor" className="text-[#E2D5B7] dark:text-white/10" />
 
           {/* Gradient Area Fill */}
           <path d={pathD} fill={`url(#grad-${title.replace(/[^a-zA-Z0-9]/g, '')})`} />
@@ -84,7 +84,7 @@ export function AreaChartWidget({
                   cy={y}
                   r={hoveredIdx === i ? 6 : 4}
                   fill={color}
-                  stroke="#06070D"
+                  stroke="#FFFDF8"
                   strokeWidth="2"
                   className="cursor-pointer transition-all duration-200"
                   onMouseEnter={() => setHoveredIdx(i)}
@@ -98,16 +98,16 @@ export function AreaChartWidget({
         {/* Hover Tooltip Overlay */}
         {hoveredIdx !== null && (
           <div 
-            className="absolute top-2 left-1/2 -translate-x-1/2 bg-zinc-900/95 border border-white/20 px-3 py-1 rounded-xl shadow-2xl text-[11px] font-mono text-white pointer-events-none flex items-center gap-2 backdrop-blur-md"
+            className="absolute top-2 left-1/2 -translate-x-1/2 bg-[#FFFDF8] dark:bg-zinc-900/95 border border-[#E2D5B7] dark:border-white/20 px-3 py-1 rounded-xl shadow-xl text-[11px] font-mono text-slate-900 dark:text-white pointer-events-none flex items-center gap-2 backdrop-blur-md"
           >
-            <span className="text-zinc-400">{data[hoveredIdx].label}:</span>
-            <strong className="text-brand-orange-400">{data[hoveredIdx].value}</strong>
+            <span className="text-slate-600 dark:text-zinc-400">{data[hoveredIdx].label}:</span>
+            <strong className="text-brand-orange-600 dark:text-brand-orange-400">{data[hoveredIdx].value}</strong>
           </div>
         )}
       </div>
 
       {/* X-Axis Labels */}
-      <div className="flex justify-between text-[10px] font-mono text-zinc-500 pt-1 border-t border-white/5">
+      <div className="flex justify-between text-[10px] font-mono text-slate-500 dark:text-zinc-500 pt-1 border-t border-[#E2D5B7]/60 dark:border-white/5">
         {data.map((d, i) => (
           <span key={i}>{d.label}</span>
         ))}
@@ -130,10 +130,10 @@ export function BarChartWidget({
   const maxVal = Math.max(...data.map(d => d.value), 1);
 
   return (
-    <div className="p-5 bg-zinc-950/80 backdrop-blur-xl border border-white/10 rounded-2xl space-y-3 shadow-xl overflow-hidden max-w-full">
+    <div className="p-5 bg-[#FFFDF8] dark:bg-zinc-950/80 backdrop-blur-xl border border-[#E2D5B7] dark:border-white/10 rounded-2xl space-y-3 shadow-md overflow-hidden max-w-full">
       <div>
-        <h4 className="text-sm font-bold text-white font-heading">{title}</h4>
-        {subtitle && <p className="text-xs text-zinc-400 mt-0.5">{subtitle}</p>}
+        <h4 className="text-sm font-bold text-slate-900 dark:text-white font-heading">{title}</h4>
+        {subtitle && <p className="text-xs text-slate-600 dark:text-zinc-400 mt-0.5">{subtitle}</p>}
       </div>
 
       <div className="space-y-3 pt-1">
@@ -143,10 +143,10 @@ export function BarChartWidget({
           return (
             <div key={i} className="space-y-1">
               <div className="flex justify-between text-xs font-mono">
-                <span className="text-zinc-300 font-semibold truncate pr-2">{d.label}</span>
-                <span className="text-white font-bold flex-shrink-0">{d.value} ({pct}%)</span>
+                <span className="text-slate-700 dark:text-zinc-300 font-semibold truncate pr-2">{d.label}</span>
+                <span className="text-slate-900 dark:text-white font-bold flex-shrink-0">{d.value} ({pct}%)</span>
               </div>
-              <div className="w-full bg-zinc-900 h-2.5 rounded-full overflow-hidden p-0.5 border border-white/5">
+              <div className="w-full bg-[#F9F5EC] dark:bg-zinc-900 h-2.5 rounded-full overflow-hidden p-0.5 border border-[#E2D5B7] dark:border-white/5">
                 <div 
                   className="h-full rounded-full transition-all duration-500" 
                   style={{ width: `${pct}%`, backgroundColor: barColor }}
@@ -179,17 +179,18 @@ export function DonutChartWidget({
   const strokeDashoffset = circumference - (percentage / 100) * circumference;
 
   return (
-    <div className="p-5 bg-zinc-950/80 backdrop-blur-xl border border-white/10 rounded-2xl flex items-center justify-between shadow-xl max-w-full overflow-hidden">
+    <div className="p-5 bg-[#FFFDF8] dark:bg-zinc-950/80 backdrop-blur-xl border border-[#E2D5B7] dark:border-white/10 rounded-2xl flex items-center justify-between shadow-md max-w-full overflow-hidden">
       <div className="space-y-1 min-w-0 pr-3">
-        <span className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-wider block truncate">{title}</span>
-        <p className="text-2xl font-black text-white font-mono">{percentage}%</p>
-        <p className="text-xs text-zinc-400 truncate">{label}</p>
+        <span className="text-[10px] font-mono font-bold text-slate-500 dark:text-zinc-400 uppercase tracking-wider block truncate">{title}</span>
+        <p className="text-2xl font-black text-slate-900 dark:text-white font-mono">{percentage}%</p>
+        <p className="text-xs text-slate-600 dark:text-zinc-400 truncate">{label}</p>
       </div>
 
       <div className="relative w-16 h-16 flex-shrink-0 flex items-center justify-center">
         <svg height="64" width="64" className="transform -rotate-90">
           <circle
-            stroke="rgba(255,255,255,0.08)"
+            stroke="currentColor"
+            className="text-[#E2D5B7]/60 dark:text-white/10"
             fill="transparent"
             strokeWidth={stroke}
             r={normalizedRadius}
@@ -209,7 +210,7 @@ export function DonutChartWidget({
             className="transition-all duration-700 ease-out"
           />
         </svg>
-        <span className="absolute text-[11px] font-mono font-bold text-white">{percentage}%</span>
+        <span className="absolute text-[11px] font-mono font-bold text-slate-900 dark:text-white">{percentage}%</span>
       </div>
     </div>
   );

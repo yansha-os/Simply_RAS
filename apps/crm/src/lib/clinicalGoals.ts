@@ -58,7 +58,7 @@ export type ClinicalGoalsSnapshot = {
   };
 };
 
-function asRecord(raw: unknown): Record<string, any> {
+function asRecord(raw: unknown): Record<string, unknown> {
   if (!raw) return {};
   if (typeof raw === 'string') {
     try {
@@ -69,7 +69,7 @@ function asRecord(raw: unknown): Record<string, any> {
     }
   }
   if (typeof raw === 'object' && !Array.isArray(raw)) {
-    return raw as Record<string, any>;
+    return raw as Record<string, unknown>;
   }
   return {};
 }
@@ -91,38 +91,47 @@ export function parseClinicalGoalsFromTreatmentPlan(raw: unknown): ClinicalGoals
   const brpRaw = Array.isArray(plan.brp) ? plan.brp : [];
   const parentRaw = Array.isArray(plan.parentGoals) ? plan.parentGoals : [];
 
-  const skillGoals: ClinicalSkillGoal[] = skillRaw.map((g: any) => ({
-    kind: 'skill' as const,
-    domain: str(g?.domain) || 'Unassigned',
-    description: str(g?.description),
-    mastery: str(g?.mastery),
-    baseline: str(g?.baseline),
-    currentLevel: str(g?.currentLevel),
-    targetDate: str(g?.targetDate),
-    status: statusOf(g?.status),
-  }));
+  const skillGoals: ClinicalSkillGoal[] = skillRaw.map((rawGoal) => {
+    const goal = asRecord(rawGoal);
+    return {
+      kind: 'skill' as const,
+      domain: str(goal.domain) || 'Unassigned',
+      description: str(goal.description),
+      mastery: str(goal.mastery),
+      baseline: str(goal.baseline),
+      currentLevel: str(goal.currentLevel),
+      targetDate: str(goal.targetDate),
+      status: statusOf(goal.status),
+    };
+  });
 
-  const brpGoals: ClinicalBrpGoal[] = brpRaw.map((b: any) => ({
-    kind: 'brp' as const,
-    behavior: str(b?.behavior),
-    function: str(b?.function),
-    mastery: str(b?.mastery),
-    baseline: str(b?.baseline),
-    currentLevel: str(b?.currentLevel),
-    targetDate: str(b?.targetDate),
-    status: statusOf(b?.status),
-    risk: str(b?.risk) || 'Low',
-  }));
+  const brpGoals: ClinicalBrpGoal[] = brpRaw.map((rawGoal) => {
+    const goal = asRecord(rawGoal);
+    return {
+      kind: 'brp' as const,
+      behavior: str(goal.behavior),
+      function: str(goal.function),
+      mastery: str(goal.mastery),
+      baseline: str(goal.baseline),
+      currentLevel: str(goal.currentLevel),
+      targetDate: str(goal.targetDate),
+      status: statusOf(goal.status),
+      risk: str(goal.risk) || 'Low',
+    };
+  });
 
-  const parentGoals: ClinicalParentGoal[] = parentRaw.map((p: any) => ({
-    kind: 'parent' as const,
-    description: str(p?.description),
-    mastery: str(p?.mastery),
-    baseline: str(p?.baseline),
-    currentLevel: str(p?.currentLevel),
-    targetDate: str(p?.targetDate),
-    status: statusOf(p?.status),
-  }));
+  const parentGoals: ClinicalParentGoal[] = parentRaw.map((rawGoal) => {
+    const goal = asRecord(rawGoal);
+    return {
+      kind: 'parent' as const,
+      description: str(goal.description),
+      mastery: str(goal.mastery),
+      baseline: str(goal.baseline),
+      currentLevel: str(goal.currentLevel),
+      targetDate: str(goal.targetDate),
+      status: statusOf(goal.status),
+    };
+  });
 
   const domains: ClinicalDomainSummary[] = [
     {
@@ -350,3 +359,45 @@ export function brpGoalsToBehaviorTargetPayloads(
   }
   return out;
 }
+
+export type StudioSkillTargetRow = {
+  id: string;
+  domain: string;
+  title: string;
+  measurementType: string;
+  targetStatus: string;
+  masteryCriteria: string | null;
+  updatedAt: string;
+};
+
+export type StudioBehaviorTargetRow = {
+  id: string;
+  behaviorName: string;
+  measurementType: string;
+};
+
+export type SessionStudioSyncStatus = {
+  skillCount: number;
+  behaviorCount: number;
+  /** Lowercased titles currently present as durable SkillTarget rows */
+  skillTitles: string[];
+  /** Lowercased behavior names currently present as durable BehaviorTarget rows */
+  behaviorNames: string[];
+  /** Durable SkillTarget rows (for per-target status management) */
+  skillTargets: StudioSkillTargetRow[];
+  /** Durable BehaviorTarget rows (read-only — no status column in schema) */
+  behaviorTargets: StudioBehaviorTargetRow[];
+};
+
+export type SyncTargetsResult = {
+  success: true;
+  skillsCreated: number;
+  skillsUpdated: number;
+  behaviorsCreated: number;
+  behaviorsUpdated: number;
+  skippedEmpty: number;
+  /** Durable SkillTarget count after sync */
+  skillTargetsTotal: number;
+  /** Durable BehaviorTarget count after sync */
+  behaviorTargetsTotal: number;
+};

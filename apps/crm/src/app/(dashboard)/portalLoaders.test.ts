@@ -50,6 +50,12 @@ vi.mock('@/components/portal-billing/BillingQueueTabs', () => ({
   },
 }));
 
+vi.mock('@/components/portal-billing/BillingDashboard', () => ({
+  default: function BillingDashboardStub() {
+    return null;
+  },
+}));
+
 vi.mock('@/components/portal-case-coord/CaseCoordDashboard', () => ({
   default: function CaseCoordDashboardStub() {
     return null;
@@ -177,8 +183,11 @@ describe('intake portal loaders', () => {
     expectNoProtectedReads();
   });
 
-  it('renders the dashboard from status-only rows', async () => {
-    const rows = [{ status: 'INQUIRY' }, { status: 'DOCS_SUBMITTED' }];
+  it('renders the dashboard from status and case-coordination rows', async () => {
+    const rows = [
+      { status: 'INQUIRY', caseCoordinatorId: null },
+      { status: 'DOCS_SUBMITTED', caseCoordinatorId: 'coordinator-1' },
+    ];
     mocks.getCurrentUser.mockResolvedValue(staff('INTAKE_PA_COORDINATOR'));
     mocks.clientFindMany.mockResolvedValue(rows);
 
@@ -187,7 +196,7 @@ describe('intake portal loaders', () => {
 
     expect(dashboard?.props.clients).toEqual(rows);
     expect(mocks.clientFindMany).toHaveBeenCalledWith({
-      select: { status: true },
+      select: { status: true, caseCoordinatorId: true },
       orderBy: { updatedAt: 'desc' },
     });
   });
@@ -205,18 +214,15 @@ describe('intake portal loaders', () => {
         messages: [],
       },
     ];
-    const coordinators = [
-      { id: STAFF_ID, firstName: 'Case', lastName: 'Coordinator' },
-    ];
-    mocks.getCurrentUser.mockResolvedValue(staff('CASE_COORDINATOR'));
+    mocks.getCurrentUser.mockResolvedValue(staff('INTAKE_PA_COORDINATOR'));
     mocks.clientFindMany.mockResolvedValue(clients);
-    mocks.userFindMany.mockResolvedValue(coordinators);
 
     const page = await IntakeClientsPage();
-    const queue = findElementWithProps(page, ['clients', 'coordinators']);
+    const queue = findElementWithProps(page, ['clients']);
 
     expect(queue?.props.clients).toEqual(clients);
-    expect(queue?.props.coordinators).toEqual(coordinators);
+    expect(queue?.props).not.toHaveProperty('coordinators');
+    expect(mocks.userFindMany).not.toHaveBeenCalled();
     expect(mocks.clientFindMany).toHaveBeenCalledWith({
       select: {
         id: true,
@@ -251,10 +257,7 @@ describe('billing portal loaders', () => {
     expectNoProtectedReads();
   });
 
-  it.each([
-    ['dashboard', BillingPortalPage],
-    ['clients', BillingClientsPage],
-  ])('renders the authorized %s queue with sanitized treatment-plan data', async (_name, pageLoader) => {
+  it('renders the authorized dashboard with live PA metrics and no queue mutations', async () => {
     const rawTreatmentClient = {
       id: CLIENT_ID,
       firstName: 'Bill',
@@ -273,7 +276,47 @@ describe('billing portal loaders', () => {
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([rawTreatmentClient]);
 
-    const page = await pageLoader();
+    const page = await BillingPortalPage();
+    const dashboard = findElementWithProps(page, ['metrics']);
+
+    expect(React.isValidElement(page)).toBe(true);
+    expect(dashboard?.props.metrics).toEqual({
+      assessmentRoster: 0,
+      treatmentRoster: 1,
+      pendingVob: 0,
+      assessmentInFlight: 0,
+      assessmentExpiring: 0,
+      treatmentReady: 1,
+      treatmentInFlight: 0,
+      treatmentExpiring: 0,
+      deniedAttention: 0,
+    });
+    expect(findElementWithProps(page, ['assessmentClients', 'treatmentClients'])).toBeNull();
+    expect(JSON.stringify(dashboard?.props)).not.toContain('raw-signature-value');
+    expect(JSON.stringify(dashboard?.props)).not.toContain('clinicalNarrative');
+    expect(mocks.clientFindMany).toHaveBeenCalledTimes(2);
+  });
+
+  it('renders the authorized clients queue with sanitized treatment-plan data', async () => {
+    const rawTreatmentClient = {
+      id: CLIENT_ID,
+      firstName: 'Bill',
+      lastName: 'Client',
+      status: 'REPORT_ASSEMBLED',
+      updatedAt: new Date('2026-08-12T12:00:00.000Z'),
+      treatmentPlan: {
+        parentSignature: 'raw-signature-value',
+        clinicalNarrative: 'must not cross the page boundary',
+      },
+      paRequests: [],
+      messages: [],
+    };
+    mocks.getCurrentUser.mockResolvedValue(staff('BILLING'));
+    mocks.clientFindMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([rawTreatmentClient]);
+
+    const page = await BillingClientsPage();
     const queue = findElementWithProps(page, ['assessmentClients', 'treatmentClients']);
     const treatmentClients = queue?.props.treatmentClients as Array<{
       treatmentPlan: unknown;
@@ -381,8 +424,6 @@ describe('case-coordination portal loaders', () => {
     expect(mocks.clientFindMany).toHaveBeenCalledWith({
       select: {
         id: true,
-        firstName: true,
-        lastName: true,
         status: true,
         caseCoordinatorId: true,
         rbtId: true,
@@ -392,8 +433,19 @@ describe('case-coordination portal loaders', () => {
     });
   });
 
-  it('renders the clients roster with only displayed staff fields', async () => {
+  it('denies an intake actor from the case-coord clients roster', async () => {
     mocks.getCurrentUser.mockResolvedValue(staff('INTAKE_PA_COORDINATOR'));
+
+    await expect(
+      CaseCoordClientsPage({
+        searchParams: Promise.resolve({ status: 'ACTIVE' }),
+      }),
+    ).rejects.toThrow(NOT_FOUND);
+    expectNoProtectedReads();
+  });
+
+  it('renders the clients roster with only displayed staff fields', async () => {
+    mocks.getCurrentUser.mockResolvedValue(staff('CASE_COORDINATOR'));
     mocks.clientFindMany.mockResolvedValue([]);
 
     const page = await CaseCoordClientsPage({
@@ -436,7 +488,7 @@ describe('clinical portal loaders', () => {
     expectNoProtectedReads();
   });
 
-  it('renders BCBA metrics without serializing the agency BCBA directory', async () => {
+  it('renders BCBA metrics without loading the agency BCBA directory', async () => {
     const metrics = {
       activeCaseload: 1,
       unsignedNotes: 0,
@@ -458,10 +510,10 @@ describe('clinical portal loaders', () => {
     mocks.getBcbaOpsMetrics.mockResolvedValue({ success: true, metrics });
 
     const page = await ClinicalPortalPage();
-    const dashboard = findElementWithProps(page, ['metrics', 'bcbas']);
+    const dashboard = findElementWithProps(page, ['metrics']);
 
     expect(dashboard?.props.metrics).toEqual(metrics);
-    expect(dashboard?.props.bcbas).toEqual([]);
+    expect('bcbas' in (dashboard?.props ?? {})).toBe(false);
     expect(mocks.userFindMany).not.toHaveBeenCalled();
     expect(mocks.getCurrentUser.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.getBcbaOpsMetrics.mock.invocationCallOrder[0]

@@ -84,7 +84,7 @@ INQUIRY → MAGIC_LINK_SENT → DOCS_SUBMITTED → DOCS_APPROVED_INTAKE
 | 1 | Create / open inquiry client; send magic link (copy-link OK). Links now carry a **30-day expiry** and are **revocable**. | Packet / docs path works |
 | 2 | Open the link as the parent. First open **binds the device** (fingerprint cookie); the form validates server-side on submit — an incomplete packet returns "Almost there — N required item(s) are still missing" with per-field/doc missing lists, and uploads land in the private `client-documents` bucket. | Complete packet → `DOCS_SUBMITTED`; incomplete submit is rejected with the missing list |
 | 3 | Intake approve → Clinical review. To exercise the **rejected-doc loop**: reject one document with a reason → parent portal shows the rejection → parent re-uploads → resubmit clears `rejectionDetails` and returns the packet to `SUBMITTED`. | Status advances honestly; rejection loop round-trips |
-| 4 | Billing: VOB + Assessment PA — work the queue at `/portal-billing` (approve / deny; clinical denials open the **P2P** loop, see G9). | `PA_APPROVED` (or equivalent stage) |
+| 4 | Billing: VOB + Assessment PA — work the queue at `/portal-billing/clients` (approve / deny; clinical denials open the **P2P** loop, see G9). Dashboard `/portal-billing` is analytics only. | `PA_APPROVED` (or equivalent stage) |
 | 5 | BCBA: assessment / TP / parent typed sign / report as your build supports. | Toward Treatment PA |
 | 6 | Billing: Treatment PA submit/approve (manual tracker). | `TX_PA_APPROVED` |
 | 7 | Case Coord: handoff → **`STAFFING_PENDING`**. Assign supervising **BCBA** (`bcbaId`). | Status = `STAFFING_PENDING`; BCBA set |
@@ -135,9 +135,9 @@ Each of these is a concrete browser check against a gate that shipped 2026-08-12
 | G5 | Convert gate order | Try converting before BCBA sign, then with a failed/missing checklist | "BCBA e-sign required…", "RBT signature required…", or "Billing checklist snapshot missing / failed at RBT submit — cannot convert" |
 | G6 | Credential warnings | Expire a staff credential (`StaffCredential`), then BCBA-sign or convert a note for that staff | Action **succeeds** with a warning naming the staff + credential issue (soft gate — warn, never block) |
 | G7 | Login rate limit | 5 failed logins for one email, then a 6th | "Too many sign-in attempts. Please try again later." (generic on purpose) |
-| G8 | Audit-log spot check | `npx prisma studio` → `AuditLogVault`, or SQL: `select action, "resourceType", "resourceId", timestamp from "AuditLogVault" order by timestamp desc limit 20;` | Rows for `VIEW` (chart opens), `SIGN` (step 17), `CONVERT` (step 19), `EXPORT` (G10 CSV), plus `OVERRIDE` if you ran G4 |
-| G9 | PA queue deny → P2P | `/portal-billing` queues: deny a PA as **clinical** with a reason | Reason lands in `p2pNotes`, `p2pResolved=false`; BCBA P2P queue on `/portal-clinical` picks it up; billing can log the P2P resolution afterward |
-| G10 | Dual-run billing audit | `/portal-billing/audit` | **"Dual-Run Billing Audit"** worksheet — fully signed notes with claim-critical fields, date/client filters, CSV export for reconciling against Artemis |
+| G8 | Audit-log spot check | `npx prisma studio` → `AuditLogVault`, or SQL: `select action, "resourceType", "resourceId", timestamp from "AuditLogVault" order by timestamp desc limit 20;` | Rows for `VIEW` (chart opens), `SIGN` (step 17), `CONVERT` (step 19), plus `OVERRIDE` if you ran G4 |
+| G9 | PA queue deny → P2P | `/portal-billing/clients` queues: deny a PA as **clinical** with a reason | Reason lands in `p2pNotes`, `p2pResolved=false`; BCBA P2P queue on `/portal-clinical` picks it up; billing can log the P2P resolution afterward |
+| G10 | Sandbox cohort QA | Follow [`2026-08-11-ras-sandbox-cutover-checklist.md`](./2026-08-11-ras-sandbox-cutover-checklist.md) | Complete the ≥10-note clinical/billing review and record the written go/no-go outside RAS. The retired `/portal-billing/audit` dual-run worksheet must not be expected. |
 | G11 | Cross-app notification links | Trigger a notification whose target lives in the other app (e.g. "note awaiting BCBA sign" seen from HRM) | Bell link resolves to the **owning app's** absolute URL (e.g. `:3000/portal-clinical/...` from HRM, `:3001/rbt/payroll` from CRM) — full navigation, no 404 |
 | G12 | HRM mock KPI routes dev-gated | Open HRM `/payroll` and `/hr-dashboard` with dev tools **off** | The mock Payroll & Benefits / HR analytics KPI views do **not** render; you get the live-data pointer page instead. With dev tools on, the mock views render (labeled dev/demo) |
 
@@ -161,7 +161,7 @@ Related (not required for tonight’s smoke):
 | [`2026-08-11-aba-session-note-data-collection-spec.md`](./2026-08-11-aba-session-note-data-collection-spec.md) | Clinical field SoT for Studio |
 | [`2026-08-11-session-studio-implementation-plan.md`](./2026-08-11-session-studio-implementation-plan.md) | Studio slices still shipping |
 | [`2026-08-11-aba-emr-artemis-replacement-roadmap.md`](./2026-08-11-aba-emr-artemis-replacement-roadmap.md) | Full enclosed EMR / Artemis replacement |
-| [`2026-08-11-artemis-dual-run-cutover-checklist.md`](./2026-08-11-artemis-dual-run-cutover-checklist.md) | Cohort dual-run go/no-go (feeds the `/portal-billing/audit` worksheet, G10) |
+| [`2026-08-11-ras-sandbox-cutover-checklist.md`](./2026-08-11-ras-sandbox-cutover-checklist.md) | Authoritative sandbox QA and cold-cutover go/no-go process (G10) |
 
 ---
 
@@ -169,7 +169,7 @@ Related (not required for tonight’s smoke):
 
 | Do **not** expect | Reality today |
 |-------------------|---------------|
-| Full **Artemis** clinical replacement | Chart modules, dual-run cutover, SOP purge — roadmap / cutover checklist; not this smoke. The `/portal-billing/audit` worksheet is the cohort-audit tool, not the cutover itself |
+| Full **Artemis** clinical replacement | Chart modules, sandbox QA, cold cutover, and SOP purge remain governed by the roadmap/cutover checklist; not this smoke. No legacy-system dual-run worksheet exists in RAS. |
 | Real **EDI** / Plutus API / clearinghouse | Billing = **manual** Plutus tracker (`isConverted` + claim ref). EDI stubs are P3-optional |
 | State **EVV aggregator** submission | Capture / Studio clock only (clock-in → `IN_PROGRESS` is honest and idempotent, but nothing is submitted upstream) |
 | DocuSign-grade crypto e-sign | Typed-name + timestamps OK; credential checks on sign are **warnings**, not blocks |

@@ -11,7 +11,7 @@ type CacheEntry<T> = {
 
 const memory = new Map<string, CacheEntry<unknown>>();
 
-const DEFAULT_TTL_MS = 45_000;
+const DEFAULT_TTL_MS = 10_000;
 
 function canUseSessionStorage() {
   return typeof window !== 'undefined' && typeof sessionStorage !== 'undefined';

@@ -415,6 +415,8 @@ export function redactForAudit(payload: EmbeddedFormPayload): Record<string, unk
       secondaryConfirmAccountNumber,
       ...rest
     } = payload.values;
+    void confirmAccountNumber;
+    void secondaryConfirmAccountNumber;
     const primaryDigits = trim(accountNumber).replace(/\D/g, '');
     const secondaryDigits = trim(secondaryAccountNumber).replace(/\D/g, '');
     return {
@@ -437,6 +439,8 @@ export function normalizeForStorage(payload: EmbeddedFormPayload): Record<string
       secondaryConfirmAccountNumber: _c2,
       ...rest
     } = payload.values;
+    void _c1;
+    void _c2;
     return {
       ...rest,
       fullName: trim(rest.fullName),

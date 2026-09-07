@@ -2,10 +2,16 @@
 
 import { prisma } from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
+import { cookies } from 'next/headers';
 import { getCurrentUser } from '@/lib/auth';
 import { requireRole } from '@/lib/auth-guard';
 import { isDevToolsEnabled } from '@/lib/devToolsGate';
 import { newMagicLinkExpiry } from '@/lib/magicLinkExpiry';
+import {
+  CANDIDATE_SESSION_COOKIE,
+  DEVICE_FINGERPRINT_COOKIE,
+  resolveFingerprintValidCandidate,
+} from '@/lib/candidateDeviceSession';
 import type { Role, Prisma } from '@repo/db';
 import {
   asRecord,
@@ -54,8 +60,59 @@ export type AtsInterviewDto = {
   completedAt: string | null;
 };
 
+export type ApplicantInterviewBookingDto = Pick<
+  AtsInterviewDto,
+  | 'id'
+  | 'candidateId'
+  | 'interviewerUserId'
+  | 'interviewerName'
+  | 'scheduledDate'
+  | 'scheduledTime'
+  | 'scheduledAt'
+  | 'meetingCode'
+  | 'meetingLink'
+  | 'status'
+>;
+
 function isUuid(value: string | null | undefined): value is string {
   return !!value && UUID_RE.test(value);
+}
+
+async function requireInterviewAccess(candidateId: string) {
+  const user = await getCurrentUser();
+  if (user && user.isActive !== false && ATS_STAFF_ROLES.includes(user.role as Role)) {
+    return { ok: true as const, actor: 'STAFF' as const };
+  }
+
+  const cookieStore = await cookies();
+  const candidate = await resolveFingerprintValidCandidate(
+    cookieStore.get(CANDIDATE_SESSION_COOKIE)?.value,
+    cookieStore.get(DEVICE_FINGERPRINT_COOKIE)?.value
+  );
+  if (candidate?.id === candidateId) {
+    return { ok: true as const, actor: 'CANDIDATE' as const };
+  }
+
+  return {
+    ok: false as const,
+    error: 'You are not authorized to access this interview.',
+  };
+}
+
+async function requireInterviewDirectoryAccess() {
+  const user = await getCurrentUser();
+  if (user && user.isActive !== false && ATS_STAFF_ROLES.includes(user.role as Role)) {
+    return { ok: true as const };
+  }
+
+  const cookieStore = await cookies();
+  const candidate = await resolveFingerprintValidCandidate(
+    cookieStore.get(CANDIDATE_SESSION_COOKIE)?.value,
+    cookieStore.get(DEVICE_FINGERPRINT_COOKIE)?.value
+  );
+  return candidate
+    ? { ok: true as const }
+    : { ok: false as const, error: 'You are not authorized to view interview staff.' };
 }
 
 function toInterviewDto(row: {
@@ -105,6 +162,24 @@ function toInterviewDto(row: {
     completedScriptSteps: completedSteps,
     recommendation: row.recommendation,
     completedAt: row.completedAt?.toISOString() ?? null,
+  };
+}
+
+function toApplicantBookingDto(
+  row: Parameters<typeof toInterviewDto>[0]
+): ApplicantInterviewBookingDto {
+  const internal = toInterviewDto(row);
+  return {
+    id: internal.id,
+    candidateId: internal.candidateId,
+    interviewerUserId: internal.interviewerUserId,
+    interviewerName: internal.interviewerName,
+    scheduledDate: internal.scheduledDate,
+    scheduledTime: internal.scheduledTime,
+    scheduledAt: internal.scheduledAt,
+    meetingCode: internal.meetingCode,
+    meetingLink: internal.meetingLink,
+    status: internal.status,
   };
 }
 
@@ -167,6 +242,11 @@ export async function getHrMembers(): Promise<{
   error?: string;
 }> {
   try {
+    const access = await requireInterviewDirectoryAccess();
+    if (!access.ok) {
+      return { success: false, data: [], error: access.error };
+    }
+
     // Bookable interviewers: active HR agents first (Marcus Vance), then Head HR.
     // Do not invent fake demo names — only real User rows.
     const hrUsers = await prisma.user.findMany({
@@ -221,15 +301,14 @@ export async function bookHrInterview(data: {
   time: string;
 }) {
   try {
-    const user = await getCurrentUser();
-    if (!user) {
-      return { success: false, error: 'UNAUTHORIZED: Authentication required.' };
-    }
-
     if (!data.candidateId || !isUuid(data.candidateId)) {
       return { success: false, error: 'A valid candidate id is required to book.' };
     }
-    if (!data.hrInterviewerName || !data.date || !data.time) {
+    const access = await requireInterviewAccess(data.candidateId);
+    if (!access.ok) {
+      return { success: false, error: access.error };
+    }
+    if (!data.date || !data.time) {
       return { success: false, error: 'Missing required interview parameters.' };
     }
 
@@ -241,9 +320,24 @@ export async function bookHrInterview(data: {
       return { success: false, error: 'Candidate not found.' };
     }
 
+    const interviewer = isUuid(data.hrInterviewerId)
+      ? await prisma.user.findFirst({
+          where: {
+            id: data.hrInterviewerId,
+            role: { in: ['HR_AGENT', 'HEAD_HR'] },
+            isActive: true,
+          },
+          select: { id: true, firstName: true, lastName: true },
+        })
+      : null;
+    if (!interviewer) {
+      return { success: false, error: 'Select an active HR interviewer.' };
+    }
+
     const roomName = `RiseAndShine_HR_Interview_${data.candidateId}`;
     const meetingLink = `https://meet.jit.si/${roomName}`;
-    const interviewerUserId = isUuid(data.hrInterviewerId) ? data.hrInterviewerId : null;
+    const interviewerUserId = interviewer.id;
+    const interviewerName = `${interviewer.firstName} ${interviewer.lastName}`.trim();
 
     const interview = await prisma.atsInterview.upsert({
       where: { candidateId: data.candidateId },
@@ -301,8 +395,8 @@ export async function bookHrInterview(data: {
 
     return {
       success: true,
-      message: `Interview successfully booked with ${data.hrInterviewerName}!`,
-      interview: toInterviewDto(interview),
+      message: `Interview successfully booked with ${interviewerName}!`,
+      interview: toApplicantBookingDto(interview),
     };
   } catch (error: unknown) {
     console.error(
@@ -322,13 +416,17 @@ export async function getAtsInterview(candidateId: string): Promise<{
   error?: string;
 }> {
   try {
-    const user = await getCurrentUser();
-    if (!user) {
-      return { success: false, error: 'UNAUTHORIZED: Authentication required.' };
-    }
-
     if (!isUuid(candidateId)) {
       return { success: true, data: null };
+    }
+    const access = await requireInterviewAccess(candidateId);
+    if (!access.ok || access.actor !== 'STAFF') {
+      return {
+        success: false,
+        error: access.ok
+          ? 'You are not authorized to view internal interview records.'
+          : access.error,
+      };
     }
 
     const row = await prisma.atsInterview.findUnique({

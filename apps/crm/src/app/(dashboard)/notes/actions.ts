@@ -11,6 +11,7 @@ import {
   normalizePlutusReference,
   sanitizeStructuredContentForDeficiency,
 } from '@repo/db/session-note-attestation';
+import { evaluateActiveClientDemoHygiene } from '@repo/db/pilot-cohort-hygiene';
 import { revalidatePath } from 'next/cache';
 
 import { createNotification } from '@/app/actions/notifications';
@@ -19,16 +20,36 @@ import {
   type AuthUnitHardStop,
 } from '@/lib/billing/authUnits';
 import {
-  PLUTUS_TRACKER_ROLES,
+  SESSION_NOTES_CONVERSION_ROLES,
+  SESSION_NOTES_ROLES,
   requireClientAccess,
   requireStaff,
 } from '@/lib/auth-guard';
 import { prisma } from '@/lib/prisma';
-import { collectNoteCredentialWarnings } from '@/lib/staffCredentials.server';
+import {
+  assertNoteCredentialHardStop,
+  collectNoteCredentialWarnings,
+  getCredentialStatus,
+  getStaffNpi,
+} from '@/lib/staffCredentials.server';
+import { evaluateCredentialHardStop } from '@/lib/staffCredentials';
+import {
+  buildPlutusExportCsv,
+  buildPlutusExportRows,
+} from '@/lib/billing/plutusExportPacket';
+import { scrubNoteForConvert } from '@/lib/billing/noteClaimScrub';
+import {
+  hasBlockingScrubDefects,
+  blockingScrubDefectLabels,
+  type ClaimScrubResult,
+} from '@/lib/claimScrubberEngine';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DEFICIENCY_ROLES = [
+  'BILLING',
+  'FINANCE',
+  'SESSION_NOTES_COORDINATOR',
   'BCBA',
   'CLINICAL_DIRECTOR',
   'CEO',
@@ -118,7 +139,7 @@ function convertedState(
   if (!note.convertedAt || !normalized) {
     return failure(
       'CONVERTED_STATE_MALFORMED',
-      'This legacy converted note is missing its durable Plutus reference or conversion time.',
+      'This legacy converted note is missing its durable claim reference or conversion time.',
       { manualReviewRequired: true },
     );
   }
@@ -167,7 +188,7 @@ function attestationDigest(note: {
 }
 
 /**
- * Explicit manual Plutus handoff. The exact reviewed revision/fingerprint,
+ * Explicit manual claim filing. The exact reviewed revision/fingerprint,
  * durable attestation chain, auth resolver, state change, and critical audits
  * are all evaluated inside one serializable transition.
  */
@@ -175,14 +196,14 @@ export async function convertNoteToBillable(
   noteId: string,
   options: ConvertOptions,
 ): Promise<ConversionSuccess | ConversionFailure> {
-  const actorGate = await requireStaff(PLUTUS_TRACKER_ROLES);
+  const actorGate = await requireStaff(SESSION_NOTES_CONVERSION_ROLES);
   if (!actorGate.ok) return failure('AUTHORIZATION_DENIED', actorGate.error);
 
   const claimRef = normalizePlutusReference(options?.plutusClaimRef);
   if (!claimRef) {
     return failure(
       'PLUTUS_REFERENCE_REQUIRED',
-      'Enter a nonblank Plutus claim or batch reference (200 characters maximum).',
+      'Enter a nonblank claim or batch reference (200 characters maximum).',
     );
   }
   const expectedUpdatedAt = parseExpectedRevision(options?.expectedNoteUpdatedAt);
@@ -214,6 +235,27 @@ export async function convertNoteToBillable(
             rbtId: true,
             bcbaId: true,
             status: true,
+            cptCode: true,
+            scheduledStart: true,
+            scheduledEnd: true,
+            actualStart: true,
+            actualEnd: true,
+            placeOfServiceCode: true,
+            client: {
+              select: {
+                status: true,
+                firstName: true,
+                lastName: true,
+                primaryDiagnosisCode: true,
+                insurancePayer: true,
+                authorizations: {
+                  where: { status: 'APPROVED' },
+                  include: { cptCodes: true },
+                  orderBy: { updatedAt: 'desc' },
+                  take: 3,
+                },
+              },
+            },
           },
         },
       },
@@ -261,11 +303,75 @@ export async function convertNoteToBillable(
       });
     }
 
+    const demoHygiene = evaluateActiveClientDemoHygiene(note.session.client.status, {
+      structuredContent: note.structuredContent,
+    });
+    if (!demoHygiene.ok) {
+      return failure('ACTIVE_DEMO_TARGETS', demoHygiene.reason, {
+        manualReviewRequired: true,
+      });
+    }
+
     const access = await requireClientAccess(note.session.clientId);
     if (!access.ok) {
       return failure(
         'CLIENT_ACCESS_DENIED',
         'You no longer have access to this client.',
+      );
+    }
+
+    const credentialGate = await assertNoteCredentialHardStop({
+      clientStatus: note.session.client.status,
+      bcbaUserId: note.session.bcbaId,
+      rbtUserId: note.session.rbtId,
+    });
+    if (!credentialGate.ok) {
+      return failure(credentialGate.code, credentialGate.error, {
+        manualReviewRequired: true,
+      });
+    }
+
+    const scrub = scrubNoteForConvert({
+      id: note.id,
+      billableUnits: note.billableUnits,
+      rbtSigned: note.rbtSigned,
+      bcbaSigned: note.bcbaSigned,
+      parentSigned: note.parentSigned,
+      isConverted: note.isConverted,
+      deficiencies: note.deficiencies,
+      session: {
+        id: note.session.id,
+        clientId: note.session.clientId,
+        cptCode: note.session.cptCode,
+        status: note.session.status,
+        scheduledStart: note.session.scheduledStart,
+        scheduledEnd: note.session.scheduledEnd,
+        actualStart: note.session.actualStart,
+        actualEnd: note.session.actualEnd,
+        placeOfServiceCode: note.session.placeOfServiceCode,
+        rbtId: note.session.rbtId,
+        bcbaId: note.session.bcbaId,
+        client: {
+          firstName: note.session.client.firstName,
+          lastName: note.session.client.lastName,
+          primaryDiagnosisCode: note.session.client.primaryDiagnosisCode,
+          insurancePayer: note.session.client.insurancePayer,
+          authorizations: note.session.client.authorizations.map((auth) => ({
+            authNumber: auth.authNumber,
+            startDate: auth.startDate,
+            endDate: auth.endDate,
+            status: auth.status,
+            unitsApproved: auth.unitsApproved,
+            cptCodes: auth.cptCodes,
+          })),
+        },
+      },
+    });
+    if (hasBlockingScrubDefects(scrub)) {
+      return failure(
+        'CLAIM_SCRUBBER_BLOCKED',
+        `Claim scrubber blocked convert: ${blockingScrubDefectLabels(scrub).join(' · ')}`,
+        { manualReviewRequired: true },
       );
     }
 
@@ -288,7 +394,7 @@ export async function convertNoteToBillable(
         const actor = await tx.user.findFirst({
           where: {
             id: actorGate.user.id,
-            role: { in: [...PLUTUS_TRACKER_ROLES] },
+            role: { in: [...SESSION_NOTES_CONVERSION_ROLES] },
             isActive: true,
           },
           select: { id: true, role: true },
@@ -298,7 +404,7 @@ export async function convertNoteToBillable(
             kind: 'BLOCKED',
             result: failure(
               'ACTOR_NOT_ACTIVE',
-              'Your active Plutus-tracker role could not be reverified.',
+              'Your active billing role could not be reverified.',
             ),
           };
         }
@@ -554,14 +660,16 @@ export async function convertNoteToBillable(
       };
     }
 
-    let credentialWarnings: string[] = [];
+    let credentialWarnings: string[] = credentialGate.warnings;
     try {
-      credentialWarnings = await collectNoteCredentialWarnings({
+      const postCommit = await collectNoteCredentialWarnings({
         bcbaUserId: note.session.bcbaId,
         rbtUserId: note.session.rbtId,
+        clientStatus: note.session.client.status,
       });
+      credentialWarnings = [...new Set([...credentialWarnings, ...postCommit])];
     } catch {
-      // Credential checks are post-commit warnings.
+      // Credential warnings are post-commit only.
     }
 
     try {
@@ -569,7 +677,7 @@ export async function convertNoteToBillable(
         await createNotification({
           userId: note.session.rbtId,
           title: 'Payroll may have updated',
-          message: 'A session note was handed off to Plutus. Refresh payroll when convenient.',
+          message: 'A session note claim was filed. Refresh payroll when convenient.',
           type: 'PAYROLL_REFRESH',
           linkUrl: '/rbt/payroll',
           dedupeHours: 24,
@@ -583,6 +691,7 @@ export async function convertNoteToBillable(
     }
 
     revalidatePath('/notes');
+    revalidatePath('/portal-billing/claims');
     revalidatePath('/', 'layout');
     revalidatePath(`/client/${note.session.clientId}`);
     return {
@@ -706,7 +815,7 @@ export async function flagDeficiency(
       return {
         success: false,
         code: 'NOTE_ALREADY_CONVERTED',
-        error: 'A converted Plutus handoff is locked. Use a separately audited reversal workflow.',
+        error: 'A converted claim is locked. Use a separately audited reversal workflow.',
       };
     }
     if (note.deficiencies.length > 0) {
@@ -860,6 +969,7 @@ export async function flagDeficiency(
     }
 
     revalidatePath('/notes');
+    revalidatePath('/portal-billing/claims');
     revalidatePath('/portal-clinical/daily');
     revalidatePath(`/client/${note.session.clientId}`);
     return {
@@ -901,6 +1011,376 @@ export async function flagDeficiency(
       code: 'DEFICIENCY_FAILED',
       error:
         'The deficiency, attestation invalidation, and critical audit did not commit.',
+    };
+  }
+}
+
+/**
+ * Export converted notes as a stable Plutus handoff CSV (no EDI / no legacy EMR).
+ */
+export async function exportPlutusHandoffCsv(): Promise<
+  | { success: true; csv: string; rowCount: number; filename: string }
+  | { success: false; error: string }
+> {
+  const gate = await requireStaff(SESSION_NOTES_CONVERSION_ROLES);
+  if (!gate.ok) return { success: false, error: gate.error };
+
+  try {
+    const converted = await prisma.sessionNote.findMany({
+      where: { isConverted: true, plutusClaimRef: { not: null } },
+      include: {
+        session: {
+          include: {
+            client: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                memberId: true,
+                medicaidId: true,
+                insurancePayer: true,
+                authorizations: {
+                  where: { status: 'APPROVED' },
+                  select: { authNumber: true },
+                  orderBy: { updatedAt: 'desc' },
+                  take: 1,
+                },
+              },
+            },
+          },
+        },
+      },
+      orderBy: { convertedAt: 'desc' },
+      take: 500,
+    });
+
+    const staffIds = [
+      ...new Set(
+        converted.flatMap((n) => [n.session.rbtId, n.session.bcbaId].filter(Boolean) as string[]),
+      ),
+    ];
+    const npiByUser = new Map<string, string>();
+    await Promise.all(
+      staffIds.map(async (userId) => {
+        npiByUser.set(userId, await getStaffNpi(userId));
+      }),
+    );
+
+    const rows = buildPlutusExportRows(
+      converted.map((note) => ({
+        id: note.id,
+        billableUnits: note.billableUnits,
+        plutusClaimRef: note.plutusClaimRef,
+        convertedAt: note.convertedAt,
+        session: {
+          cptCode: note.session.cptCode,
+          scheduledStart: note.session.scheduledStart,
+          actualStart: note.session.actualStart,
+          rbtNpi: note.session.rbtId ? npiByUser.get(note.session.rbtId) : '',
+          bcbaNpi: note.session.bcbaId ? npiByUser.get(note.session.bcbaId) : '',
+          client: note.session.client,
+        },
+      })),
+    );
+
+    if (rows.length === 0) {
+      return {
+        success: false,
+        error: 'No converted notes with claim refs and billable units to export.',
+      };
+    }
+
+    const csv = buildPlutusExportCsv(rows);
+    const stamp = new Date().toISOString().slice(0, 10);
+    return {
+      success: true,
+      csv,
+      rowCount: rows.length,
+      filename: `plutus-handoff-${stamp}.csv`,
+    };
+  } catch (error) {
+    console.error(
+      'Action failed [exportPlutusHandoffCsv]:',
+      error instanceof Error ? error.message : 'Unknown error',
+    );
+    return { success: false, error: 'Could not build claims export packet.' };
+  }
+}
+
+const CLIENT_PIPELINE_NOTE_INCLUDE = {
+  session: {
+    include: {
+      client: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          status: true,
+          insurancePayer: true,
+          memberId: true,
+          medicaidId: true,
+          primaryDiagnosisCode: true,
+          authorizations: {
+            where: { status: 'APPROVED' as const },
+            select: {
+              authNumber: true,
+              type: true,
+              status: true,
+              startDate: true,
+              endDate: true,
+              unitsApproved: true,
+              cptCodes: { select: { code: true, unitsApproved: true } },
+            },
+            orderBy: { updatedAt: 'desc' as const },
+            take: 3,
+          },
+        },
+      },
+      rbt: { select: { id: true, firstName: true, lastName: true } },
+      bcba: { select: { id: true, firstName: true, lastName: true } },
+    },
+  },
+  deficiencies: {
+    where: { status: 'OPEN' as const },
+  },
+} as const;
+
+export type ClientSessionNotesPipelinePayload = {
+  awaitingBcba: Awaited<
+    ReturnType<typeof prisma.sessionNote.findMany<{ include: typeof CLIENT_PIPELINE_NOTE_INCLUDE }>>
+  >;
+  readyForPlutus: ClientSessionNotesPipelinePayload['awaitingBcba'];
+  converted: ClientSessionNotesPipelinePayload['awaitingBcba'];
+  queueCounts: { awaiting: number; ready: number; converted: number };
+  authUnitStatusByNoteId: Record<string, AuthUnitHardStop>;
+  scrubStatusByNoteId: Record<string, ClaimScrubResult>;
+  convertBlockersByNoteId: Record<string, string[]>;
+  canConvert: boolean;
+};
+
+/**
+ * Client-scoped SessionNote pipeline for inline Plutus handoff in the client profile.
+ */
+export async function getClientSessionNotesPipeline(
+  clientId: string,
+): Promise<
+  | { success: true; data: ClientSessionNotesPipelinePayload }
+  | { success: false; error: string }
+> {
+  const access = await requireClientAccess(clientId);
+  if (!access.ok) return { success: false, error: access.error };
+
+  const roleGate = await requireStaff(SESSION_NOTES_ROLES);
+  if (!roleGate.ok) return { success: false, error: roleGate.error };
+
+  const canConvert = SESSION_NOTES_CONVERSION_ROLES.includes(
+    roleGate.user.role as Role,
+  );
+
+  const clientScope = { session: { clientId } };
+
+  try {
+    const [
+      awaitingBcba,
+      readyForPlutus,
+      converted,
+      awaitingCount,
+      readyCount,
+      convertedCount,
+    ] = await Promise.all([
+      prisma.sessionNote.findMany({
+        where: { ...clientScope, rbtSigned: true, bcbaSigned: false },
+        include: CLIENT_PIPELINE_NOTE_INCLUDE,
+        orderBy: { updatedAt: 'desc' },
+        take: 100,
+      }),
+      prisma.sessionNote.findMany({
+        where: { ...clientScope, bcbaSigned: true, isConverted: false },
+        include: CLIENT_PIPELINE_NOTE_INCLUDE,
+        orderBy: { updatedAt: 'desc' },
+        take: 100,
+      }),
+      prisma.sessionNote.findMany({
+        where: { ...clientScope, isConverted: true },
+        include: CLIENT_PIPELINE_NOTE_INCLUDE,
+        orderBy: { convertedAt: 'desc' },
+        take: 100,
+      }),
+      prisma.sessionNote.count({
+        where: { ...clientScope, rbtSigned: true, bcbaSigned: false },
+      }),
+      prisma.sessionNote.count({
+        where: { ...clientScope, bcbaSigned: true, isConverted: false },
+      }),
+      prisma.sessionNote.count({
+        where: { ...clientScope, isConverted: true },
+      }),
+    ]);
+
+    const authUnitStatusByNoteId: Record<string, AuthUnitHardStop> = {};
+    const scrubStatusByNoteId: Record<string, ClaimScrubResult> = {};
+    const convertBlockersByNoteId: Record<string, string[]> = {};
+
+    if (readyForPlutus.length > 0) {
+      const [authorizations, paRequests, sessions] = await Promise.all([
+        prisma.authorization.findMany({
+          where: { clientId },
+          include: { cptCodes: true },
+        }),
+        prisma.pARequest.findMany({ where: { clientId } }),
+        prisma.session.findMany({
+          where: { clientId },
+          select: {
+            id: true,
+            status: true,
+            cptCode: true,
+            scheduledStart: true,
+            scheduledEnd: true,
+            actualStart: true,
+            actualEnd: true,
+            note: {
+              select: {
+                billableUnits: true,
+                parentSigned: true,
+                parentSignedAt: true,
+                parentSignerName: true,
+                rbtSigned: true,
+                rbtSignedAt: true,
+                rbtSignerName: true,
+                bcbaSigned: true,
+                bcbaSignedAt: true,
+                bcbaSignerName: true,
+                isConverted: true,
+                checklistSnapshot: true,
+                structuredContent: true,
+                deficiencies: {
+                  where: { status: 'OPEN' },
+                  select: { id: true },
+                },
+              },
+            },
+          },
+        }),
+      ]);
+
+      const ledgerSessions = sessions.map((session) => ({
+        ...session,
+        note: session.note
+          ? {
+              billableUnits: session.note.billableUnits,
+              parentSigned: session.note.parentSigned,
+              parentSignedAt: session.note.parentSignedAt,
+              parentSignerName: session.note.parentSignerName,
+              rbtSigned: session.note.rbtSigned,
+              rbtSignedAt: session.note.rbtSignedAt,
+              rbtSignerName: session.note.rbtSignerName,
+              bcbaSigned: session.note.bcbaSigned,
+              bcbaSignedAt: session.note.bcbaSignedAt,
+              bcbaSignerName: session.note.bcbaSignerName,
+              isConverted: session.note.isConverted,
+              checklistSnapshot: session.note.checklistSnapshot,
+              openDeficiencyCount: session.note.deficiencies.length,
+              submissionFingerprint: extractSubmissionFingerprint(
+                session.note.structuredContent,
+              ),
+            }
+          : null,
+      }));
+
+      for (const note of readyForPlutus) {
+        const sessionId = note.session?.id;
+        if (!sessionId) continue;
+
+        authUnitStatusByNoteId[note.id] = evaluateAuthUnitHardStop({
+          clientId,
+          targetSessionId: sessionId,
+          authorizations,
+          paRequests,
+          sessions: ledgerSessions,
+        });
+
+        if (!note.session) continue;
+
+        const scrub = scrubNoteForConvert({
+          id: note.id,
+          billableUnits: note.billableUnits,
+          rbtSigned: note.rbtSigned,
+          bcbaSigned: note.bcbaSigned,
+          parentSigned: note.parentSigned,
+          isConverted: note.isConverted,
+          deficiencies: note.deficiencies,
+          session: {
+            id: note.session.id,
+            clientId: note.session.clientId,
+            cptCode: note.session.cptCode,
+            status: note.session.status,
+            scheduledStart: note.session.scheduledStart,
+            scheduledEnd: note.session.scheduledEnd,
+            actualStart: note.session.actualStart,
+            actualEnd: note.session.actualEnd,
+            placeOfServiceCode: note.session.placeOfServiceCode,
+            rbtId: note.session.rbtId,
+            bcbaId: note.session.bcbaId,
+            client: {
+              firstName: note.session.client.firstName,
+              lastName: note.session.client.lastName,
+              primaryDiagnosisCode: note.session.client.primaryDiagnosisCode,
+              insurancePayer: note.session.client.insurancePayer,
+              authorizations: note.session.client.authorizations,
+            },
+          },
+        });
+        scrubStatusByNoteId[note.id] = scrub;
+
+        const blockers: string[] = [];
+        if (hasBlockingScrubDefects(scrub)) {
+          blockers.push(
+            ...scrub.defects
+              .filter((d) => d.severity === 'BLOCKING')
+              .map((d) => d.message),
+          );
+        }
+
+        const [rbtStatus, bcbaStatus] = await Promise.all([
+          note.session.rbtId ? getCredentialStatus(note.session.rbtId) : null,
+          note.session.bcbaId ? getCredentialStatus(note.session.bcbaId) : null,
+        ]);
+        const credentialVerdict = evaluateCredentialHardStop({
+          clientStatus: note.session.client.status,
+          rbtStatus,
+          bcbaStatus,
+        });
+        if (!credentialVerdict.ok) blockers.push(...credentialVerdict.blockers);
+
+        if (blockers.length > 0) convertBlockersByNoteId[note.id] = blockers;
+      }
+    }
+
+    return {
+      success: true,
+      data: {
+        awaitingBcba,
+        readyForPlutus,
+        converted,
+        queueCounts: {
+          awaiting: awaitingCount,
+          ready: readyCount,
+          converted: convertedCount,
+        },
+        authUnitStatusByNoteId,
+        scrubStatusByNoteId,
+        convertBlockersByNoteId,
+        canConvert,
+      },
+    };
+  } catch (error) {
+    console.error(
+      'Action failed [getClientSessionNotesPipeline]:',
+      error instanceof Error ? error.message : 'Unknown error',
+    );
+    return {
+      success: false,
+      error: 'Could not load session notes pipeline for this client.',
     };
   }
 }

@@ -56,6 +56,7 @@ const mocks = vi.hoisted(() => {
     },
     user: {
       findUnique: vi.fn(),
+      findFirst: vi.fn(),
     },
     atsHelpTicket: {
       findFirst: vi.fn(),
@@ -110,6 +111,8 @@ vi.mock('next/headers', () => ({
 }));
 
 import {
+  declineWageOffer,
+  discussWageOffer,
   sendWageOffer,
   signWageOffer,
 } from './wageOfferActions';
@@ -121,6 +124,7 @@ function deviceSession() {
     deviceFingerprint: FINGERPRINT,
     magicLinkToken: 'current-link-token',
     revokedAt: null,
+    boundAt: new Date(),
     candidate: {
       id: CANDIDATE_ID,
       stage: 'OFFER',
@@ -195,6 +199,11 @@ beforeEach(() => {
   });
   mocks.tx.onboardingSignatureEvent.findFirst.mockResolvedValue(null);
   mocks.tx.onboardingSignatureEvent.findMany.mockResolvedValue([]);
+  mocks.tx.user.findFirst.mockResolvedValue(null);
+  mocks.tx.atsHelpTicket.findFirst.mockResolvedValue(null);
+  mocks.tx.atsHelpTicket.create.mockResolvedValue({
+    id: '77777777-7777-4777-8777-777777777777',
+  });
   mocks.prisma.$transaction.mockImplementation(
     async (operation: (tx: typeof mocks.tx) => Promise<unknown>) =>
       operation(mocks.tx)
@@ -328,5 +337,81 @@ describe('wage notice resend versus signing', () => {
       code: 'WAGE_NOTICE_STALE',
     });
     expect(mocks.tx.onboardingSignatureEvent.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('wage notice decline versus signing', () => {
+  it('atomically declines the exact current unsigned notice', async () => {
+    const result = await declineWageOffer('Rate needs discussion');
+
+    expect(result).toEqual({ success: true });
+    expect(mocks.tx.candidateOnboardingPacket.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: '55555555-5555-4555-8555-555555555555',
+        ls54Status: 'SENT',
+        ls54Version: 3,
+        ls54SignedAt: null,
+      },
+      data: {
+        ls54Status: 'DECLINED',
+        ls54DeclinedAt: expect.any(Date),
+      },
+    });
+    expect(mocks.tx.onboardingSignatureEvent.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports stale and creates no audit event when signing wins the race', async () => {
+    mocks.tx.candidateOnboardingPacket.updateMany.mockResolvedValue({ count: 0 });
+
+    const result = await declineWageOffer('Rate needs discussion');
+
+    expect(result).toMatchObject({
+      success: false,
+      code: 'WAGE_NOTICE_STALE',
+    });
+    expect(mocks.tx.onboardingSignatureEvent.create).not.toHaveBeenCalled();
+    expect(mocks.revalidatePath).not.toHaveBeenCalled();
+  });
+});
+
+describe('wage notice discussion versus signing', () => {
+  it('commits the state transition, ticket, and audit in one transaction', async () => {
+    const result = await discussWageOffer('Please explain the rate.');
+
+    expect(result).toEqual({
+      success: true,
+      data: {
+        ticketId: '77777777-7777-4777-8777-777777777777',
+        assignedToUserId: null,
+      },
+    });
+    expect(mocks.tx.candidateOnboardingPacket.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: '55555555-5555-4555-8555-555555555555',
+        ls54Status: 'SENT',
+        ls54Version: 3,
+        ls54SignedAt: null,
+      },
+      data: { ls54Status: 'IN_DISCUSSION' },
+    });
+    expect(mocks.tx.atsCandidate.updateMany).toHaveBeenCalledWith({
+      where: { id: CANDIDATE_ID, stage: 'OFFER' },
+      data: { stage: 'HELP_DESK' },
+    });
+    expect(mocks.tx.onboardingSignatureEvent.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('creates no ticket or audit when signing wins the state race', async () => {
+    mocks.tx.candidateOnboardingPacket.updateMany.mockResolvedValue({ count: 0 });
+
+    const result = await discussWageOffer('Please explain the rate.');
+
+    expect(result).toMatchObject({
+      success: false,
+      code: 'WAGE_NOTICE_STALE',
+    });
+    expect(mocks.tx.atsHelpTicket.create).not.toHaveBeenCalled();
+    expect(mocks.tx.onboardingSignatureEvent.create).not.toHaveBeenCalled();
+    expect(mocks.revalidatePath).not.toHaveBeenCalled();
   });
 });

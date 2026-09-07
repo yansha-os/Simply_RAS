@@ -1,22 +1,24 @@
 'use client';
 
 import React, { useState, useEffect, useSyncExternalStore, useTransition } from 'react';
-import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { Link as LinkIcon, FileText, CheckCircle, AlertTriangle, X, Check, Eye, LockOpen, FileCheck } from 'lucide-react';
+import { DocumentReviewPreviewModal } from '@/components/client-profile/DocumentReviewPreviewModal';
+import { DocumentReviewStackedDialog } from '@/components/client-profile/DocumentReviewStackedDialog';
+import { SecureDocumentPreviewContent } from '@/components/client-profile/SecureDocumentPreviewContent';
+import {
+  DocumentReviewApproveButton,
+  DocumentReviewApprovedBadge,
+  DocumentReviewRejectButton,
+  DocumentReviewSendCorrectionsButton,
+} from '@/components/client-profile/DocumentReviewToolbarButtons';
+import { Link as LinkIcon, FileText, CheckCircle, AlertTriangle, X, Check, Eye, LockOpen, Pencil } from 'lucide-react';
+import { getSecureDocument } from '@/lib/secureDocument';
 import { generateMagicLink, sendToClinical, approveDocument, rejectDocument, rejectFormFieldsBulk, regenerateMagicLink, unlockPacket } from '@/app/(dashboard)/portal-case/actions';
 import { Form01ClientIntake } from '@/components/magic-link/Form01ClientIntake';
 import { Form02Consent } from '@/components/magic-link/Form02Consent';
 import { parsePacketFormData, safeParseJson } from '@/lib/safeParseJson';
-
-type SecureDocument = {
-  url: string;
-  name: string;
-  size: string;
-  type: string;
-};
 
 type IntakePacketView = {
   id: string;
@@ -89,32 +91,6 @@ function getActionError(result: unknown): string | null {
   if (!result || typeof result !== 'object' || !('error' in result)) return null;
   const error = (result as { error?: unknown }).error;
   return typeof error === 'string' && error.trim() ? error : null;
-}
-
-function isAuthorizedDocumentPath(path: string | null, clientId: string): boolean {
-  if (!path) return false;
-  const separatorIndex = path.indexOf('/');
-  if (separatorIndex < 1 || path.slice(0, separatorIndex) !== clientId) return false;
-  return /^[a-zA-Z0-9._-]{1,160}$/.test(path.slice(separatorIndex + 1));
-}
-
-function getSecureDocument(value: unknown, clientId: string): SecureDocument | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  const document = value as Record<string, unknown>;
-  if (typeof document.url !== 'string') return null;
-
-  const [pathname, query = ''] = document.url.split('?', 2);
-  const path = new URLSearchParams(query).get('path');
-  if (pathname !== '/api/documents' || !isAuthorizedDocumentPath(path, clientId)) {
-    return null;
-  }
-
-  return {
-    url: document.url,
-    name: typeof document.name === 'string' ? document.name : 'Secure document',
-    size: typeof document.size === 'string' ? document.size : '',
-    type: typeof document.type === 'string' ? document.type : '',
-  };
 }
 
 export default function IntakeDocumentsTab({
@@ -271,12 +247,18 @@ export default function IntakeDocumentsTab({
         setStagedRejections([]);
         setShowSubmitConfirm(false);
         setBulkRejectReason('');
-        setApprovedDocs([]);
+        // Do NOT wipe approvedDocs here — field-level rejections on one form
+        // do not un-approve other documents. router.refresh() will re-derive
+        // the correct state from the updated packet after the action completes.
       }
     );
   };
 
-  const hasMedicaid = formData['hasMedicaid'] && formData['hasMedicaid'] !== 'No' && formData['hasMedicaid'] !== 'Not Sure';
+  const medicaidValue = formData['hasMedicaid'];
+  const hasMedicaid =
+    typeof medicaidValue === 'string' &&
+    medicaidValue !== 'No' &&
+    medicaidValue !== 'Not Sure';
   const hasCustodyDoc = formData['custodyDocAttached'] === 'Yes — Attached' || formData['custodyDocAttached'] === 'Yes — Will Provide';
   const hasIEP = formData['hasIEP'] === 'Yes — Attached' || formData['hasIEP'] === 'Yes — Will Provide';
   const hasPriorABA = formData['hasPriorABA'] === 'Yes';
@@ -619,7 +601,7 @@ export default function IntakeDocumentsTab({
             
             {/* Magic Link Display */}
             {!isCaseCoordMode && (
-              <div className="bg-zinc-900 border border-white/5 p-4 rounded-xl flex items-center justify-between group hover:border-brand-blue-500/30 transition-colors">
+              <div className="bg-zinc-900 border border-white/5 p-4 rounded-xl flex items-center justify-between group hover:border-orange-500/30 transition-colors">
                 <div>
                   <h4 className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1.5">Secure Parent Link</h4>
                   <p className="text-sm font-mono text-zinc-300 break-all select-all">
@@ -706,190 +688,245 @@ export default function IntakeDocumentsTab({
         </Card>
       )}
 
-      {mounted && createPortal(
-        <>
-          {/* Preview Modal */}
-          {previewDoc && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-200">
-              <div
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="intake-preview-title"
-                className="bg-zinc-900 border border-white/10 rounded-2xl w-full max-w-6xl shadow-2xl overflow-hidden flex flex-col h-[90vh]"
+      <DocumentReviewPreviewModal
+        isOpen={Boolean(previewDoc)}
+        onClose={handleCloseModal}
+        title={previewDoc?.name ?? ''}
+        titleId="intake-preview-title"
+        isApproved={previewDoc ? approvedDocs.includes(previewDoc.key) : false}
+        toolbarCenter={
+          previewDoc &&
+          (previewDoc.key === 'intakeFormComplete' || previewDoc.key === 'consentFormComplete') &&
+          isIntakeReviewReady &&
+          Boolean(packet?.[previewDoc.key]) ? (
+            <div className="flex shrink-0 items-center gap-0.5 rounded-full border border-white/[0.07] bg-zinc-800/80 p-1">
+              <button
+                type="button"
+                onClick={() => setIsChangeMode(false)}
+                aria-pressed={!isChangeMode}
+                className={`flex cursor-pointer items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold transition-all duration-200 ${
+                  !isChangeMode
+                    ? 'bg-zinc-700 text-white shadow-sm'
+                    : 'text-zinc-500 hover:text-zinc-300'
+                }`}
               >
-            <div className="flex justify-between items-center p-4 border-b border-white/10 bg-zinc-950">
-              <h3 id="intake-preview-title" className="font-semibold text-white flex items-center">
-                <Eye className="w-5 h-5 mr-2 text-brand-blue-500" aria-hidden="true" />
-                Preview: {previewDoc.name}
-              </h3>
-              
-              <div className="flex items-center space-x-4">
-                {(previewDoc.key === 'intakeFormComplete' || previewDoc.key === 'consentFormComplete') && isIntakeReviewReady && Boolean(packet[previewDoc.key]) && (
-                  <div className="flex items-center bg-white/5 rounded-lg p-1 space-x-2">
-                    <button 
-                      type="button"
-                      onClick={() => setIsChangeMode(false)}
-                      aria-pressed={!isChangeMode}
-                      className={`cursor-pointer px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${!isChangeMode ? 'bg-zinc-700 text-white shadow' : 'text-zinc-400 hover:text-white'}`}
-                    >
-                      View Mode
-                    </button>
-                    <button 
-                      type="button"
-                      onClick={() => setIsChangeMode(true)}
-                      aria-pressed={isChangeMode}
-                      className={`cursor-pointer px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${isChangeMode ? 'bg-orange-500 text-black shadow' : 'text-zinc-400 hover:text-white'}`}
-                    >
-                      Request Changes Mode
-                    </button>
-                  </div>
-                )}
-                
-                {isChangeMode && stagedRejections.length > 0 && (
-                  <Button type="button" variant="danger" disabled={isActionPending} onClick={() => setShowSubmitConfirm(true)}>
-                    Send {stagedRejections.length} Request(s)
-                  </Button>
-                )}
-                
-                {!isChangeMode && isIntakeReviewReady && !approvedDocs.includes(previewDoc.key) && (
-                  <div className="flex space-x-2">
-                    {previewDoc.key !== 'intakeFormComplete' && previewDoc.key !== 'consentFormComplete' && (
-                      <Button type="button" variant="danger" disabled={isActionPending} onClick={() => setRejectDoc(previewDoc)}>
-                        Request Correction
-                      </Button>
-                    )}
-                    <div className="relative group rounded-md">
-                      <div className="absolute -inset-0.5 bg-green-500 rounded-md blur opacity-50 group-hover:opacity-100 transition duration-200"></div>
-                      <Button type="button" variant="primary" className="relative cursor-pointer bg-zinc-900 hover:bg-zinc-800 text-white font-bold tracking-wide border border-green-500/50" onClick={() => setShowApproveConfirm(true)}>
-                        Approve
-                      </Button>
-                    </div>
-                  </div>
-                )}
-
-                <div className="w-px h-6 bg-white/10 mx-2"></div>
-                <button
-                  type="button"
-                  autoFocus
-                  aria-label="Close document preview"
-                  onClick={handleCloseModal}
-                  className="cursor-pointer text-zinc-400 hover:text-white transition-colors p-1"
-                >
-                  <X className="w-6 h-6" aria-hidden="true" />
-                </button>
-              </div>
+                <Eye className="h-3 w-3" />
+                View Mode
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsChangeMode(true)}
+                aria-pressed={isChangeMode}
+                className={`flex cursor-pointer items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold transition-all duration-200 ${
+                  isChangeMode
+                    ? 'bg-zinc-700 text-white shadow-sm'
+                    : 'text-zinc-500 hover:text-zinc-300'
+                }`}
+              >
+                <Pencil className="h-3 w-3" />
+                Request Changes
+              </button>
             </div>
-            
-            {isChangeMode && (
-              <div className="bg-orange-500/10 border-b border-orange-500/20 p-3 text-center">
-                <p className="text-orange-400 text-sm font-medium flex items-center justify-center">
-                  <AlertTriangle className="w-4 h-4 mr-2" aria-hidden="true" />
-                  Select fields that need correction. A specific parent-facing reason is required before sending.
-                </p>
-              </div>
-            )}
-
-            <div className="flex-1 p-8 flex items-start justify-center bg-zinc-900/50 overflow-y-auto">
-              {previewDoc.key === 'intakeFormComplete' ? (
-                <div className="w-full max-w-4xl">
-                  <Form01ClientIntake 
-                    formData={formData} 
-                    client={client} 
-                    readOnly={true} 
-                    adminReviewMode={isChangeMode} 
-                    rejectedFields={rejectedFieldsList} 
-                    stagedRejections={stagedRejections}
-                    onRejectField={handleRejectFormField} 
-                  />
-                </div>
-              ) : previewDoc.key === 'consentFormComplete' ? (
-                <div className="w-full max-w-4xl">
-                  <Form02Consent 
-                    formData={formData} 
-                    client={client} 
-                    readOnly={true} 
-                    adminReviewMode={isChangeMode} 
-                    rejectedFields={rejectedFieldsList} 
-                    stagedRejections={stagedRejections}
-                    onRejectField={handleRejectFormField} 
-                  />
-                </div>
-              ) : (
-                (() => {
-                  const formKey = dbKeyToFormKey[previewDoc.key] || previewDoc.key;
-                  const docData = getSecureDocument(formData[formKey], client.id);
-                  
-                  if (docData) {
-                    return (
-                      <div className="w-full bg-white rounded-lg shadow-2xl overflow-hidden relative flex flex-col mt-4">
-                        <div className="bg-zinc-100 border-b border-zinc-200 px-4 py-3 flex items-center justify-between text-zinc-600">
-                          <div className="flex items-center text-sm font-medium">
-                            <FileCheck className="w-4 h-4 mr-2 text-green-600" aria-hidden="true" />
-                            {docData.name}
-                          </div>
-                          <div className="text-xs font-mono">{docData.size}</div>
-                        </div>
-                        <div className="bg-zinc-200 p-4 flex items-center justify-center min-h-[50vh]">
-                          {docData.type === 'application/pdf' ? (
-                            <iframe
-                              src={docData.url}
-                              title={`${previewDoc.name} PDF preview`}
-                              className="w-full h-[70vh] rounded shadow-inner"
-                            />
-                          ) : (
-                            // Authenticated, short-lived document route; intrinsic dimensions are unknown.
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img src={docData.url} alt={docData.name} className="w-full h-auto object-contain shadow-2xl rounded" />
-                          )}
-                        </div>
-                      </div>
-                    );
-                  }
-
-                  return (
-                    <div className="w-full max-w-4xl h-[70vh] bg-white rounded-lg shadow-2xl overflow-hidden relative flex flex-col mt-10">
-                      <div className="bg-zinc-100 border-b border-zinc-200 px-4 py-3 flex items-center justify-between text-zinc-600">
-                        <div className="flex items-center text-sm font-medium">
-                          <AlertTriangle className="w-4 h-4 mr-2 text-orange-600" aria-hidden="true" />
-                          Secure document unavailable
-                        </div>
-                      </div>
-                      <div className="flex-1 bg-zinc-200/50 p-8 flex items-center justify-center relative">
-                        <div className="max-w-md text-center text-zinc-600">
-                          This upload is missing, was returned for correction, or does not use the authorized document route. It cannot be reviewed or approved.
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })()
+          ) : undefined
+        }
+        toolbarActions={
+          previewDoc ? (
+            <>
+              {isChangeMode && stagedRejections.length > 0 && (
+                <DocumentReviewSendCorrectionsButton
+                  count={stagedRejections.length}
+                  disabled={isActionPending}
+                  onClick={() => setShowSubmitConfirm(true)}
+                />
               )}
+
+              {!isChangeMode && isIntakeReviewReady && !approvedDocs.includes(previewDoc.key) && (
+                <>
+                  {previewDoc.key !== 'intakeFormComplete' && previewDoc.key !== 'consentFormComplete' && (
+                    <DocumentReviewRejectButton
+                      disabled={isActionPending}
+                      onClick={() => setRejectDoc(previewDoc)}
+                    />
+                  )}
+                  <DocumentReviewApproveButton onClick={() => setShowApproveConfirm(true)} />
+                </>
+              )}
+
+              {!isChangeMode && approvedDocs.includes(previewDoc.key) && (
+                <DocumentReviewApprovedBadge />
+              )}
+            </>
+          ) : undefined
+        }
+        changeModeBanner={
+          isChangeMode ? (
+            <div className="flex flex-shrink-0 items-center justify-center gap-2 border-b border-orange-500/20 bg-orange-500/[0.08] px-5 py-2.5">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-orange-400" aria-hidden="true" />
+              <p className="text-xs font-medium text-orange-300">
+                Click any field to flag it for correction. A parent-facing reason is required before sending.
+              </p>
+            </div>
+          ) : undefined
+        }
+      >
+        {previewDoc?.key === 'intakeFormComplete' ? (
+          <div className="mx-auto w-full max-w-5xl px-4 py-6">
+            <Form01ClientIntake
+              formData={formData}
+              client={client}
+              readOnly={true}
+              adminReviewMode={isChangeMode}
+              rejectedFields={rejectedFieldsList}
+              stagedRejections={stagedRejections}
+              onRejectField={handleRejectFormField}
+            />
+          </div>
+        ) : previewDoc?.key === 'consentFormComplete' ? (
+          <div className="mx-auto w-full max-w-5xl px-4 py-6">
+            <Form02Consent
+              formData={formData}
+              client={client}
+              readOnly={true}
+              adminReviewMode={isChangeMode}
+              rejectedFields={rejectedFieldsList}
+              stagedRejections={stagedRejections}
+              onRejectField={handleRejectFormField}
+            />
+          </div>
+        ) : previewDoc ? (
+          <SecureDocumentPreviewContent
+            docData={getSecureDocument(
+              formData[dbKeyToFormKey[previewDoc.key] || previewDoc.key],
+              client.id
+            )}
+            previewTitle={previewDoc.name}
+          />
+        ) : null}
+      </DocumentReviewPreviewModal>
+
+      <DocumentReviewStackedDialog
+        isOpen={Boolean(approveDoc && packet)}
+        onClose={() => setApproveDoc(null)}
+        titleId="approve-intake-item-title"
+        dismissOnBackdrop={!isActionPending}
+      >
+        {approveDoc && packet && (
+          <div className="space-y-4 p-6 pr-12">
+            <h3 id="approve-intake-item-title" className="font-heading text-lg font-semibold text-white">Approve {approveDoc.name}?</h3>
+            <p className="text-sm leading-relaxed text-zinc-400">Are you sure this document meets all compliance standards?</p>
+            {actionError && <p role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">{actionError}</p>}
+            <div className="flex justify-end space-x-3 pt-4">
+              <Button type="button" variant="secondary" disabled={isActionPending} onClick={() => setApproveDoc(null)}>Cancel</Button>
+              <Button
+                type="button"
+                variant="primary"
+                isLoading={isActionPending}
+                disabled={isActionPending}
+                className="cursor-pointer"
+                onClick={() => runAction(
+                  () => approveDocument(packet.id, approveDoc.key, client.id),
+                  `${approveDoc.name} approved.`,
+                  () => {
+                    setApprovedDocs((previous) => previous.includes(approveDoc.key) ? previous : [...previous, approveDoc.key]);
+                    setApproveDoc(null);
+                    setPreviewDoc(null);
+                  }
+                )}
+              >
+                Confirm Approval
+              </Button>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </DocumentReviewStackedDialog>
 
-      {/* Approve Modal */}
-      {approveDoc && packet && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div role="dialog" aria-modal="true" aria-labelledby="approve-intake-item-title" className="bg-zinc-900 border border-white/10 rounded-xl w-full max-w-md shadow-2xl overflow-hidden">
-            <div className="p-6 space-y-4">
-              <h3 id="approve-intake-item-title" className="text-lg font-semibold text-white">Approve {approveDoc.name}?</h3>
-              <p className="text-sm text-zinc-400">Are you sure this document meets all compliance standards?</p>
-              {actionError && <p role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">{actionError}</p>}
-              <div className="flex justify-end space-x-3 pt-4">
-                <Button type="button" variant="secondary" disabled={isActionPending} onClick={() => setApproveDoc(null)}>Cancel</Button>
+      <DocumentReviewStackedDialog
+        isOpen={Boolean(rejectDoc && packet)}
+        onClose={() => {
+          if (isActionPending) return;
+          setRejectDoc(null);
+          setRejectReason('');
+        }}
+        titleId="reject-intake-item-title"
+        dismissOnBackdrop={!isActionPending}
+      >
+        {rejectDoc && packet && (
+          <div className="space-y-4 p-6 pr-12">
+            <h3 id="reject-intake-item-title" className="font-heading flex items-center text-lg font-semibold text-white">
+              <AlertTriangle className="mr-2 h-5 w-5 text-red-500" aria-hidden="true" /> Request correction: {rejectDoc.name}
+            </h3>
+            <p className="text-sm leading-relaxed text-zinc-400">Why is this rejected? What needs to change? (The client will see this message).</p>
+            <label htmlFor="intake-document-reason" className="block text-xs font-semibold uppercase tracking-wider text-zinc-300">
+              Correction reason
+            </label>
+            <textarea
+              id="intake-document-reason"
+              autoFocus
+              className="h-24 w-full resize-none rounded-lg border border-white/10 bg-zinc-950 p-3 text-sm text-white outline-none transition-colors focus:border-red-500"
+              placeholder="e.g. The insurance card is too blurry to read the Member ID."
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              maxLength={1000}
+              required
+              aria-describedby="intake-document-reason-help"
+            />
+            <p id="intake-document-reason-help" className="text-xs text-zinc-500">
+              The parent will see this reason. {rejectReason.length}/1000
+            </p>
+            {actionError && <p role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">{actionError}</p>}
+            <div className="flex justify-end space-x-3 pt-2">
+              <Button type="button" variant="secondary" disabled={isActionPending} onClick={() => { setRejectDoc(null); setRejectReason(''); }}>Cancel</Button>
+              <Button
+                type="button"
+                variant="danger"
+                isLoading={isActionPending}
+                disabled={rejectReason.trim().length < 5 || isActionPending}
+                className={rejectReason.trim().length >= 5 ? 'cursor-pointer' : 'cursor-not-allowed'}
+                onClick={() => runAction(
+                  () => rejectDocument(packet.id, rejectDoc.key, client.id, rejectReason.trim()),
+                  'The document was returned for parent correction.',
+                  () => {
+                    setRejectDoc(null);
+                    setRejectReason('');
+                    setPreviewDoc(null);
+                    setApprovedDocs([]);
+                  }
+                )}
+              >
+                Request Correction
+              </Button>
+            </div>
+          </div>
+        )}
+      </DocumentReviewStackedDialog>
+
+      <DocumentReviewStackedDialog
+        isOpen={Boolean(showApproveConfirm && previewDoc && packet)}
+        onClose={() => setShowApproveConfirm(false)}
+        titleId="approve-intake-preview-title"
+        dismissOnBackdrop={!isActionPending}
+      >
+        {showApproveConfirm && previewDoc && packet && (
+          <div className="space-y-4 p-6 pr-12">
+            <h3 id="approve-intake-preview-title" className="font-heading text-lg font-semibold text-white">Approve {previewDoc.name}?</h3>
+            <p className="text-sm leading-relaxed text-zinc-400">Are you sure this form meets all compliance standards?</p>
+            {actionError && <p role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">{actionError}</p>}
+            <div className="flex justify-end space-x-3 pt-4">
+              <Button type="button" variant="secondary" disabled={isActionPending} onClick={() => setShowApproveConfirm(false)}>Cancel</Button>
+              <div className="group relative rounded-md">
+                <div className="absolute -inset-0.5 rounded-md bg-green-500 opacity-50 blur transition duration-200 group-hover:opacity-100" />
                 <Button
                   type="button"
                   variant="primary"
                   isLoading={isActionPending}
                   disabled={isActionPending}
-                  className="cursor-pointer"
+                  className="relative cursor-pointer border border-green-500/50 bg-zinc-900 font-bold tracking-wide text-white hover:bg-zinc-800"
                   onClick={() => runAction(
-                    () => approveDocument(packet.id, approveDoc.key, client.id),
-                    `${approveDoc.name} approved.`,
+                    () => approveDocument(packet.id, previewDoc.key, client.id),
+                    `${previewDoc.name} approved.`,
                     () => {
-                      setApprovedDocs((previous) => previous.includes(approveDoc.key) ? previous : [...previous, approveDoc.key]);
-                      setApproveDoc(null);
+                      setApprovedDocs((previous) => previous.includes(previewDoc.key) ? previous : [...previous, previewDoc.key]);
+                      setShowApproveConfirm(false);
                       setPreviewDoc(null);
                     }
                   )}
@@ -899,111 +936,26 @@ export default function IntakeDocumentsTab({
               </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </DocumentReviewStackedDialog>
 
-      {/* Reject Modal */}
-      {rejectDoc && packet && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div role="dialog" aria-modal="true" aria-labelledby="reject-intake-item-title" className="bg-zinc-900 border border-white/10 rounded-xl w-full max-w-md shadow-2xl overflow-hidden">
-            <div className="p-6 space-y-4">
-              <h3 id="reject-intake-item-title" className="text-lg font-semibold text-white flex items-center"><AlertTriangle className="w-5 h-5 mr-2 text-red-500" aria-hidden="true" /> Request correction: {rejectDoc.name}</h3>
-              <p className="text-sm text-zinc-400">Why is this rejected? What needs to change? (The client will see this message).</p>
-              <label htmlFor="intake-document-reason" className="block text-xs font-semibold uppercase tracking-wider text-zinc-300">
-                Correction reason
-              </label>
-              <textarea 
-                id="intake-document-reason"
-                autoFocus
-                className="w-full text-sm border border-white/10 p-3 rounded-lg bg-zinc-950 text-white focus:border-red-500 outline-none transition-colors h-24 resize-none"
-                placeholder="e.g. The insurance card is too blurry to read the Member ID."
-                value={rejectReason}
-                onChange={(e) => setRejectReason(e.target.value)}
-                maxLength={1000}
-                required
-                aria-describedby="intake-document-reason-help"
-              />
-              <p id="intake-document-reason-help" className="text-xs text-zinc-500">
-                The parent will see this reason. {rejectReason.length}/1000
-              </p>
-              {actionError && <p role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">{actionError}</p>}
-              <div className="flex justify-end space-x-3 pt-2">
-                <Button type="button" variant="secondary" disabled={isActionPending} onClick={() => { setRejectDoc(null); setRejectReason(''); }}>Cancel</Button>
-                <Button
-                  type="button"
-                  variant="danger"
-                  isLoading={isActionPending}
-                  disabled={rejectReason.trim().length < 5 || isActionPending}
-                  className={rejectReason.trim().length >= 5 ? 'cursor-pointer' : 'cursor-not-allowed'}
-                  onClick={() => runAction(
-                    () => rejectDocument(packet.id, rejectDoc.key, client.id, rejectReason.trim()),
-                    'The document was returned for parent correction.',
-                    () => {
-                      setRejectDoc(null);
-                      setRejectReason('');
-                      setPreviewDoc(null);
-                      setApprovedDocs([]);
-                    }
-                  )}
-                >
-                  Request Correction
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Approve Confirm (from preview modal) */}
-      {showApproveConfirm && previewDoc && packet && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div role="dialog" aria-modal="true" aria-labelledby="approve-intake-preview-title" className="bg-zinc-900 border border-white/10 rounded-xl w-full max-w-md shadow-2xl overflow-hidden">
-            <div className="p-6 space-y-4">
-              <h3 id="approve-intake-preview-title" className="text-lg font-semibold text-white">Approve {previewDoc.name}?</h3>
-              <p className="text-sm text-zinc-400">Are you sure this form meets all compliance standards?</p>
-              {actionError && <p role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">{actionError}</p>}
-              <div className="flex justify-end space-x-3 pt-4">
-                <Button type="button" variant="secondary" disabled={isActionPending} onClick={() => setShowApproveConfirm(false)}>Cancel</Button>
-                <div className="relative group rounded-md">
-                  <div className="absolute -inset-0.5 bg-green-500 rounded-md blur opacity-50 group-hover:opacity-100 transition duration-200"></div>
-                  <Button
-                    type="button"
-                    variant="primary"
-                    isLoading={isActionPending}
-                    disabled={isActionPending}
-                    className="relative cursor-pointer bg-zinc-900 hover:bg-zinc-800 text-white font-bold tracking-wide border border-green-500/50"
-                    onClick={() => runAction(
-                      () => approveDocument(packet.id, previewDoc.key, client.id),
-                      `${previewDoc.name} approved.`,
-                      () => {
-                        setApprovedDocs((previous) => previous.includes(previewDoc.key) ? previous : [...previous, previewDoc.key]);
-                        setShowApproveConfirm(false);
-                        setPreviewDoc(null);
-                      }
-                    )}
-                  >
-                    Confirm Approval
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Send to Clinical Confirm */}
-      {showSendClinicalConfirm && packet && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div role="dialog" aria-modal="true" aria-labelledby="send-clinical-title" className="w-full max-w-md rounded-xl border border-white/10 bg-zinc-900 p-6 shadow-2xl">
-            <h3 id="send-clinical-title" className="flex items-center text-lg font-semibold text-white">
+      <DocumentReviewStackedDialog
+        isOpen={Boolean(showSendClinicalConfirm && packet)}
+        onClose={() => setShowSendClinicalConfirm(false)}
+        titleId="send-clinical-title"
+        dismissOnBackdrop={!isActionPending}
+      >
+        {showSendClinicalConfirm && packet && (
+          <div className="space-y-4 p-6 pr-12">
+            <h3 id="send-clinical-title" className="font-heading flex items-center text-lg font-semibold text-white">
               <CheckCircle className="mr-2 h-5 w-5 text-green-400" aria-hidden="true" />
               Approve packet and send to Clinical?
             </h3>
-            <p className="mt-3 text-sm leading-6 text-zinc-400">
+            <p className="text-sm leading-relaxed text-zinc-400">
               This confirms Intake reviewed every required form and upload. The canonical client status will advance to Intake Approved.
             </p>
-            {actionError && <p role="alert" className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">{actionError}</p>}
-            <div className="mt-6 flex justify-end gap-3">
+            {actionError && <p role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">{actionError}</p>}
+            <div className="flex justify-end gap-3 pt-2">
               <Button type="button" autoFocus variant="secondary" disabled={isActionPending} onClick={() => setShowSendClinicalConfirm(false)}>Cancel</Button>
               <Button
                 type="button"
@@ -1023,74 +975,70 @@ export default function IntakeDocumentsTab({
               </Button>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </DocumentReviewStackedDialog>
 
-      {/* Discard Confirm */}
-      {showDiscardConfirm && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div role="dialog" aria-modal="true" aria-labelledby="discard-intake-title" className="bg-zinc-900 border border-white/10 rounded-xl w-full max-w-md shadow-2xl overflow-hidden">
-            <div className="p-6 space-y-4">
-              <h3 id="discard-intake-title" className="text-lg font-semibold text-white">Discard Changes?</h3>
-              <p className="text-sm text-zinc-400">You have {stagedRejections.length} field(s) selected for rejection. Are you sure you want to discard these selections and close the form?</p>
-              <div className="flex justify-end space-x-3 pt-4">
-                <Button type="button" variant="secondary" onClick={() => setShowDiscardConfirm(false)}>Keep Editing</Button>
-                <Button type="button" variant="danger" onClick={() => {
-                  setShowDiscardConfirm(false);
-                  setStagedRejections([]);
-                  setIsChangeMode(false);
-                  setPreviewDoc(null);
-                }}>Discard & Close</Button>
-              </div>
-            </div>
+      <DocumentReviewStackedDialog
+        isOpen={showDiscardConfirm}
+        onClose={() => setShowDiscardConfirm(false)}
+        titleId="discard-intake-title"
+      >
+        <div className="space-y-4 p-6 pr-12">
+          <h3 id="discard-intake-title" className="font-heading text-lg font-semibold text-white">Discard Changes?</h3>
+          <p className="text-sm leading-relaxed text-zinc-400">You have {stagedRejections.length} field(s) selected for rejection. Are you sure you want to discard these selections and close the form?</p>
+          <div className="flex justify-end space-x-3 pt-4">
+            <Button type="button" variant="secondary" onClick={() => setShowDiscardConfirm(false)}>Keep Editing</Button>
+            <Button type="button" variant="danger" className="cursor-pointer" onClick={() => {
+              setShowDiscardConfirm(false);
+              setStagedRejections([]);
+              setIsChangeMode(false);
+              setPreviewDoc(null);
+            }}>Discard & Close</Button>
           </div>
         </div>
-      )}
+      </DocumentReviewStackedDialog>
 
-      {/* Submit Bulk Confirm */}
-      {showSubmitConfirm && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div role="dialog" aria-modal="true" aria-labelledby="submit-intake-corrections-title" className="bg-zinc-900 border border-white/10 rounded-xl w-full max-w-md shadow-2xl overflow-hidden">
-            <div className="p-6 space-y-4">
-              <h3 id="submit-intake-corrections-title" className="text-lg font-semibold text-white">Send Changes Requested?</h3>
-              <p className="text-sm text-zinc-400">You are about to wipe {stagedRejections.length} field(s) and bounce this form back to the client. The client will be notified to correct the wiped fields.</p>
-              <label htmlFor="intake-field-reason" className="block text-xs font-semibold uppercase tracking-wider text-zinc-300">
-                What must be corrected?
-              </label>
-              <textarea
-                id="intake-field-reason"
-                autoFocus
-                value={bulkRejectReason}
-                onChange={(event) => setBulkRejectReason(event.target.value)}
-                maxLength={1000}
-                required
-                placeholder="Describe the correction needed so the parent knows exactly what to update."
-                className="h-28 w-full resize-none rounded-lg border border-white/10 bg-zinc-950 p-3 text-sm text-white outline-none transition-colors focus:border-red-500"
-              />
-              <p className="text-xs text-zinc-500">
-                Applied to all {stagedRejections.length} selected fields. {bulkRejectReason.length}/1000
-              </p>
-              {actionError && <p role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">{actionError}</p>}
-              <div className="flex justify-end space-x-3 pt-4">
-                <Button type="button" variant="secondary" disabled={isActionPending} onClick={() => setShowSubmitConfirm(false)}>Cancel</Button>
-                <Button
-                  type="button"
-                  variant="danger"
-                  isLoading={isActionPending}
-                  disabled={bulkRejectReason.trim().length < 5 || isActionPending}
-                  className={bulkRejectReason.trim().length >= 5 ? 'cursor-pointer' : 'cursor-not-allowed'}
-                  onClick={handleBulkRejectSubmit}
-                >
-                  Confirm & Send
-                </Button>
-              </div>
-            </div>
+      <DocumentReviewStackedDialog
+        isOpen={showSubmitConfirm}
+        onClose={() => setShowSubmitConfirm(false)}
+        titleId="submit-intake-corrections-title"
+        dismissOnBackdrop={!isActionPending}
+      >
+        <div className="space-y-4 p-6 pr-12">
+          <h3 id="submit-intake-corrections-title" className="font-heading text-lg font-semibold text-white">Send Changes Requested?</h3>
+          <p className="text-sm leading-relaxed text-zinc-400">You are about to wipe {stagedRejections.length} field(s) and bounce this form back to the client. The client will be notified to correct the wiped fields.</p>
+          <label htmlFor="intake-field-reason" className="block text-xs font-semibold uppercase tracking-wider text-zinc-300">
+            What must be corrected?
+          </label>
+          <textarea
+            id="intake-field-reason"
+            autoFocus
+            value={bulkRejectReason}
+            onChange={(event) => setBulkRejectReason(event.target.value)}
+            maxLength={1000}
+            required
+            placeholder="Describe the correction needed so the parent knows exactly what to update."
+            className="h-28 w-full resize-none rounded-lg border border-white/10 bg-zinc-950 p-3 text-sm text-white outline-none transition-colors focus:border-red-500"
+          />
+          <p className="text-xs text-zinc-500">
+            Applied to all {stagedRejections.length} selected fields. {bulkRejectReason.length}/1000
+          </p>
+          {actionError && <p role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">{actionError}</p>}
+          <div className="flex justify-end space-x-3 pt-4">
+            <Button type="button" variant="secondary" disabled={isActionPending} onClick={() => setShowSubmitConfirm(false)}>Cancel</Button>
+            <Button
+              type="button"
+              variant="danger"
+              isLoading={isActionPending}
+              disabled={bulkRejectReason.trim().length < 5 || isActionPending}
+              className={bulkRejectReason.trim().length >= 5 ? 'cursor-pointer' : 'cursor-not-allowed'}
+              onClick={handleBulkRejectSubmit}
+            >
+              Confirm & Send
+            </Button>
           </div>
         </div>
-      )}
-      </>,
-      document.body
-    )}
+      </DocumentReviewStackedDialog>
 
     </div>
   );

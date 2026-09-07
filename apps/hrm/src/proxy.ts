@@ -5,8 +5,9 @@ import {
   DEVICE_FINGERPRINT_COOKIE,
   resolveFingerprintValidCandidate,
 } from '@/lib/candidateDeviceSession'
+import { isDevToolsEnabled } from '@/lib/devToolsGate'
 
-const PUBLIC_EXACT = new Set(['/', '/login', '/public', '/apply'])
+const PUBLIC_EXACT = new Set(['/', '/login', '/public', '/apply', '/api/health'])
 
 function isPublicPath(pathname: string): boolean {
   if (PUBLIC_EXACT.has(pathname)) return true
@@ -54,9 +55,16 @@ function hardenMagicLinkResponse(response: NextResponse): NextResponse {
 }
 
 function isApplicantDevToolsBypassEnabled(): boolean {
-  return (
-    process.env.NODE_ENV !== 'production' &&
-    process.env.NEXT_PUBLIC_ENABLE_DEV_TOOLS === 'true'
+  return isDevToolsEnabled()
+}
+
+function isStaffDevToolsBypassEnabled(request: NextRequest): boolean {
+  if (!isDevToolsEnabled()) {
+    return false
+  }
+  return Boolean(
+    request.cookies.get('dev_impersonate_role')?.value ||
+    request.cookies.get('dev_impersonate_user_id')?.value
   )
 }
 
@@ -163,14 +171,15 @@ export async function proxy(request: NextRequest) {
     }
   }
 
-  if (isStaffProtectedPath(pathname) && !user) {
+  const isStaffDevBypassed = isStaffDevToolsBypassEnabled(request)
+  if (isStaffProtectedPath(pathname) && !user && !isStaffDevBypassed) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     url.searchParams.set('next', pathname)
     return NextResponse.redirect(url)
   }
 
-  if (pathname.startsWith('/login') && user) {
+  if (pathname.startsWith('/login') && (user || isStaffDevBypassed)) {
     const url = request.nextUrl.clone()
     url.pathname = '/'
     url.search = ''

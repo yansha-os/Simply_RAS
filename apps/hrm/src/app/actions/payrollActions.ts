@@ -46,7 +46,7 @@ export type PayableSessionRow = {
  * Slice 7: prefers SessionNote.billableUnits over duration estimates and
  * surfaces IN_PROGRESS sessions as DB-backed incomplete holds.
  */
-export async function listRbtPayrollSessions(rbtUserId?: string) {
+export async function listRbtPayrollSessions() {
   const gate = await requireStaff();
   if (!gate.ok) {
     return {
@@ -58,7 +58,7 @@ export async function listRbtPayrollSessions(rbtUserId?: string) {
   }
 
   try {
-    const resolvedId = await resolveActingRbtUserId(rbtUserId);
+    const resolvedId = await resolveActingRbtUserId();
     if (!resolvedId) {
       return {
         success: false as const,
@@ -198,9 +198,9 @@ export async function listRbtPayrollSessions(rbtUserId?: string) {
 }
 
 /** Sessions the RBT can work in Session Studio / schedule (shared Session model). */
-export async function listRbtScheduledSessions(rbtUserId?: string) {
+export async function listRbtScheduledSessions() {
   try {
-    const resolvedId = await resolveActingRbtUserId(rbtUserId);
+    const resolvedId = await resolveActingRbtUserId();
     if (!resolvedId) {
       return { success: false as const, sessions: [], error: 'No RBT user resolved.' };
     }

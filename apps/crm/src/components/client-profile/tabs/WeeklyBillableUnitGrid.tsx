@@ -354,7 +354,7 @@ export default function WeeklyBillableUnitGrid({ clientId }: { clientId: string 
               )}
               {data.totals.awaitingConvert > 0 && (
                 <span className="rounded-md border border-amber-500/25 bg-amber-500/10 px-2.5 py-1 font-mono text-[10px] font-semibold text-amber-300">
-                  {data.totals.awaitingConvert} awaiting Plutus
+                  {data.totals.awaitingConvert} awaiting claim
                 </span>
               )}
               {data.totals.integrityReviewCount > 0 && (
@@ -396,7 +396,7 @@ export default function WeeklyBillableUnitGrid({ clientId }: { clientId: string 
                   Units appear only after the completed Session and parent, RBT, BCBA,
                   checklist, deficiency, fingerprint, and durable-unit checks all pass. Use the
                   arrows to check other weeks, or convert eligible notes on{' '}
-                  <span className="font-mono text-zinc-400">/notes</span>.
+                  <span className="font-mono text-zinc-400">/portal-billing/claims</span>.
                 </p>
               </div>
             ) : (

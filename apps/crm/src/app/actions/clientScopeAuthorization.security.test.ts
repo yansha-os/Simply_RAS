@@ -9,15 +9,20 @@ const PARENT_GATE_ERROR =
 
 const mocks = vi.hoisted(() => ({
   prisma: {
-    session: { findMany: vi.fn() },
-    client: { findUnique: vi.fn(), update: vi.fn() },
+    session: { findMany: vi.fn(), findUnique: vi.fn() },
+    client: { findUnique: vi.fn(), update: vi.fn(), updateMany: vi.fn(), count: vi.fn(), findMany: vi.fn() },
     skillTarget: { create: vi.fn(), update: vi.fn() },
     behaviorTarget: { create: vi.fn(), update: vi.fn() },
     intakePacket: { findUnique: vi.fn(), update: vi.fn() },
-    user: { findMany: vi.fn() },
+    user: { findMany: vi.fn(), count: vi.fn() },
+    sessionNote: { count: vi.fn(), findMany: vi.fn() },
+    authorization: { findMany: vi.fn() },
+    document: { findMany: vi.fn() },
+    paRequest: { findMany: vi.fn() },
   },
   getCurrentUser: vi.fn(),
   requireClientAccess: vi.fn(),
+  requirePersistedStaff: vi.fn(),
   requireStaffOrParent: vi.fn(),
   requireParentPacketAccess: vi.fn(),
   writeAuditLog: vi.fn(),
@@ -29,6 +34,8 @@ vi.mock('@/lib/prisma', () => ({ prisma: mocks.prisma }));
 vi.mock('@/lib/auth', () => ({ getCurrentUser: mocks.getCurrentUser }));
 vi.mock('@/lib/auth-guard', () => ({
   requireClientAccess: mocks.requireClientAccess,
+  requirePersistedStaff: mocks.requirePersistedStaff,
+  CLINICAL_ROLES: ['CEO', 'CLINICAL_DIRECTOR', 'OPS_DIRECTOR', 'BCBA', 'CLINICAL_SUPPORT'],
 }));
 vi.mock('@/lib/magicLinkGuard', () => ({
   requireStaffOrParent: mocks.requireStaffOrParent,
@@ -43,6 +50,10 @@ vi.mock('@/app/actions/notifications', () => ({
 import { getClientSessionHistory } from './clientSessionHistoryActions';
 import { syncTreatmentPlanTargetsToSessionStudio } from './clinicalGoalsActions';
 import { signTreatmentPlan } from './intake';
+import { getParentPortalOverview } from './parentPortalActions';
+import { getClientAuthLedgers } from './authCptLedgerActions';
+import { getClientEmrDocumentVault } from './emrDocumentVaultActions';
+import { getBcbaOpsMetrics } from './bcbaMetricsActions';
 
 function activeBcba() {
   return {
@@ -62,6 +73,10 @@ beforeEach(() => {
     ok: false,
     error: CLIENT_ACCESS_ERROR,
   });
+  mocks.requirePersistedStaff.mockResolvedValue({
+    ok: false,
+    error: 'Not found.',
+  });
   mocks.requireStaffOrParent.mockResolvedValue({
     ok: true,
     via: 'staff',
@@ -74,6 +89,7 @@ beforeEach(() => {
   mocks.prisma.session.findMany.mockResolvedValue([]);
   mocks.prisma.client.findUnique.mockResolvedValue(null);
   mocks.prisma.client.update.mockResolvedValue({});
+  mocks.prisma.client.updateMany.mockResolvedValue({ count: 1 });
   mocks.prisma.user.findMany.mockResolvedValue([]);
   mocks.writeAuditLog.mockResolvedValue(undefined);
 });
@@ -127,6 +143,7 @@ describe('client-scoped clinical action authorization', () => {
     mocks.prisma.client.findUnique.mockResolvedValue({
       id: CLIENT_ID,
       status: 'ASSESSMENT_SCHEDULED',
+      updatedAt: new Date('2026-09-05T18:00:00.000Z'),
       guardianName: 'Parent Name',
       treatmentPlan: { status: 'COMPLETED' },
       intakePacket: {
@@ -140,7 +157,7 @@ describe('client-scoped clinical action authorization', () => {
 
     expect(result).toEqual({ success: true, nameMatched: true });
     expect(mocks.requireClientAccess).not.toHaveBeenCalled();
-    expect(mocks.prisma.client.update).toHaveBeenCalledTimes(1);
+    expect(mocks.prisma.client.updateMany).toHaveBeenCalledTimes(1);
     expect(mocks.writeAuditLog).toHaveBeenCalledWith(
       expect.objectContaining({
         action: 'SIGN',
@@ -148,5 +165,38 @@ describe('client-scoped clinical action authorization', () => {
         entityId: CLIENT_ID,
       })
     );
+  });
+
+  it('denies parent portal overview before loading client sessions', async () => {
+    const result = await getParentPortalOverview(CLIENT_ID);
+
+    expect(result).toEqual({ success: false, error: CLIENT_ACCESS_ERROR });
+    expect(mocks.requireClientAccess).toHaveBeenCalledWith(CLIENT_ID);
+    expect(mocks.prisma.client.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('denies auth CPT ledger reads for unassigned clients', async () => {
+    const result = await getClientAuthLedgers(CLIENT_ID);
+
+    expect(result).toEqual({ success: false, error: CLIENT_ACCESS_ERROR });
+    expect(mocks.requireClientAccess).toHaveBeenCalledWith(CLIENT_ID);
+    expect(mocks.prisma.authorization.findMany).not.toHaveBeenCalled();
+  });
+
+  it('denies EMR vault reads for unassigned clients', async () => {
+    const result = await getClientEmrDocumentVault(CLIENT_ID);
+
+    expect(result).toEqual({ success: false, error: CLIENT_ACCESS_ERROR });
+    expect(mocks.requireClientAccess).toHaveBeenCalledWith(CLIENT_ID);
+    expect(mocks.prisma.document.findMany).not.toHaveBeenCalled();
+  });
+
+  it('denies clinical ops metrics for non-clinical staff', async () => {
+    const result = await getBcbaOpsMetrics();
+
+    expect(result.success).toBe(false);
+    expect(result.metrics).toBeDefined();
+    expect(mocks.requirePersistedStaff).toHaveBeenCalled();
+    expect(mocks.prisma.client.count).not.toHaveBeenCalled();
   });
 });

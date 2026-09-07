@@ -24,11 +24,13 @@ import {
 import { toast } from 'sonner';
 import {
   claimHelpTicket,
+  forwardHelpTicketToHeadHr,
   listHelpTickets,
   resolveHelpTicket,
   sendHelpMessage,
   type HelpTicketDto,
 } from '@/app/actions/helpDeskActions';
+import { useHrmRole } from '@/lib/useHrmRole';
 
 function getInitials(name: string) {
   if (!name?.trim()) return '??';
@@ -58,9 +60,10 @@ interface HelpTicket {
   categoryLabel: string;
   subject: string;
   message: string;
-  status: 'OPEN' | 'CLAIMED' | 'IN_PROGRESS' | 'RESOLVED';
+  status: 'OPEN' | 'CLAIMED' | 'IN_PROGRESS' | 'RESOLVED' | 'ESCALATED_HEAD_HR';
   createdAt: string;
   assignedHrAgent?: string;
+  claimedByUserId?: string | null;
   candidateName: string;
   candidateEmail: string;
   candidatePhone: string;
@@ -68,6 +71,7 @@ interface HelpTicket {
 }
 
 export default function HrHelpTicketsPage() {
+  const { role } = useHrmRole();
   const [tickets, setTickets] = useState<HelpTicket[]>([]);
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
   const [replyInput, setReplyInput] = useState('');
@@ -91,6 +95,7 @@ export default function HrHelpTicketsPage() {
     status: (t.status === 'CLOSED' ? 'RESOLVED' : t.status) as HelpTicket['status'],
     createdAt: t.createdAt,
     assignedHrAgent: t.assignedHrAgent,
+    claimedByUserId: t.claimedByUserId,
     candidateName: t.candidateName,
     candidateEmail: t.candidateEmail,
     candidatePhone: t.candidatePhone,
@@ -162,7 +167,7 @@ export default function HrHelpTicketsPage() {
       })();
     };
 
-    loadTickets(false);
+    loadTickets(true);
     const onSync = () => {
       void import('@/lib/clientDataCache').then(({ CACHE_KEYS, invalidateCache }) => {
         invalidateCache(CACHE_KEYS.helpTicketsActive);
@@ -203,6 +208,20 @@ export default function HrHelpTicketsPage() {
     const mapped = mapDto(res.ticket);
     saveAndSyncTickets(tickets.map((t) => (t.id === mapped.id ? mapped : t)));
     toast.success('Ticket claimed! You can now message the candidate live.');
+  };
+
+  const handleForwardToHeadHr = async (ticketId: string) => {
+    const res = await forwardHelpTicketToHeadHr(ticketId);
+    if (!res.success || !res.ticket) {
+      toast.error(res.error || 'Failed to forward ticket');
+      return;
+    }
+    const updated = tickets.filter((t) => t.id !== ticketId);
+    saveAndSyncTickets(updated);
+    if (selectedTicketId === ticketId) {
+      setSelectedTicketId(updated.length > 0 ? updated[0].id : null);
+    }
+    toast.success('Ticket forwarded to Head HR for executive review!');
   };
 
   const handleResolveTicket = async (ticketId: string) => {
@@ -364,75 +383,84 @@ export default function HrHelpTicketsPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* TICKETS DRAWER SIDEBAR */}
         <div className="bg-zinc-950/80 backdrop-blur-xl border border-white/10 rounded-3xl p-5 space-y-4 shadow-2xl h-fit">
-          <h3 className="text-sm font-black font-heading text-white uppercase tracking-wider flex items-center gap-2 border-b border-white/10 pb-3">
-            <LifeBuoy className="w-4 h-4 text-brand-orange-400" /> Active Tickets ({tickets.length})
-          </h3>
+          {(() => {
+            const claimedTickets = tickets.filter(
+              (t) => t.status !== 'RESOLVED' && (t.status as string) !== 'CLOSED'
+            );
+            return (
+              <>
+                <h3 className="text-sm font-black font-heading text-white uppercase tracking-wider flex items-center gap-2 border-b border-white/10 pb-3">
+                  <LifeBuoy className="w-4 h-4 text-brand-orange-400" /> Active Tickets Queue ({claimedTickets.length})
+                </h3>
 
-          <div className="space-y-3">
-            {loadState === 'loading' ? (
-              <div className="p-8 text-center text-zinc-400 font-mono text-xs border border-dashed border-white/10 rounded-2xl flex flex-col items-center gap-2">
-                <Loader2 className="w-5 h-5 animate-spin text-brand-orange-400" />
-                Loading tickets from database…
-              </div>
-            ) : loadState === 'error' ? (
-              <div className="p-6 text-center space-y-2 border border-dashed border-rose-500/30 bg-rose-500/5 rounded-2xl">
-                <AlertTriangle className="w-6 h-6 text-rose-400 mx-auto" />
-                <p className="text-xs font-bold text-rose-300">Could not load tickets</p>
-                <p className="text-[11px] font-mono text-zinc-500">{loadError}</p>
-              </div>
-            ) : tickets.length === 0 ? (
-              <div className="p-8 text-center space-y-2 border border-dashed border-white/10 rounded-2xl bg-zinc-900/40">
-                <LifeBuoy className="w-8 h-8 text-zinc-600 mx-auto" />
-                <p className="text-xs font-bold text-zinc-300">Queue is empty</p>
-                <p className="text-[11px] font-mono text-zinc-500 leading-relaxed">
-                  No open AtsHelpTicket rows. Candidates open tickets from RBT Help Desk — nothing is faked here.
-                </p>
-              </div>
-            ) : (
-              tickets.map((t) => {
-                const isSelected = selectedTicket?.id === t.id;
-                return (
-                  <div
-                    key={t.id}
-                    onClick={() => setSelectedTicketId(t.id)}
-                    className={`p-4 rounded-2xl border transition-all duration-300 cursor-pointer space-y-2 hover:scale-[1.01] hover:shadow-2xl ${
-                      isSelected
-                        ? 'bg-brand-orange-500/10 border-brand-orange-500/60 shadow-lg'
-                        : 'bg-zinc-900/80 border-white/5 hover:border-brand-orange-500/40'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="font-mono text-[10px] font-black text-brand-orange-400">
-                        {t.ticketNumber}
-                      </span>
-                      <span className={`px-2 py-0.5 rounded-full text-[9px] font-mono font-black uppercase border ${
-                        t.status === 'RESOLVED'
-                          ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                          : t.status === 'CLAIMED'
-                          ? 'bg-blue-500/10 text-blue-400 border-blue-500/20'
-                          : 'bg-rose-500/10 text-rose-400 border-rose-500/20 animate-pulse'
-                      }`}>
-                        {t.status === 'RESOLVED' ? '✓ RESOLVED' : t.status === 'CLAIMED' ? '🟡 CLAIMED BY YOU' : '🔴 UNCLAIMED'}
-                      </span>
-                    </div>
-
-                    <h4 className="font-extrabold text-xs text-white line-clamp-1">
-                      {t.candidateName} — {t.subject}
-                    </h4>
-
-                    <p className="text-[11px] text-zinc-400 font-mono line-clamp-2 italic">
-                      &quot;{t.message}&quot;
-                    </p>
-
-                    <div className="flex items-center justify-between text-[10px] font-mono text-zinc-500 pt-1 border-t border-white/5">
-                      <span>{t.candidateName}</span>
-                      <span>{t.createdAt}</span>
-                    </div>
+                {loadState === 'loading' ? (
+                  <div className="p-8 text-center text-zinc-400 font-mono text-xs border border-dashed border-white/10 rounded-2xl flex flex-col items-center gap-2">
+                    <Loader2 className="w-5 h-5 animate-spin text-brand-orange-400" />
+                    Loading tickets from database…
                   </div>
-                );
-              })
-            )}
-          </div>
+                ) : loadState === 'error' ? (
+                  <div className="p-6 text-center space-y-2 border border-dashed border-rose-500/30 bg-rose-500/5 rounded-2xl">
+                    <AlertTriangle className="w-6 h-6 text-rose-400 mx-auto" />
+                    <p className="text-xs font-bold text-rose-300">Could not load tickets</p>
+                    <p className="text-[11px] font-mono text-zinc-500">{loadError}</p>
+                  </div>
+                ) : claimedTickets.length === 0 ? (
+                  <div className="p-8 text-center space-y-2 border border-dashed border-white/10 rounded-2xl bg-zinc-900/40">
+                    <LifeBuoy className="w-8 h-8 text-zinc-600 mx-auto" />
+                    <p className="text-xs font-bold text-zinc-300">No active help tickets</p>
+                    <p className="text-[11px] font-mono text-zinc-500 leading-relaxed">
+                      All tickets resolved or cleared!
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {claimedTickets.map((t) => {
+                      const isSelected = selectedTicket?.id === t.id;
+                      return (
+                        <div
+                          key={t.id}
+                          onClick={() => setSelectedTicketId(t.id)}
+                          className={`p-4 rounded-2xl border transition-all duration-300 cursor-pointer space-y-2 hover:scale-[1.01] hover:shadow-2xl ${
+                            isSelected
+                              ? 'bg-brand-orange-500/15 border-brand-orange-500/60 shadow-lg'
+                              : 'bg-zinc-900/80 border-white/5 hover:border-brand-orange-500/40'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-mono text-[10px] font-black text-brand-orange-400">
+                              #{t.ticketNumber}
+                            </span>
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[9px] font-mono font-black uppercase border ${
+                                t.status === 'RESOLVED'
+                                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                                  : 'bg-blue-500/10 text-blue-400 border-blue-500/20'
+                              }`}
+                            >
+                              {t.status === 'RESOLVED' ? '✓ RESOLVED' : '🛠️ CLAIMED BY YOU'}
+                            </span>
+                          </div>
+
+                          <h4 className="font-extrabold text-xs text-white line-clamp-1">
+                            {t.candidateName} — {t.subject}
+                          </h4>
+
+                          <p className="text-[11px] text-zinc-400 font-mono line-clamp-2 italic">
+                            &quot;{t.message}&quot;
+                          </p>
+
+                          <div className="flex items-center justify-between text-[10px] font-mono text-zinc-500 pt-1 border-t border-white/5">
+                            <span>{t.candidateName}</span>
+                            <span>{t.createdAt}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </div>
 
         {/* LIVE DISCORD/IMESSAGE MESSENGER CHAT THREAD */}
@@ -457,13 +485,28 @@ export default function HrHelpTicketsPage() {
                 </div>
 
                 <div className="flex items-center gap-2 self-start sm:self-auto">
-                  {selectedTicket.status !== 'CLAIMED' && selectedTicket.status !== 'RESOLVED' && (
+                  {!(selectedTicket.status === 'CLAIMED' || selectedTicket.status === 'IN_PROGRESS' || !!selectedTicket.claimedByUserId) && selectedTicket.status !== 'RESOLVED' ? (
                     <button
                       onClick={() => handleClaimTicket(selectedTicket.id)}
                       className="bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs px-4 py-2 rounded-xl shadow-md cursor-pointer transition-all flex items-center gap-1.5"
                     >
                       <UserCheck className="w-3.5 h-3.5 text-black" />
                       <span>Claim Ticket</span>
+                    </button>
+                  ) : selectedTicket.status !== 'RESOLVED' ? (
+                    <span className="bg-blue-500/10 text-blue-400 border border-blue-500/20 text-xs font-mono font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5">
+                      <UserCheck className="w-3.5 h-3.5 text-blue-400" />
+                      <span>Claimed by You</span>
+                    </span>
+                  ) : null}
+
+                  {role === 'HR_AGENT' && selectedTicket.status !== 'ESCALATED_HEAD_HR' && selectedTicket.status !== 'RESOLVED' && (
+                    <button
+                      type="button"
+                      onClick={() => handleForwardToHeadHr(selectedTicket.id)}
+                      className="bg-purple-600 hover:bg-purple-500 text-white font-extrabold text-xs px-3.5 py-2 rounded-xl shadow-md cursor-pointer transition-all flex items-center gap-1.5"
+                    >
+                      <span>⏩ Forward to Head HR</span>
                     </button>
                   )}
 
@@ -510,6 +553,7 @@ export default function HrHelpTicketsPage() {
                   )}
                 </div>
               </div>
+
 
               {/* TICKET SUBJECT BOX */}
               <div className="p-4 bg-zinc-900/60 border-b border-white/5 space-y-1">

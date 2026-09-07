@@ -172,7 +172,8 @@ export async function createNotification(data: NotificationInput) {
  * not concurrent idempotency or durable delivery.
  */
 export async function notifyUsers(input: NotifyUsersInput) {
-  const unique = [...new Set(input.userIds.filter((id) => UUID_RE.test(id)))];
+  const safeUserIds = Array.isArray(input?.userIds) ? input.userIds : [];
+  const unique = [...new Set(safeUserIds.filter((id) => typeof id === 'string' && UUID_RE.test(id)))];
   if (unique.length === 0) return { success: true, notified: 0 };
   if (unique.length > MAX_NOTIFICATION_FAN_OUT) {
     return {

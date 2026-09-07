@@ -6,7 +6,7 @@
 
 **Read with (do not duplicate):**
 - Bridge E–G session/note/payroll flow → [`2026-08-11-aba-crm-hrm-spine-roadmap.md`](./2026-08-11-aba-crm-hrm-spine-roadmap.md)
-- Cutover phases referenced below → gap-analysis §4 (Phase 0/1/2) and [`2026-08-11-artemis-dual-run-cutover-checklist.md`](./2026-08-11-artemis-dual-run-cutover-checklist.md)
+- Cutover phases referenced below → gap-analysis §4 (Phase 0/1/2) and [`2026-08-11-ras-sandbox-cutover-checklist.md`](./2026-08-11-ras-sandbox-cutover-checklist.md)
 - SQL delivery convention → [`docs/sql/README.md`](../../sql/README.md) (manual Supabase SQL Editor only — never `prisma migrate`/`db push`)
 
 ---

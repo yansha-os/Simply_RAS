@@ -97,7 +97,7 @@ export async function submitTreatmentPacket(clientId: string) {
         status: true,
         paRequests: {
           where: { type: 'TREATMENT' },
-          select: { id: true },
+          select: { id: true, status: true },
           orderBy: { updatedAt: 'desc' },
           take: 1,
         },
@@ -121,6 +121,16 @@ export async function submitTreatmentPacket(clientId: string) {
     }
 
     const existingTx = client.paRequests[0]
+    if (
+      existingTx &&
+      existingTx.status !== 'NOT_STARTED' &&
+      existingTx.status !== 'SUBMITTED'
+    ) {
+      return {
+        success: false,
+        error: `Treatment PA is already ${existingTx.status} and cannot be reset to SUBMITTED.`,
+      }
+    }
     await prisma.$transaction(async (tx) => {
       const updated = await tx.client.updateMany({
         where: { id: clientId, status: 'REPORT_ASSEMBLED' },
@@ -129,10 +139,16 @@ export async function submitTreatmentPacket(clientId: string) {
       if (updated.count !== 1) throw new Error(STATUS_CHANGED)
 
       if (existingTx) {
-        await tx.pARequest.update({
-          where: { id: existingTx.id },
+        const paUpdated = await tx.pARequest.updateMany({
+          where: {
+            id: existingTx.id,
+            clientId,
+            type: 'TREATMENT',
+            status: existingTx.status,
+          },
           data: { status: 'SUBMITTED' },
         })
+        if (paUpdated.count !== 1) throw new Error(STATUS_CHANGED)
       } else {
         await tx.pARequest.create({
           data: {

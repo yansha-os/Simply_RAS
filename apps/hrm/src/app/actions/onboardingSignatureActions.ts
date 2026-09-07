@@ -21,6 +21,12 @@ import {
   type EmbeddedFormPayload,
 } from '@/lib/embeddedOnboardingForms';
 import { canUseApplicantDeviceSession } from '@/lib/applicantAccessPolicy';
+import {
+  applicantDocumentMagicBytesMatchMime,
+  isAllowedApplicantDocumentMime,
+  normalizeMimeType,
+} from '@/lib/uploadValidation';
+import { isCandidateDeviceSessionCurrent } from '@/lib/candidateDeviceSession';
 
 const ATS_STAFF_ROLES = [
   'HEAD_HR',
@@ -39,12 +45,6 @@ const SESSION_COOKIE = 'ras_device_session_token';
 const FINGERPRINT_COOKIE = 'device_fingerprint';
 const BUCKET = 'ats-applicant-docs';
 const MAX_BYTES = 10 * 1024 * 1024;
-const ALLOWED_MIME = new Set([
-  'application/pdf',
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-]);
 
 export type OnboardingActionType =
   | 'DOWNLOADED'
@@ -119,6 +119,7 @@ async function resolveApplicantId(): Promise<
     },
     select: {
       revokedAt: true,
+      boundAt: true,
       candidate: {
         select: {
           stage: true,
@@ -129,7 +130,7 @@ async function resolveApplicantId(): Promise<
   });
   if (
     !session ||
-    session.revokedAt ||
+    !isCandidateDeviceSessionCurrent(session) ||
     !canUseApplicantDeviceSession(session.candidate)
   ) {
     return { ok: false, error: 'Applicant session is not active on this device.' };
@@ -254,6 +255,9 @@ export async function recordOnboardingSignature(input: {
     if (stepNumber < 1 || stepNumber > ONBOARDING_TOTAL_STEPS) {
       return { success: false as const, error: 'Invalid step.' };
     }
+    if (getOnboardingDoc(stepNumber).kind !== 'ESIGN') {
+      return { success: false as const, error: 'This step cannot be completed with an e-signature.' };
+    }
 
     const signerName = String(input.signerName || '').trim();
     if (signerName.length < 2 || signerName.length > 120) {
@@ -302,6 +306,9 @@ export async function recordOnboardingAdvance(fromStep: number, toStep: number) 
     if (fromStep < 1 || fromStep > ONBOARDING_TOTAL_STEPS || toStep < 1 || toStep > ONBOARDING_TOTAL_STEPS) {
       return { success: false as const, error: 'Invalid step.' };
     }
+    if (toStep !== fromStep + 1) {
+      return { success: false as const, error: 'Onboarding steps must be advanced in order.' };
+    }
     const session = await resolveApplicantId();
     if (!session.ok) return { success: false as const, error: session.error };
 
@@ -312,7 +319,6 @@ export async function recordOnboardingAdvance(fromStep: number, toStep: number) 
       fingerprint: session.fingerprint,
       consents: { read: true, agree: true, eSign: true },
     });
-
     return { success: true as const, data: { auditHash: event.auditHash } };
   } catch (error) {
     console.error('recordOnboardingAdvance failed:', error instanceof Error ? error.message : 'Unknown');
@@ -409,10 +415,17 @@ export async function submitOnboardingEmbeddedForm(input: {
 }
 
 export async function uploadOnboardingFile(formData: FormData) {
+  let storageClient: Awaited<ReturnType<typeof getStorageClient>> | null = null;
+  let uploadedStoragePath: string | null = null;
+  let databaseCommitted = false;
   try {
     const stepNumber = Number(formData.get('stepNumber'));
     if (!Number.isInteger(stepNumber) || stepNumber < 1 || stepNumber > ONBOARDING_TOTAL_STEPS) {
       return { success: false as const, error: 'Invalid step.' };
+    }
+    const doc = getOnboardingDoc(stepNumber);
+    if (doc.kind !== 'UPLOAD') {
+      return { success: false as const, error: 'This step does not accept a file upload.' };
     }
 
     const file = formData.get('file');
@@ -422,21 +435,27 @@ export async function uploadOnboardingFile(formData: FormData) {
     if (file.size <= 0 || file.size > MAX_BYTES) {
       return { success: false as const, error: 'File must be between 1 byte and 10MB.' };
     }
-    const mime = file.type || 'application/pdf';
-    if (!ALLOWED_MIME.has(mime)) {
+    const mime = normalizeMimeType(file.type);
+    if (!isAllowedApplicantDocumentMime(mime)) {
       return { success: false as const, error: 'Only PDF, JPG, or PNG files are allowed.' };
     }
 
     const session = await resolveApplicantId();
     if (!session.ok) return { success: false as const, error: session.error };
 
-    const doc = getOnboardingDoc(stepNumber);
     const ext = extForMime(mime);
     const safeName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_').slice(0, 120);
     const storagePath = `onboarding/${session.candidateId}/${doc.key}-${Date.now()}.${ext}`;
 
     const storage = await getStorageClient();
+    storageClient = storage;
     const bytes = Buffer.from(await file.arrayBuffer());
+    if (!applicantDocumentMagicBytesMatchMime(bytes, mime)) {
+      return {
+        success: false as const,
+        error: 'The file content does not match its declared type.',
+      };
+    }
     const { error } = await storage.storage.from(BUCKET).upload(storagePath, bytes, {
       contentType: mime,
       upsert: false,
@@ -445,6 +464,7 @@ export async function uploadOnboardingFile(formData: FormData) {
       console.error('uploadOnboardingFile storage:', error.message);
       return { success: false as const, error: 'Upload failed. Try again.' };
     }
+    uploadedStoragePath = storagePath;
 
     const event = await persistEvent({
       candidateId: session.candidateId,
@@ -455,6 +475,9 @@ export async function uploadOnboardingFile(formData: FormData) {
       fingerprint: session.fingerprint,
       consents: { read: true, agree: true, eSign: true },
     });
+    // The audit event is the durable owner of this object. From this point the
+    // upload is referenced and must not be removed by catch-path cleanup.
+    databaseCommitted = true;
 
     const packetPatch: Record<string, boolean> = {};
     if (stepNumber === 20) packetPatch.w4Complete = true;
@@ -467,13 +490,20 @@ export async function uploadOnboardingFile(formData: FormData) {
         data: packetPatch,
       });
     }
-
     revalidatePath('/rbt', 'layout');
     return {
       success: true as const,
       data: { auditHash: event.auditHash, fileName: safeName, createdAt: event.createdAt.toISOString() },
     };
   } catch (error) {
+    if (!databaseCommitted && storageClient && uploadedStoragePath) {
+      const { error: cleanupError } = await storageClient.storage
+        .from(BUCKET)
+        .remove([uploadedStoragePath]);
+      if (cleanupError) {
+        console.error('uploadOnboardingFile cleanup failed:', cleanupError.message);
+      }
+    }
     console.error('uploadOnboardingFile failed:', error instanceof Error ? error.message : 'Unknown');
     return { success: false as const, error: 'Failed to upload file.' };
   }

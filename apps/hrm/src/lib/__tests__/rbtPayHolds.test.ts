@@ -168,6 +168,12 @@ describe('estimateUnitsFromWindow', () => {
     expect(estimateUnitsFromWindow(start, start + 5 * 60_000)).toBe(0);
     expect(estimateUnitsFromWindow(start, start)).toBe(0);
   });
+
+  it('handles NaN, negative timestamps, and endMs <= startMs safely', () => {
+    expect(estimateUnitsFromWindow(NaN, 1000)).toBe(0);
+    expect(estimateUnitsFromWindow(1000, NaN)).toBe(0);
+    expect(estimateUnitsFromWindow(5000, 2000)).toBe(0);
+  });
 });
 
 describe('checklist and local hold compatibility helpers', () => {

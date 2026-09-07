@@ -8,8 +8,10 @@ import { getActionItems, resolveActionItem, createActionItem } from '@/app/actio
 import { toast } from 'sonner';
 import Link from 'next/link';
 
+type ActionItem = Awaited<ReturnType<typeof getActionItems>>['actionItems'][number];
+
 export default function CaseCoordActionItems({ coordinatorId }: { coordinatorId?: string }) {
-  const [items, setItems] = useState<any[]>([]);
+  const [items, setItems] = useState<ActionItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'OPEN' | 'RESOLVED'>('OPEN');
   const [isPending, startTransition] = useTransition();
@@ -30,7 +32,15 @@ export default function CaseCoordActionItems({ coordinatorId }: { coordinatorId?
   };
 
   useEffect(() => {
-    loadItems();
+    let cancelled = false;
+    void getActionItems(coordinatorId).then((res) => {
+      if (cancelled) return;
+      if (res.success) setItems(res.actionItems);
+      setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [coordinatorId]);
 
   const handleResolve = (id: string) => {
@@ -91,7 +101,7 @@ export default function CaseCoordActionItems({ coordinatorId }: { coordinatorId?
           <div className="bg-zinc-900 p-1 rounded-lg border border-white/5 flex text-xs">
             <button
               onClick={() => setFilter('OPEN')}
-              className={`px-3 py-1.5 rounded-md font-semibold transition-colors ${
+              className={`cursor-pointer px-3 py-1.5 rounded-md font-semibold transition-colors ${
                 filter === 'OPEN' ? 'bg-brand-orange-500 text-white' : 'text-zinc-400 hover:text-white'
               }`}
             >
@@ -99,7 +109,7 @@ export default function CaseCoordActionItems({ coordinatorId }: { coordinatorId?
             </button>
             <button
               onClick={() => setFilter('RESOLVED')}
-              className={`px-3 py-1.5 rounded-md font-semibold transition-colors ${
+              className={`cursor-pointer px-3 py-1.5 rounded-md font-semibold transition-colors ${
                 filter === 'RESOLVED' ? 'bg-green-600 text-white' : 'text-zinc-400 hover:text-white'
               }`}
             >
@@ -109,7 +119,7 @@ export default function CaseCoordActionItems({ coordinatorId }: { coordinatorId?
 
           <Button
             onClick={() => setShowAddForm(!showAddForm)}
-            className="bg-zinc-900 hover:bg-zinc-800 border border-white/10 text-xs text-white"
+            className="cursor-pointer bg-zinc-900 hover:bg-zinc-800 border border-white/10 text-xs text-white"
           >
             <Plus className="w-4 h-4 mr-1" /> Log Event
           </Button>
@@ -140,10 +150,10 @@ export default function CaseCoordActionItems({ coordinatorId }: { coordinatorId?
               />
             </div>
             <div className="flex justify-end gap-2">
-              <Button type="button" variant="secondary" onClick={() => setShowAddForm(false)} className="text-xs bg-zinc-800 text-zinc-300">
+              <Button type="button" variant="secondary" onClick={() => setShowAddForm(false)} className="cursor-pointer text-xs bg-zinc-800 text-zinc-300">
                 Cancel
               </Button>
-              <Button type="submit" disabled={isPending} className="text-xs bg-brand-orange-500 text-white font-bold">
+              <Button type="submit" disabled={isPending} className={`text-xs bg-brand-orange-500 text-white font-bold ${isPending ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
                 Save Action Item
               </Button>
             </div>

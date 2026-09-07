@@ -11,7 +11,9 @@ import {
   CheckCircle2,
   ClipboardList,
   Clock3,
+  Compass,
   Edit3,
+  Globe,
   Loader2,
   LockKeyhole,
   MapPin,
@@ -21,6 +23,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { OnboardingNextStepsPrompt } from './OnboardingNextStepsPrompt';
 
 import {
   getMyRbtAvailability,
@@ -105,39 +108,38 @@ function StatePanel({
   const Icon = icon === 'lock' ? LockKeyhole : AlertTriangle;
 
   return (
-    <section className="relative mx-auto max-w-3xl overflow-hidden rounded-[2rem] border border-white/10 bg-slate-950 p-7 text-white shadow-2xl shadow-slate-950/30 sm:p-10">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,_rgba(249,115,22,0.22),_transparent_42%),radial-gradient(circle_at_bottom_left,_rgba(14,165,233,0.14),_transparent_45%)]" />
+    <section className="relative mx-auto max-w-3xl overflow-hidden rounded-[2rem] border border-[#E2D5B7] bg-[#FFFDF8] p-7 text-slate-900 shadow-xl sm:p-10">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,_rgba(249,115,22,0.08),_transparent_42%),radial-gradient(circle_at_bottom_left,_rgba(14,165,233,0.05),_transparent_45%)]" />
       <div className="relative flex flex-col items-center text-center">
-        <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl border border-orange-400/25 bg-orange-500/10 text-orange-300 shadow-xl shadow-orange-950/20">
+        <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl border border-orange-200 bg-orange-100 text-[#F97316] shadow-sm">
           <Icon className="h-8 w-8" aria-hidden="true" />
         </div>
-        <span className="rounded-full border border-orange-400/20 bg-orange-500/10 px-3 py-1 font-mono text-[10px] font-black uppercase tracking-[0.2em] text-orange-200">
+        <span className="rounded-full border border-orange-200 bg-orange-100 px-3 py-1 font-mono text-[10px] font-black uppercase tracking-[0.2em] text-[#C2410C]">
           {eyebrow}
         </span>
-        <h1 className="mt-4 font-heading text-2xl font-black tracking-tight sm:text-3xl">
+        <h1 className="mt-4 font-heading text-2xl font-black tracking-tight text-slate-900 sm:text-3xl">
           {title}
         </h1>
-        <p className="mt-3 max-w-xl text-sm font-medium leading-6 text-slate-300">{detail}</p>
+        <p className="mt-3 max-w-xl text-sm font-medium leading-6 text-slate-600">{detail}</p>
         <div className="mt-7 flex w-full flex-col justify-center gap-3 sm:w-auto sm:flex-row">
           <button
             type="button"
             onClick={onRetry}
             disabled={busy}
-            className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-2xl bg-orange-500 px-6 py-3.5 text-sm font-black text-white shadow-xl shadow-orange-950/30 transition-all duration-300 hover:scale-[1.01] hover:bg-orange-400 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-2xl bg-[#F97316] hover:bg-orange-600 px-6 py-3.5 text-sm font-black text-white shadow-md transition-all duration-300 hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {busy ? (
               <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
             ) : (
               <RefreshCw className="h-4 w-4" aria-hidden="true" />
             )}
-            {busy ? 'Checking profile…' : 'Try again'}
+            {busy ? 'Connecting to database…' : 'Try again'}
           </button>
           <Link
-            href="/rbt"
-            className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-white/15 bg-white/5 px-6 py-3.5 text-sm font-black text-slate-100 transition-all duration-300 hover:border-orange-400/40 hover:bg-white/10"
+            href="/rbt/dashboard"
+            className="inline-flex cursor-pointer items-center justify-center rounded-2xl border border-[#E2D5B7] bg-[#F9F5EC] hover:bg-white px-6 py-3.5 text-sm font-black text-slate-800 transition-all duration-300"
           >
-            <ClipboardList className="h-4 w-4" aria-hidden="true" />
-            My Tasks
+            Return to dashboard
           </Link>
         </div>
       </div>
@@ -403,139 +405,197 @@ export function RbtAvailabilityView({
 
   if (snapshot.saved && !showGridEditor) {
     return (
-      <main className="relative mx-auto max-w-4xl space-y-5 text-white">
-        <div className="pointer-events-none absolute inset-0 -z-10 rounded-[2.5rem] bg-[radial-gradient(circle_at_top,_rgba(16,185,129,0.16),_transparent_48%)]" />
-        <section className="relative overflow-hidden rounded-[2rem] border border-emerald-300/20 bg-slate-950 p-6 shadow-2xl shadow-emerald-950/20 sm:p-9">
-          <div className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-emerald-400/15 blur-3xl" />
+      <main className="relative mx-auto max-w-5xl space-y-6 pb-12 text-slate-900">
+        <div className="pointer-events-none absolute inset-0 -z-10 rounded-[2.5rem] bg-[radial-gradient(circle_at_top,_rgba(16,185,129,0.08),_transparent_48%)]" />
+
+        {/* REQUIREMENT COMPLETED HEADER CARD */}
+        <section className="relative overflow-hidden rounded-[2rem] border border-[#E2D5B7] bg-[#FFFDF8] p-6 shadow-xl sm:p-9">
+          <div className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-emerald-400/10 blur-3xl" />
           <div className="pointer-events-none absolute -bottom-20 -left-12 h-48 w-48 rounded-full bg-orange-400/10 blur-3xl" />
 
           <div className="relative flex flex-col gap-7">
             <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-start">
               <div className="flex items-start gap-4">
-                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-emerald-300/25 bg-emerald-400/10 text-emerald-300 shadow-lg shadow-emerald-950/30">
-                  <CheckCircle2 className="h-7 w-7" aria-hidden="true" />
+                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-emerald-300 bg-emerald-50 text-emerald-700 shadow-md">
+                  <CheckCircle2 className="h-8 w-8" aria-hidden="true" />
                 </div>
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="inline-flex items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-400/10 px-3 py-1 font-mono text-[10px] font-black uppercase tracking-[0.18em] text-emerald-200">
-                      <span className="dot-live h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                      Persisted in DB
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-300 bg-emerald-100 px-3 py-1 font-mono text-[10px] font-black uppercase tracking-[0.18em] text-emerald-800">
+                      <span className="dot-live h-1.5 w-1.5 rounded-full bg-emerald-600" />
+                      Requirement 3 Complete · Persisted in DB
                     </span>
-                    <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 font-mono text-[10px] font-black uppercase tracking-[0.16em] text-slate-300">
+                    <span className="rounded-full border border-[#E2D5B7] bg-[#F9F5EC] px-3 py-1 font-mono text-[10px] font-black uppercase tracking-[0.16em] text-slate-700">
                       {snapshot.isHired ? 'Active RBT' : `ATS · ${snapshot.stage}`}
                     </span>
                   </div>
-                  <h1 className="mt-3 font-heading text-2xl font-black tracking-tight sm:text-3xl">
-                    Weekly availability on file
+                  <h1 className="mt-3 font-heading text-2xl font-black tracking-tight text-slate-900 sm:text-3xl">
+                    Weekly Availability on File
                   </h1>
-                  <p className="mt-2 text-sm font-medium text-slate-300">
-                    {selectedHours} open hour{selectedHours === 1 ? '' : 's'} ·{' '}
-                    {selectedBoroughs.join(', ')} · {transportLabel(transportation)} · max{' '}
-                    {maxDistance} mi
+                  <p className="mt-2 text-sm font-semibold text-slate-600">
+                    Your recurring availability is locked and active for NYC case staffing and client matching.
                   </p>
-                  <p className="mt-2 font-mono text-[10px] uppercase tracking-wider text-slate-500">
-                    Recurring wall-clock schedule · America/New_York · updated{' '}
-                    {formatSavedAt(snapshot.updatedAt)}
+                  <p className="mt-1 font-mono text-[10px] uppercase tracking-wider text-slate-500">
+                    Recurring schedule · America/New_York (ET) · updated {formatSavedAt(snapshot.updatedAt)}
                   </p>
                 </div>
               </div>
               <ShieldCheck
-                className="hidden h-8 w-8 shrink-0 text-emerald-300/70 sm:block"
+                className="hidden h-9 w-9 shrink-0 text-emerald-600 sm:block"
                 aria-hidden="true"
               />
             </div>
 
-            <div className="overflow-x-auto rounded-2xl border border-white/10 bg-white/[0.035] p-2">
-              <table className="w-full min-w-[560px] border-separate border-spacing-1 text-center">
-                <caption className="sr-only">
-                  Persisted weekly availability. Green cells are open one-hour windows in
-                  Eastern Time.
-                </caption>
-                <thead>
-                  <tr>
-                    <th
-                      scope="col"
-                      className="px-2 py-1 font-mono text-[9px] font-bold uppercase tracking-wider text-slate-500"
-                    >
-                      ET
-                    </th>
-                    {AVAILABILITY_DAYS.map((day) => (
-                      <th
-                        key={day}
-                        scope="col"
-                        className="px-2 py-1 font-mono text-[9px] font-black uppercase tracking-wider text-slate-400"
-                      >
-                        {day.slice(0, 3)}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {AVAILABILITY_HOURS.map((hour, hourIndex) => (
-                    <tr key={hour}>
-                      <th
-                        scope="row"
-                        className="whitespace-nowrap px-2 py-1 text-right font-mono text-[9px] font-bold text-slate-500"
-                      >
-                        {hour}
-                      </th>
-                      {AVAILABILITY_DAYS.map((day, dayIndex) => {
-                        const open = grid[dayIndex][hourIndex];
-                        return (
-                          <td key={`${day}-${hour}`} className="p-0.5">
-                            <span
-                              aria-label={`${day} ${hour}: ${open ? 'open' : 'unavailable'}`}
-                              className={`mx-auto block h-2.5 w-full max-w-8 rounded-sm ${
-                                open
-                                  ? 'bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.45)]'
-                                  : 'bg-white/10'
-                              }`}
-                            />
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            {/* KPI STATS TILES */}
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div className="rounded-2xl border border-[#E2D5B7] bg-[#F9F5EC] p-3.5">
+                <span className="flex items-center gap-1.5 font-mono text-[10px] font-black uppercase tracking-wider text-slate-500">
+                  <Clock3 className="h-3.5 w-3.5 text-[#F97316]" />
+                  Total Open Time
+                </span>
+                <p className="mt-1.5 font-heading text-xl font-black text-[#C2410C]">
+                  {selectedHours} hrs <span className="text-xs font-bold text-slate-500">/ week</span>
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-[#E2D5B7] bg-[#F9F5EC] p-3.5">
+                <span className="flex items-center gap-1.5 font-mono text-[10px] font-black uppercase tracking-wider text-slate-500">
+                  <MapPin className="h-3.5 w-3.5 text-sky-600" />
+                  Boroughs
+                </span>
+                <p className="mt-1.5 truncate font-heading text-sm font-black text-slate-900" title={selectedBoroughs.join(', ')}>
+                  {selectedBoroughs.join(', ') || 'NYC All'}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-[#E2D5B7] bg-[#F9F5EC] p-3.5">
+                <span className="flex items-center gap-1.5 font-mono text-[10px] font-black uppercase tracking-wider text-slate-500">
+                  <Car className="h-3.5 w-3.5 text-emerald-600" />
+                  Transit Mode
+                </span>
+                <p className="mt-1.5 truncate font-heading text-sm font-black text-slate-900">
+                  {transportLabel(transportation)}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-[#E2D5B7] bg-[#F9F5EC] p-3.5">
+                <span className="flex items-center gap-1.5 font-mono text-[10px] font-black uppercase tracking-wider text-slate-500">
+                  <Compass className="h-3.5 w-3.5 text-purple-600" />
+                  Max Radius
+                </span>
+                <p className="mt-1.5 font-heading text-xl font-black text-slate-900">
+                  {maxDistance} <span className="text-xs font-bold text-slate-500">miles</span>
+                </p>
+              </div>
             </div>
 
-            <div className="flex flex-col gap-3 sm:flex-row">
+            {/* VISUAL WEEKLY SCHEDULE MATRIX */}
+            <div className="overflow-hidden rounded-2xl border border-[#E2D5B7] bg-white shadow-sm">
+              <div className="flex items-center justify-between border-b border-[#E2D5B7] bg-[#F9F5EC] px-4 py-3">
+                <span className="flex items-center gap-2 font-heading text-xs font-black text-slate-800">
+                  <Globe className="h-3.5 w-3.5 text-[#F97316]" />
+                  Weekly Eastern Time Schedule Grid
+                </span>
+                <span className="font-mono text-[10px] font-black text-emerald-700 bg-emerald-100 border border-emerald-300 rounded-full px-2.5 py-0.5">
+                  {selectedHours} Total Slots Open
+                </span>
+              </div>
+
+              <div className="overflow-x-auto p-3 sm:p-4">
+                <table className="w-full min-w-[620px] border-separate border-spacing-1 text-center">
+                  <caption className="sr-only">
+                    Persisted weekly availability. Green cells are open one-hour windows in Eastern Time.
+                  </caption>
+                  <thead>
+                    <tr>
+                      <th
+                        scope="col"
+                        className="rounded-lg bg-[#F9F5EC] px-2.5 py-2 font-mono text-[10px] font-black uppercase tracking-wider text-slate-600 border border-[#E2D5B7]"
+                      >
+                        Time (ET)
+                      </th>
+                      {AVAILABILITY_DAYS.map((day) => (
+                        <th
+                          key={day}
+                          scope="col"
+                          className="rounded-lg bg-[#F9F5EC] px-2.5 py-2 font-heading text-xs font-black text-slate-900 border border-[#E2D5B7]"
+                        >
+                          {day.slice(0, 3)}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {AVAILABILITY_HOURS.map((hour, hourIndex) => (
+                      <tr key={hour}>
+                        <th
+                          scope="row"
+                          className="whitespace-nowrap rounded-lg bg-[#F9F5EC]/50 px-2 py-1.5 text-right font-mono text-[10px] font-bold text-slate-700 border border-[#E2D5B7]/50"
+                        >
+                          {hour}
+                        </th>
+                        {AVAILABILITY_DAYS.map((day, dayIndex) => {
+                          const open = grid[dayIndex][hourIndex];
+                          return (
+                            <td key={`${day}-${hour}`} className="p-0.5">
+                              {open ? (
+                                <div
+                                  aria-label={`${day} ${hour}: open`}
+                                  className="flex h-7 w-full items-center justify-center rounded-lg bg-emerald-500 font-mono text-[9px] font-black text-white shadow-xs"
+                                >
+                                  OPEN
+                                </div>
+                              ) : (
+                                <div
+                                  aria-label={`${day} ${hour}: unavailable`}
+                                  className="flex h-7 w-full items-center justify-center rounded-lg bg-[#F9F5EC]/30 font-mono text-[9px] font-bold text-slate-300"
+                                >
+                                  —
+                                </div>
+                              )}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* ACTION BUTTONS */}
+            <div className="flex flex-col gap-3 pt-2 sm:flex-row">
               <button
                 type="button"
                 onClick={() => setShowGridEditor(true)}
-                className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-2xl bg-orange-500 px-5 py-3.5 text-sm font-black text-white shadow-xl shadow-orange-950/30 transition-all duration-300 hover:scale-[1.01] hover:bg-orange-400"
+                className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-2xl bg-orange-500 px-6 py-3.5 text-sm font-black text-white shadow-xl shadow-orange-950/20 transition-all duration-300 hover:scale-[1.01] hover:bg-orange-400"
               >
                 <Edit3 className="h-4 w-4" aria-hidden="true" />
-                Edit availability
+                Edit availability schedule
               </button>
               <Link
                 href="/rbt"
-                className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-white/15 bg-white/5 px-5 py-3.5 text-sm font-black text-slate-100 transition-all duration-300 hover:border-orange-400/40 hover:bg-white/10"
+                className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-[#E2D5B7] bg-[#F9F5EC] px-6 py-3.5 text-sm font-black text-slate-800 transition-all duration-300 hover:bg-white"
               >
                 <ClipboardList className="h-4 w-4" aria-hidden="true" />
-                My Tasks
+                Go to My Tasks
               </Link>
               {snapshot.isHired ? (
                 <Link
                   href="/rbt/job-board"
-                  className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-emerald-300/20 bg-emerald-400/10 px-5 py-3.5 text-sm font-black text-emerald-100 transition-all duration-300 hover:scale-[1.01] hover:border-emerald-300/40 hover:bg-emerald-400/15"
+                  className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-emerald-300 bg-emerald-100 px-6 py-3.5 text-sm font-black text-emerald-900 transition-all duration-300 hover:scale-[1.01] hover:bg-emerald-200"
                 >
                   <Briefcase className="h-4 w-4" aria-hidden="true" />
-                  Job Board
+                  View Job Board
                 </Link>
-              ) : (
-                <div
-                  role="status"
-                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-amber-300/20 bg-amber-400/10 px-5 py-3.5 text-sm font-black text-amber-100"
-                >
-                  <LockKeyhole className="h-4 w-4" aria-hidden="true" />
-                  Job Board unlocks at HIRED
-                </div>
-              )}
+              ) : null}
             </div>
           </div>
         </section>
+
+        {/* PROMPT TO COMPLETE OTHER REQUIREMENTS */}
+        <OnboardingNextStepsPrompt currentTab="AVAILABILITY" />
+
         <p className="sr-only" aria-live="polite">
           {announcement}
         </p>
@@ -544,39 +604,39 @@ export function RbtAvailabilityView({
   }
 
   return (
-    <main className="relative mx-auto max-w-6xl space-y-6 pb-12 text-white">
-      <div className="pointer-events-none absolute inset-0 -z-10 rounded-[2.5rem] bg-[radial-gradient(circle_at_top_right,_rgba(249,115,22,0.18),_transparent_42%),radial-gradient(circle_at_bottom_left,_rgba(14,165,233,0.12),_transparent_48%)]" />
+    <main className="relative mx-auto max-w-6xl space-y-6 pb-12 text-slate-900">
+      <div className="pointer-events-none absolute inset-0 -z-10 rounded-[2.5rem] bg-[radial-gradient(circle_at_top_right,_rgba(249,115,22,0.08),_transparent_42%),radial-gradient(circle_at_bottom_left,_rgba(14,165,233,0.06),_transparent_48%)]" />
 
-      <header className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-slate-950 p-6 shadow-2xl shadow-slate-950/30 sm:p-8">
-        <div className="pointer-events-none absolute -right-14 -top-14 h-44 w-44 rounded-full bg-orange-500/15 blur-3xl" />
+      <header className="relative overflow-hidden rounded-[2rem] border border-[#E2D5B7] bg-[#FFFDF8] p-6 shadow-xl sm:p-8">
+        <div className="pointer-events-none absolute -right-14 -top-14 h-44 w-44 rounded-full bg-orange-400/10 blur-3xl" />
         <div className="relative flex flex-col justify-between gap-5 sm:flex-row sm:items-center">
           <div className="flex items-start gap-4">
-            <div className="flex h-13 w-13 shrink-0 items-center justify-center rounded-2xl bg-orange-500 text-white shadow-xl shadow-orange-950/40">
+            <div className="flex h-13 w-13 shrink-0 items-center justify-center rounded-2xl bg-orange-500 text-white shadow-xl shadow-orange-950/20">
               <Clock3 className="h-6 w-6" aria-hidden="true" />
             </div>
             <div>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded-full border border-orange-300/20 bg-orange-400/10 px-3 py-1 font-mono text-[10px] font-black uppercase tracking-[0.18em] text-orange-200">
+                <span className="rounded-full border border-orange-400/30 bg-orange-400/10 px-3 py-1 font-mono text-[10px] font-black uppercase tracking-[0.18em] text-[#C2410C]">
                   America/New_York
                 </span>
-                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 font-mono text-[10px] font-black uppercase tracking-[0.16em] text-slate-300">
+                <span className="rounded-full border border-white/10 bg-white/50 px-3 py-1 font-mono text-[10px] font-black uppercase tracking-[0.16em] text-slate-700">
                   {snapshot.isHired ? 'Active RBT' : `ATS · ${snapshot.stage}`}
                 </span>
               </div>
-              <h1 className="mt-3 font-heading text-2xl font-black tracking-tight sm:text-3xl">
+              <h1 className="mt-3 font-heading text-2xl font-black tracking-tight text-slate-900 sm:text-3xl">
                 Weekly availability
               </h1>
-              <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-slate-300">
+              <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-slate-600">
                 Set recurring Eastern Time windows for staffing and case matching. Changes
                 count as saved only after the server confirms the database write.
               </p>
             </div>
           </div>
-          <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-right">
+          <div className="rounded-2xl border border-[#E2D5B7] bg-[#F9F5EC] px-4 py-3 text-right">
             <p className="font-mono text-[9px] font-black uppercase tracking-[0.18em] text-slate-500">
               Open time
             </p>
-            <p className="mt-1 font-heading text-xl font-black text-orange-300">
+            <p className="mt-1 font-heading text-xl font-black text-[#C2410C]">
               {selectedHours} hr
             </p>
           </div>
@@ -586,9 +646,9 @@ export function RbtAvailabilityView({
       {snapshot.needsRepair && (
         <div
           role="alert"
-          className="flex items-start gap-3 rounded-2xl border border-amber-300/20 bg-amber-400/10 px-4 py-3.5 text-sm font-semibold text-amber-100 shadow-lg shadow-amber-950/10"
+          className="flex items-start gap-3 rounded-2xl border border-amber-300/40 bg-amber-50 px-4 py-3.5 text-sm font-semibold text-amber-900 shadow-lg shadow-amber-950/10"
         >
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" aria-hidden="true" />
           <span>
             The database says this step was complete, but its schedule or travel profile is
             incomplete. Review and save to repair the persisted record.
@@ -602,14 +662,14 @@ export function RbtAvailabilityView({
         className="space-y-6"
         noValidate
       >
-        <section className="overflow-hidden rounded-[2rem] border border-white/10 bg-slate-950 shadow-2xl shadow-slate-950/20 transition-all duration-300 hover:border-orange-400/25">
-          <div className="flex flex-col justify-between gap-4 border-b border-white/10 p-5 sm:flex-row sm:items-center sm:p-7">
+        <section className="overflow-hidden rounded-[2rem] border border-[#E2D5B7] bg-[#FFFDF8] shadow-xl transition-all duration-300 hover:border-orange-400/40">
+          <div className="flex flex-col justify-between gap-4 border-b border-[#E2D5B7] p-5 sm:flex-row sm:items-center sm:p-7">
             <div>
-              <h2 className="flex items-center gap-2 font-heading text-lg font-black">
-                <Sparkles className="h-5 w-5 text-orange-300" aria-hidden="true" />
+              <h2 className="flex items-center gap-2 font-heading text-lg font-black text-slate-900">
+                <Sparkles className="h-5 w-5 text-[#F97316]" aria-hidden="true" />
                 Recurring hourly windows
               </h2>
-              <p id="availability-grid-help" className="mt-1 text-xs font-medium text-slate-400">
+              <p id="availability-grid-help" className="mt-1 text-xs font-medium text-slate-600">
                 Each cell is a half-open one-hour window in ET; for example, 8 PM means
                 8:00–9:00 PM. New York daylight-saving changes apply automatically.
               </p>
@@ -693,8 +753,8 @@ export function RbtAvailabilityView({
                             onDragStart={(event) => event.preventDefault()}
                             className={`min-h-10 w-full cursor-pointer rounded-xl border px-1 py-2 font-mono text-[9px] font-black transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-300 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 ${
                               selected
-                                ? 'border-emerald-300/45 bg-emerald-400 text-emerald-950 shadow-[0_0_16px_rgba(52,211,153,0.24)] hover:bg-emerald-300'
-                                : 'border-white/[0.07] bg-white/[0.035] text-transparent hover:border-orange-300/30 hover:bg-orange-400/10'
+                                ? 'border-emerald-300/45 bg-emerald-500 text-white shadow-[0_0_16px_rgba(52,211,153,0.24)] hover:bg-emerald-600'
+                                : 'border-[#E2D5B7] bg-[#F9F5EC] text-slate-400 hover:border-orange-400/40 hover:bg-orange-100/50'
                             }`}
                           >
                             {selected ? 'OPEN' : '—'}
@@ -710,11 +770,11 @@ export function RbtAvailabilityView({
         </section>
 
         <div className="grid gap-6 lg:grid-cols-2">
-          <fieldset className="rounded-[2rem] border border-white/10 bg-slate-950 p-6 shadow-xl transition-all duration-300 hover:scale-[1.01] hover:border-orange-400/25 hover:shadow-2xl">
-            <legend className="px-2 font-heading text-base font-black text-white">
+          <fieldset className="rounded-[2rem] border border-[#E2D5B7] bg-[#FFFDF8] p-6 shadow-xl transition-all duration-300 hover:scale-[1.01] hover:border-orange-400/30 hover:shadow-2xl">
+            <legend className="px-2 font-heading text-base font-black text-slate-900">
               Transportation &amp; radius
             </legend>
-            <p className="mt-1 text-xs font-medium text-slate-400">
+            <p className="mt-1 text-xs font-medium text-slate-600">
               Used only for travel-aware case matching.
             </p>
 
@@ -739,8 +799,8 @@ export function RbtAvailabilityView({
                     }}
                     className={`flex cursor-pointer flex-col items-center gap-2 rounded-2xl border p-3 text-xs font-black transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-300 ${
                       active
-                        ? 'border-orange-300/60 bg-orange-500 text-white shadow-xl shadow-orange-950/30'
-                        : 'border-white/10 bg-white/5 text-slate-300 hover:border-orange-300/30 hover:bg-white/10'
+                        ? 'border-orange-400 bg-orange-500 text-white shadow-xl shadow-orange-950/20'
+                        : 'border-[#E2D5B7] bg-[#F9F5EC] text-slate-700 hover:border-orange-300 hover:bg-white'
                     }`}
                   >
                     <Icon className="h-4 w-4" aria-hidden="true" />
@@ -785,11 +845,11 @@ export function RbtAvailabilityView({
             </div>
           </fieldset>
 
-          <fieldset className="rounded-[2rem] border border-white/10 bg-slate-950 p-6 shadow-xl transition-all duration-300 hover:scale-[1.01] hover:border-orange-400/25 hover:shadow-2xl">
-            <legend className="px-2 font-heading text-base font-black text-white">
+          <fieldset className="rounded-[2rem] border border-[#E2D5B7] bg-[#FFFDF8] p-6 shadow-xl transition-all duration-300 hover:scale-[1.01] hover:border-orange-400/30 hover:shadow-2xl">
+            <legend className="px-2 font-heading text-base font-black text-slate-900">
               Preferred NYC boroughs
             </legend>
-            <p className="mt-1 text-xs font-medium text-slate-400">
+            <p className="mt-1 text-xs font-medium text-slate-600">
               Select every borough where you are willing to accept a case.
             </p>
             <div className="mt-5 flex flex-wrap gap-2.5">
@@ -803,8 +863,8 @@ export function RbtAvailabilityView({
                     onClick={() => toggleBorough(borough)}
                     className={`cursor-pointer rounded-2xl border px-4 py-3 text-xs font-black transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-300 ${
                       active
-                        ? 'border-orange-300/60 bg-orange-500 text-white shadow-lg shadow-orange-950/30'
-                        : 'border-white/10 bg-white/5 text-slate-300 hover:border-orange-300/30 hover:bg-white/10'
+                        ? 'border-orange-400 bg-orange-500 text-white shadow-lg shadow-orange-950/20'
+                        : 'border-[#E2D5B7] bg-[#F9F5EC] text-slate-700 hover:border-orange-300 hover:bg-white'
                     }`}
                   >
                     {active ? `✓ ${borough}` : `+ ${borough}`}
@@ -831,7 +891,7 @@ export function RbtAvailabilityView({
               type="button"
               onClick={cancelEditing}
               disabled={saving}
-              className="inline-flex cursor-pointer items-center justify-center rounded-2xl border border-white/15 bg-slate-950 px-6 py-4 text-sm font-black text-slate-200 transition-all duration-300 hover:border-white/25 hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex cursor-pointer items-center justify-center rounded-2xl border border-[#E2D5B7] bg-[#F9F5EC] hover:bg-white px-6 py-4 text-sm font-black text-slate-800 transition-all duration-300 disabled:cursor-not-allowed disabled:opacity-60"
             >
               Discard changes
             </button>

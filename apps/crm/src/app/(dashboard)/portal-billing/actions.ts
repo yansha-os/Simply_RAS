@@ -26,6 +26,11 @@ import {
   submitPaRequest,
   submitTreatmentPaRequest,
 } from '@/app/(dashboard)/portal-case/actions/billing';
+import { billingPaQueueHref } from '@/lib/clientProfileTabs';
+import { notifyAssessmentPaDecisionHandoff } from '@/lib/intakeWorkflowNotifications';
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export type BillingQueueActionResult = { success: boolean; error?: string };
 
@@ -73,6 +78,17 @@ async function notifyPaDecision(input: PaDecisionNotificationInput) {
     });
     if (current?.status !== input.decision) return;
 
+    if (input.paType === 'ASSESSMENT') {
+      await notifyAssessmentPaDecisionHandoff({
+        clientId: input.clientId,
+        clientName: input.clientName,
+        decision: input.decision,
+        actorUserId: input.actorId,
+        reason: input.reason,
+      });
+      return;
+    }
+
     const fallbackRecipients = input.caseCoordinatorId
       ? []
       : await prisma.user.findMany({
@@ -86,7 +102,7 @@ async function notifyPaDecision(input: PaDecisionNotificationInput) {
         : fallbackRecipients.map((user) => user.id)
     ).filter((userId) => userId !== input.actorId);
 
-    const paLabel = input.paType === 'TREATMENT' ? 'Treatment PA' : 'Assessment PA';
+    const paLabel = 'Treatment PA';
     const approved = input.decision === 'APPROVED';
     const reasonSnippet = input.reason?.replace(/\s+/g, ' ').trim().slice(0, 120);
 
@@ -97,7 +113,7 @@ async function notifyPaDecision(input: PaDecisionNotificationInput) {
         ? `${input.clientName}'s ${paLabel} was approved. Review the authorization and coordinate next steps.`
         : `${input.clientName}'s ${paLabel} was denied. Review the billing record and next steps.${reasonSnippet ? ` Reason: ${reasonSnippet}` : ''}`,
       type: approved ? 'INFO' : 'ALERT',
-      linkUrl: `/client/${input.clientId}?mode=billing`,
+      linkUrl: billingPaQueueHref(input.clientId, input.paType),
       dedupeHours: 24,
     });
   } catch (notifyError) {
@@ -159,13 +175,13 @@ export async function recordPaApproval(
   if (!gate.ok) return { success: false, error: gate.error };
 
   const authNumber = input.authNumber.trim();
-  const approvedUnits = Math.trunc(Number(input.approvedUnits));
+  const approvedUnits = Number(input.approvedUnits);
   const effectiveDate = new Date(input.effectiveDate);
   const expirationDate = new Date(input.expirationDate);
 
   if (!authNumber) return { success: false, error: 'Auth number is required.' };
-  if (!Number.isFinite(approvedUnits) || approvedUnits <= 0) {
-    return { success: false, error: 'Approved units must be a positive number.' };
+  if (!Number.isInteger(approvedUnits) || approvedUnits <= 0) {
+    return { success: false, error: 'Approved units must be a positive whole number.' };
   }
   if (Number.isNaN(effectiveDate.getTime()) || Number.isNaN(expirationDate.getTime())) {
     return { success: false, error: 'Effective and expiration dates are both required.' };
@@ -230,9 +246,12 @@ export async function recordPaDenial(
 ): Promise<BillingQueueActionResult> {
   const gate = await requireStaff(BILLING_ROLES);
   if (!gate.ok) return { success: false, error: gate.error };
+  if (!UUID_RE.test(paId)) return { success: false, error: 'PA request not found.' };
 
   const reason = input.reason.trim();
-  if (!reason) return { success: false, error: 'A denial reason is required.' };
+  if (!reason || reason.length > 5_000) {
+    return { success: false, error: 'A denial reason between 1 and 5,000 characters is required.' };
+  }
 
   try {
     const existing = await prisma.pARequest.findUnique({
@@ -252,16 +271,10 @@ export async function recordPaDenial(
     });
     if (!existing) return { success: false, error: 'PA request not found.' };
 
-    const result = toResult(await denyPaRequest(paId, input.isClinical));
+    const result = toResult(await denyPaRequest(paId, input.isClinical, reason));
     if (!result.success) return result;
 
-    const pa = await prisma.pARequest.update({
-      where: { id: paId },
-      data: { p2pNotes: reason, p2pResolved: false },
-      select: { clientId: true },
-    });
-
-    revalidateBillingQueues(pa.clientId);
+    revalidateBillingQueues(existing.clientId);
     revalidatePath('/portal-clinical'); // BCBA P2P queue reads p2pResolved
     await notifyPaDecision({
       paId,
@@ -296,14 +309,17 @@ export async function resolvePaP2p(
 ): Promise<BillingQueueActionResult> {
   const gate = await requireStaff(BILLING_ROLES);
   if (!gate.ok) return { success: false, error: gate.error };
+  if (!UUID_RE.test(paId)) return { success: false, error: 'PA request not found.' };
 
   const trimmed = notes.trim();
-  if (!trimmed) return { success: false, error: 'P2P resolution notes are required.' };
+  if (!trimmed || trimmed.length > 5_000) {
+    return { success: false, error: 'P2P resolution notes between 1 and 5,000 characters are required.' };
+  }
 
   try {
     const existing = await prisma.pARequest.findUnique({
       where: { id: paId },
-      select: { status: true, clientId: true },
+      select: { status: true, clientId: true, updatedAt: true, p2pResolved: true },
     });
     if (!existing) return { success: false, error: 'PA request not found.' };
     if (existing.status !== 'DENIED_CLINICAL') {
@@ -313,10 +329,19 @@ export async function resolvePaP2p(
       };
     }
 
-    await prisma.pARequest.update({
-      where: { id: paId },
+    const resolved = await prisma.pARequest.updateMany({
+      where: {
+        id: paId,
+        clientId: existing.clientId,
+        status: 'DENIED_CLINICAL',
+        updatedAt: existing.updatedAt,
+        p2pResolved: existing.p2pResolved,
+      },
       data: { p2pResolved: true, p2pNotes: trimmed },
     });
+    if (resolved.count !== 1) {
+      return { success: false, error: 'The PA changed in another session. Refresh and try again.' };
+    }
 
     revalidateBillingQueues(existing.clientId);
     revalidatePath('/portal-clinical');

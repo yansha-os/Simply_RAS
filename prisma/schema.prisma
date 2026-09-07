@@ -23,6 +23,7 @@ enum Role {
   OPS_DIRECTOR
   INTAKE_PA_COORDINATOR
   CASE_COORDINATOR
+  SESSION_NOTES_COORDINATOR
   CLINICAL_SUPPORT
   BILLING
   BCBA
@@ -51,6 +52,13 @@ enum ClientStatus {
   DISCHARGED
 }
 
+/// Artemis dual-run cohort mode — per-client pilot tracking (Phase 1).
+enum DualRunMode {
+  D0_SHADOW
+  D1_DUAL_WRITE
+  D2_RAS_PRIMARY
+}
+
 enum IntakePacketStatus {
   PENDING_CLIENT_SUBMISSION
   SUBMITTED
@@ -65,6 +73,12 @@ enum PARequestStatus {
   DENIED_CLERICAL
   DENIED_CLINICAL
   APPROVED
+}
+
+enum ClaimOutcome {
+  APPROVED
+  DENIED_CLERICAL
+  DENIED_CLINICAL
 }
 
 enum DocumentType {
@@ -176,15 +190,22 @@ model Client {
   medicaidId      String?
   status          ClientStatus @default(INQUIRY)
   
-  // Contacts
-  guardianName    String?
-  parentGender    String?
-  parentAddress   String?
-  guardianPhone   String?
-  guardianEmail   String?
+  // Contacts & Guardians
+  guardianName            String?
+  parentGender            String?
+  parentAddress           String?
+  guardianPhone           String?
+  guardianEmail           String?
+  secondaryGuardianName   String?
+  secondaryGuardianPhone  String?
+  secondaryGuardianEmail  String?
 
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
+  // Clinical EMR Diagnosis & Chart
+  primaryDiagnosisCode    String?
+  secondaryDiagnosisCode  String?
+
+  createdAt               DateTime     @default(now())
+  updatedAt               DateTime     @updatedAt
 
   // Clinical & Ops Team
   caseCoordinatorId String?    @db.Uuid
@@ -192,7 +213,11 @@ model Client {
   bcbaId            String?    @db.Uuid
   rbtId             String?    @db.Uuid
   rbtApproved       Boolean    @default(false)
-  
+
+  /// Ops-assigned dual-run pilot cohort label (e.g. "pilot-week1-2026").
+  dualRunCohort     String?
+  dualRunMode       DualRunMode?
+
   caseCoordinator   User?      @relation("CaseCoordinator", fields: [caseCoordinatorId], references: [id])
   clinicalSupport   User?      @relation("ClinicalSupport", fields: [clinicalSupportId], references: [id])
   bcba              User?      @relation("BCBASupervisor", fields: [bcbaId], references: [id])
@@ -216,6 +241,9 @@ model Client {
   appointments    ScheduleAppointment[]
   reAuthPackets   ReAuthPacket[]
   caseOpenings    CaseOpening[]
+  notifications   Notification[]
+
+  @@index([dualRunCohort])
 }
 
 model Document {
@@ -316,6 +344,7 @@ model SessionNote {
   plutusClaimRef     String?   // manual Plutus tracker claim / batch id
   convertedAt        DateTime?
   isConverted        Boolean   @default(false) // Billable status — CRM /notes only
+  claimOutcome       ClaimOutcome? // payer adjudication after isConverted
 
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
@@ -369,9 +398,7 @@ model RbtOnboarding {
   bacbVerified        Boolean  @default(false)
   backgroundCleared   Boolean  @default(false)
   trainingsComplete   Boolean  @default(false)
-  // Legacy column name (pre-cutover). UI copy reads "EMR account setup" — keep the
-  // column name to avoid destructive DDL; rename only at a future major migration.
-  artemisAccountSetup Boolean  @default(false)
+  clinicalEmrProvisioned Boolean  @default(false)
   payrollComplete     Boolean  @default(false)
   payerCredentialed   Boolean  @default(false)
   planOrientationDate DateTime?
@@ -511,6 +538,7 @@ model GoalTemplate {
 model Notification {
   id        String   @id @default(uuid()) @db.Uuid
   userId    String?  @db.Uuid
+  clientId  String?  @db.Uuid
   title     String
   message   String   @db.Text
   type      String   @default("INFO") // INFO, WARNING, ALERT
@@ -519,6 +547,10 @@ model Notification {
   createdAt DateTime @default(now())
 
   user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  client    Client?  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, isRead])
+  @@index([userId, isRead])
 }
 
 // ------------------------------------------------------
@@ -616,9 +648,16 @@ model EVVLog {
   clockInTimestamp   DateTime  @default(now())
   clockOutTimestamp  DateTime?
 
+  // State EVV Aggregator Sync (Cures Act Direct Integration)
+  aggregatorVendor       String?   // HHAEXCHANGE | SANDATA | TELLUS
+  aggregatorStatus       String?   @default("PENDING") // PENDING | SUBMITTED | ACCEPTED | REJECTED
+  aggregatorResponseId   String?
+  aggregatorSubmittedAt DateTime?
+
   session            Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   staff              User      @relation(fields: [staffId], references: [id], onDelete: Cascade)
 }
+
 
 // ------------------------------------------------------
 // INTELLIGENT SCHEDULING MODELS (PHASE 5)

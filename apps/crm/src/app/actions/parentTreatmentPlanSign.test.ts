@@ -7,7 +7,7 @@ const PARENT_GATE_ERROR =
 
 const mocks = vi.hoisted(() => ({
   prisma: {
-    client: { findUnique: vi.fn(), update: vi.fn() },
+    client: { findUnique: vi.fn(), updateMany: vi.fn() },
   },
   requireParentPacketAccess: vi.fn(),
   writeAuditLog: vi.fn(),
@@ -42,6 +42,7 @@ beforeEach(() => {
   mocks.prisma.client.findUnique.mockResolvedValue({
     id: CLIENT_ID,
     status: 'ASSESSMENT_SCHEDULED',
+    updatedAt: new Date('2026-09-05T18:00:00.000Z'),
     guardianName: 'Jane Parent',
     treatmentPlan: {
       status: 'COMPLETED',
@@ -55,7 +56,7 @@ beforeEach(() => {
       magicLinkToken: 'tok',
     },
   });
-  mocks.prisma.client.update.mockResolvedValue({});
+  mocks.prisma.client.updateMany.mockResolvedValue({ count: 1 });
   mocks.writeAuditLog.mockResolvedValue(undefined);
 });
 
@@ -157,7 +158,7 @@ describe('signTreatmentPlan parent hardening', () => {
       success: false,
       code: 'NOT_REVIEWED',
     });
-    expect(mocks.prisma.client.update).not.toHaveBeenCalled();
+    expect(mocks.prisma.client.updateMany).not.toHaveBeenCalled();
     expect(mocks.writeAuditLog).not.toHaveBeenCalled();
   });
 
@@ -165,7 +166,7 @@ describe('signTreatmentPlan parent hardening', () => {
     const result = await signTreatmentPlan(CLIENT_ID, 'Jane Parent');
 
     expect(result).toMatchObject({ success: false, code: 'NOT_REVIEWED' });
-    expect(mocks.prisma.client.update).not.toHaveBeenCalled();
+    expect(mocks.prisma.client.updateMany).not.toHaveBeenCalled();
   });
 
   it('rejects staff sessions that lack parent packet access', async () => {
@@ -178,7 +179,7 @@ describe('signTreatmentPlan parent hardening', () => {
 
     expect(result).toEqual({ success: false, error: PARENT_GATE_ERROR });
     expect(mocks.prisma.client.findUnique).not.toHaveBeenCalled();
-    expect(mocks.prisma.client.update).not.toHaveBeenCalled();
+    expect(mocks.prisma.client.updateMany).not.toHaveBeenCalled();
     expect(mocks.writeAuditLog).not.toHaveBeenCalled();
   });
 
@@ -186,13 +187,14 @@ describe('signTreatmentPlan parent hardening', () => {
     const result = await signTreatmentPlan(CLIENT_ID, '   ', { planReviewed: true });
 
     expect(result).toMatchObject({ success: false, code: 'EMPTY_NAME' });
-    expect(mocks.prisma.client.update).not.toHaveBeenCalled();
+    expect(mocks.prisma.client.updateMany).not.toHaveBeenCalled();
   });
 
   it('fails closed when guardian name is missing on packet and client', async () => {
     mocks.prisma.client.findUnique.mockResolvedValue({
       id: CLIENT_ID,
       status: 'ASSESSMENT_SCHEDULED',
+      updatedAt: new Date('2026-09-05T18:00:00.000Z'),
       guardianName: null,
       treatmentPlan: { status: 'COMPLETED' },
       intakePacket: { id: PACKET_ID, formData: {}, magicLinkToken: 'tok' },
@@ -201,7 +203,7 @@ describe('signTreatmentPlan parent hardening', () => {
     const result = await signTreatmentPlan(CLIENT_ID, 'Jane Parent', { planReviewed: true });
 
     expect(result).toMatchObject({ success: false, code: 'NO_GUARDIAN' });
-    expect(mocks.prisma.client.update).not.toHaveBeenCalled();
+    expect(mocks.prisma.client.updateMany).not.toHaveBeenCalled();
   });
 
   it('writes SIGN audit with ids only and soft-mismatch warning', async () => {
@@ -212,8 +214,8 @@ describe('signTreatmentPlan parent hardening', () => {
       nameMatched: false,
       warning: expect.stringContaining('does not match'),
     });
-    expect(mocks.prisma.client.update).toHaveBeenCalledTimes(1);
-    const updateArg = mocks.prisma.client.update.mock.calls[0][0];
+    expect(mocks.prisma.client.updateMany).toHaveBeenCalledTimes(1);
+    const updateArg = mocks.prisma.client.updateMany.mock.calls[0][0];
     expect(updateArg.data.treatmentPlan.parentPlanReviewed).toBe(true);
     expect(updateArg.data.treatmentPlan.parentSignature).toBe('Other Name');
 
@@ -244,5 +246,14 @@ describe('signTreatmentPlan parent hardening', () => {
         meta: expect.objectContaining({ nameMatched: true, packetId: PACKET_ID }),
       })
     );
+  });
+
+  it('rejects a stale plan version without writing a signature audit event', async () => {
+    mocks.prisma.client.updateMany.mockResolvedValue({ count: 0 });
+
+    const result = await signTreatmentPlan(CLIENT_ID, 'Jane Parent', { planReviewed: true });
+
+    expect(result).toMatchObject({ success: false, code: 'PLAN_STALE' });
+    expect(mocks.writeAuditLog).not.toHaveBeenCalled();
   });
 });

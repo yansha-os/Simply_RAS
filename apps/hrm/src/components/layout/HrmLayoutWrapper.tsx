@@ -35,8 +35,9 @@ export function HrmLayoutWrapper({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // RBT / APPLICANT Role defaults to Warm Soft Cream Light Mode unless explicitly saved as 'dark' in settings
-  const isRbtLightMode = (role === 'RBT' || role === 'APPLICANT') && colorMode === 'light';
+  // RBT / APPLICANT routes always render in Warm Soft Cream Light Mode
+  const isRbtRoute = pathname.startsWith('/rbt');
+  const isRbtLightMode = isRbtRoute || ((role === 'RBT' || role === 'APPLICANT') && colorMode === 'light');
 
   return (
     <div className={`flex h-screen overflow-hidden w-full transition-colors duration-300 relative z-20 ${

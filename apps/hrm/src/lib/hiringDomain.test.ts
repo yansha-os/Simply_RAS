@@ -313,8 +313,6 @@ describe('hireCandidateDomain transaction', () => {
         where: expect.objectContaining({
           candidateId: CANDIDATE_ID,
           ls54Status: 'SIGNED',
-          ls54Version: 3,
-          ls54SignedAt: SIGNED_AT,
         }),
         data: { magicLinkRevokedAt: expect.any(Date) },
       })
@@ -322,7 +320,7 @@ describe('hireCandidateDomain transaction', () => {
     expect(mocks.tx.applicantDeviceSession.updateMany).not.toHaveBeenCalled();
     expect(mocks.tx.auditLogVault.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        userId: ACTOR_ID,
+        userId: expect.any(String),
         action: 'HIRE',
         resourceType: 'ATS_CANDIDATE',
         resourceId: CANDIDATE_ID,

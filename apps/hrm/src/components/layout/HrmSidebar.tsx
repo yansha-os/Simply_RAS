@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useHrmRole, HrmRole } from '@/lib/useHrmRole';
@@ -50,7 +51,8 @@ export function HrmSidebar() {
   // Accordion state for parent tabs with sub-items
   const [isAtsSubMenuOpen, setIsAtsSubMenuOpen] = useState(true);
 
-  const isRbtLightMode = (role === 'RBT' || role === 'APPLICANT') && colorMode === 'light';
+  const isRbtRoute = pathname?.startsWith('/rbt') ?? false;
+  const isRbtLightMode = isRbtRoute || ((role === 'RBT' || role === 'APPLICANT') && colorMode === 'light');
 
   useEffect(() => {
     const loadFromDb = (force = false) => {
@@ -89,13 +91,12 @@ export function HrmSidebar() {
     };
   }, []);
 
-  // Hired candidates are official RBTs — promote UI role off APPLICANT
+  // Hired / wage-signed candidates are official RBTs — promote UI role off APPLICANT
   useEffect(() => {
-    if (!isHired) return;
     void import('@/lib/syncAtsProgress').then(({ ensureHiredAsRbtStaff }) =>
       ensureHiredAsRbtStaff()
     );
-  }, [isHired]);
+  }, []);
 
   const interviewDoneOrBooked = isInterviewDone;
 
@@ -103,6 +104,7 @@ export function HrmSidebar() {
   const showStaffRbtNav = isHired || role === 'RBT';
   const rbtNavItems: NavItem[] = showStaffRbtNav
     ? [
+        { name: 'Dashboard Overview', href: '/rbt', icon: LayoutDashboard },
         { name: 'Schedule', href: '/rbt/schedule', icon: Calendar },
         { name: 'Job Board', href: '/rbt/job-board', icon: Briefcase },
         { name: 'Communication', href: '/rbt/communication', icon: MessageSquare },
@@ -236,7 +238,7 @@ export function HrmSidebar() {
           isRbtLightMode ? 'border-[#E2D5B7]' : 'border-white/10'
         }`}>
           <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-brand-orange-500 to-amber-600 flex items-center justify-center flex-shrink-0 shadow-lg shadow-brand-orange-500/25 border border-brand-orange-400/40 hover:scale-105 transition-transform">
-            <img src="/logo.png" alt="Rise & Shine ABA Logo" className="w-8 h-8 object-contain drop-shadow-md" />
+            <Image src="/logo.png" alt="Rise & Shine ABA Logo" width={32} height={32} className="h-8 w-8 object-contain drop-shadow-md" />
           </div>
           <div>
             <div className={`font-heading font-black text-base tracking-tight opacity-0 group-hover:opacity-100 transition-opacity duration-300 ${
@@ -344,15 +346,27 @@ export function HrmSidebar() {
         <div className={`pt-3 mt-auto border-t opacity-0 group-hover:opacity-100 transition-opacity duration-300 whitespace-nowrap min-w-[230px] ${
           isRbtLightMode ? 'border-[#E2D5B7]' : 'border-white/10'
         }`}>
-          <div className="p-2.5 rounded-2xl bg-zinc-900/80 border border-white/10 flex items-center gap-2.5 text-xs">
-            <div className="w-8 h-8 rounded-xl bg-brand-orange-500/20 border border-brand-orange-500/40 text-brand-orange-400 flex items-center justify-center font-black text-xs shrink-0">
+          <div className={`p-2.5 rounded-2xl border flex items-center gap-2.5 text-xs ${
+            isRbtLightMode
+              ? 'bg-[#FFFDF8] border-[#E2D5B7] shadow-sm'
+              : 'bg-zinc-900/80 border-white/10'
+          }`}>
+            <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-black text-xs shrink-0 ${
+              isRbtLightMode
+                ? 'bg-orange-100 border border-orange-200 text-[#F97316]'
+                : 'bg-brand-orange-500/20 border border-brand-orange-500/40 text-brand-orange-400'
+            }`}>
               {hrAgentNames[role]?.[0] || (role === 'RBT' || role === 'APPLICANT' ? 'R' : '·')}
             </div>
             <div className="overflow-hidden">
-              <span className="block font-bold text-white text-[11px] truncate">
+              <span className={`block font-bold text-[11px] truncate ${
+                isRbtLightMode ? 'text-slate-900' : 'text-white'
+              }`}>
                 {hrAgentNames[role] || (role === 'NONE' ? '…' : 'Staff')}
               </span>
-              <span className="block text-[9px] font-mono text-zinc-400 uppercase tracking-wider">
+              <span className={`block text-[9px] font-mono uppercase tracking-wider ${
+                isRbtLightMode ? 'text-slate-500' : 'text-zinc-400'
+              }`}>
                 {role.replace('_', ' ')} Persona
               </span>
             </div>
