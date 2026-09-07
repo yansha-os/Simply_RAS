@@ -37,6 +37,7 @@ When a target database needs these scripts, paste them into Supabase SQL Editor 
 | 15 | [`2026-08-20-033656Z-session-note-claim-outcome.sql`](2026-08-20-033656Z-session-note-claim-outcome.sql) | `ClaimOutcome` enum + `SessionNote.claimOutcome` — **APPLY** before client-profile Claims tab adjudication actions |
 | 16 | [`2026-09-07-035344Z-database-security-advisor-hardening.sql`](2026-09-07-035344Z-database-security-advisor-hardening.sql) | Revoke public/authenticated execution of the `ensure_rls` trigger function and remove the redundant per-row service-role `Client` policy — **verified applied to `Simple_RAS_CRM_DEV` on 2026-09-07**; verify independently before applying to any other target |
 | 17 | [`2026-09-07-054051Z-foreign-key-supporting-indexes.sql`](2026-09-07-054051Z-foreign-key-supporting-indexes.sql) | Add query-shaped supporting indexes for the 26 foreign keys reported by the Supabase advisor — **verified applied to `Simple_RAS_CRM_DEV` on 2026-09-07**; verify independently before applying to any other target |
+| 18 | [`2026-09-07-180522Z-drop-empty-legacy-tables.sql`](2026-09-07-180522Z-drop-empty-legacy-tables.sql) | Remove the empty, unreferenced legacy `AuditLog`, `FirstSessionConsensus`, and `StartDatePoll` tables — **verified applied to `Simple_RAS_CRM_DEV` on 2026-09-07**; destructive, guarded, and intentionally fails if any table contains data or has a dependency |
 
 Storage size source of truth for security review: CRM `client-documents` is **5 MiB** (`5,242,880` bytes), HRM `ats-applicant-docs` is **10 MiB** (`10,485,760` bytes), and `ats-interview-recordings` is **50 MiB** (`52,428,800` bytes) per the current named constants and tests. These limits and MIME allowlists were **verified in `Simple_RAS_CRM_DEV` on 2026-09-07**. No current 200 MiB recording constant exists. The RLS hardening script is policy-only and does **not** alter bucket metadata; any Dashboard cap change is separate.
 
@@ -64,6 +65,7 @@ Full walkthrough (apps, intake → payroll): [`docs/superpowers/specs/2026-08-11
 | [`2026-08-20-033656Z-session-note-claim-outcome.sql`](2026-08-20-033656Z-session-note-claim-outcome.sql) | `ClaimOutcome` enum + `SessionNote.claimOutcome` for payer adjudication on filed claims — **APPLY** with client-profile Claims tab |
 | [`2026-09-07-035344Z-database-security-advisor-hardening.sql`](2026-09-07-035344Z-database-security-advisor-hardening.sql) | Advisor hardening: retain automatic RLS enablement while revoking direct untrusted execution, and remove the redundant service-role `Client` policy |
 | [`2026-09-07-054051Z-foreign-key-supporting-indexes.sql`](2026-09-07-054051Z-foreign-key-supporting-indexes.sql) | Query-shaped supporting indexes for all live foreign keys flagged by the Supabase performance advisor |
+| [`2026-09-07-180522Z-drop-empty-legacy-tables.sql`](2026-09-07-180522Z-drop-empty-legacy-tables.sql) | Guarded removal of three empty legacy tables with no Prisma or application ownership |
 
 ## Older numbered SQL
 
