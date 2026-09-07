@@ -35,8 +35,9 @@ When a target database needs these scripts, paste them into Supabase SQL Editor 
 | 13 | [`2026-08-20-012800Z-dual-run-cohort-fields.sql`](2026-08-20-012800Z-dual-run-cohort-fields.sql) | `Client.dualRunCohort` + `Client.dualRunMode` (`DualRunMode` enum) + index — **APPLY** before sandbox/pilot cohort tagging in `/portal-billing/audit` |
 | 14 | [`2026-08-20-015300Z-clinical-emr-provisioned-rename.sql`](2026-08-20-015300Z-clinical-emr-provisioned-rename.sql) | Rename `RbtOnboarding.artemisAccountSetup` → `clinicalEmrProvisioned` — **APPLY** with Phase 4 pre-prod deploy (idempotent; no-op if already renamed) |
 | 15 | [`2026-08-20-033656Z-session-note-claim-outcome.sql`](2026-08-20-033656Z-session-note-claim-outcome.sql) | `ClaimOutcome` enum + `SessionNote.claimOutcome` — **APPLY** before client-profile Claims tab adjudication actions |
+| 16 | [`2026-09-07-035344Z-database-security-advisor-hardening.sql`](2026-09-07-035344Z-database-security-advisor-hardening.sql) | Revoke public/authenticated execution of the `ensure_rls` trigger function and remove the redundant per-row service-role `Client` policy — **verified applied to `Simple_RAS_CRM_DEV` on 2026-09-07**; verify independently before applying to any other target |
 
-Storage size source of truth for security review: CRM `client-documents` is **5 MiB** (`5,242,880` bytes), HRM `ats-applicant-docs` is **10 MiB** (`10,485,760` bytes), and `ats-interview-recordings` is **50 MiB** (`52,428,800` bytes) per the current named constants and tests. No current 200 MiB recording constant exists. The RLS hardening script is policy-only and does **not** alter bucket metadata; any Dashboard cap change is separate.
+Storage size source of truth for security review: CRM `client-documents` is **5 MiB** (`5,242,880` bytes), HRM `ats-applicant-docs` is **10 MiB** (`10,485,760` bytes), and `ats-interview-recordings` is **50 MiB** (`52,428,800` bytes) per the current named constants and tests. These limits and MIME allowlists were **verified in `Simple_RAS_CRM_DEV` on 2026-09-07**. No current 200 MiB recording constant exists. The RLS hardening script is policy-only and does **not** alter bucket metadata; any Dashboard cap change is separate.
 
 Manual SQL Editor runs do not create a repository execution ledger. Observed catalog state may show that required objects exist, but only explicit human confirmation can establish a manual execution record.
 
@@ -60,6 +61,7 @@ Full walkthrough (apps, intake → payroll): [`docs/superpowers/specs/2026-08-11
 | [`2026-08-20-012800Z-dual-run-cohort-fields.sql`](2026-08-20-012800Z-dual-run-cohort-fields.sql) | Sandbox/pilot cohort fields on `Client` (`dualRunCohort`, `dualRunMode`, index) — **APPLY** before Phase 1 cohort tagging |
 | [`2026-08-20-015300Z-clinical-emr-provisioned-rename.sql`](2026-08-20-015300Z-clinical-emr-provisioned-rename.sql) | Rename `RbtOnboarding.artemisAccountSetup` → `clinicalEmrProvisioned` — **APPLY** with Phase 4 pre-prod deploy |
 | [`2026-08-20-033656Z-session-note-claim-outcome.sql`](2026-08-20-033656Z-session-note-claim-outcome.sql) | `ClaimOutcome` enum + `SessionNote.claimOutcome` for payer adjudication on filed claims — **APPLY** with client-profile Claims tab |
+| [`2026-09-07-035344Z-database-security-advisor-hardening.sql`](2026-09-07-035344Z-database-security-advisor-hardening.sql) | Advisor hardening: retain automatic RLS enablement while revoking direct untrusted execution, and remove the redundant service-role `Client` policy |
 
 ## Older numbered SQL
 
