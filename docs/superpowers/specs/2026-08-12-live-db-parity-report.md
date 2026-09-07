@@ -61,6 +61,16 @@ Prisma's offline generated DDL defines 58 foreign keys. `Simple_RAS_CRM_DEV` has
 
 Current classification: **zero actionable foreign-key gaps**. Revisit the accepted `ON UPDATE` drift only if the system ever supports changing primary identifiers, and retire the two `ScheduleAppointment` constraints with that dead table if the approved calendar-unification cleanup is executed.
 
+## Column-default audit — 2026-09-07
+
+A read-only catalog comparison checked all 171 fields with `@default(...)` in `prisma/schema.prisma`, normalizing equivalent PostgreSQL spellings such as `CURRENT_TIMESTAMP`/`now()`, enum/text casts, JSONB casts, and database-side `gen_random_uuid()` for Prisma `uuid()` defaults.
+
+- **Zero missing defaults and zero conflicting default values.**
+- DEV has 11 additional `now()` defaults, exclusively on Prisma `@updatedAt` columns: `ScheduleAppointment`, `ReAuthPacket`, `AtsInterview`, `AtsCandidate`, `AtsHelpTicket`, `CandidateOnboardingPacket`, `CaseApplication`, `CaseOpening`, `SkillTarget`, `BehaviorTarget`, and `StaffCredential`.
+- These additional defaults are intentionally accepted. They make direct SQL inserts safer, while Prisma's `@updatedAt` behavior still supplies subsequent update timestamps. Removing them would not improve application correctness or performance.
+
+Current classification: **zero actionable column-default gaps**.
+
 ## Fully matching tables (21 of 36 exact; the other 15 differ only by the items above)
 
 User, Client, Document, Authorization, AuthCptCode, Session, ContactLog, RbtOnboarding, NoteDeficiency, PARequest, GoalTemplate, Notification, SkillTarget, SessionTrialData, BehaviorTarget, BehaviorLog, StaffCredential, EVVLog, ScheduleAppointment, AuditLogVault, AtsCandidate
