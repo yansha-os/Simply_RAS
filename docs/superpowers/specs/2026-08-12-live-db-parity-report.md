@@ -82,6 +82,17 @@ A read-only `pg_constraint`/`pg_index` comparison against Prisma's offline gener
 
 Current classification: **zero actionable primary-key, uniqueness, or check-constraint gaps**.
 
+## Physical column-type audit — 2026-09-07
+
+A full read-only comparison covered every Prisma scalar field and its live PostgreSQL column, including native UUIDs, text, integers, bigints, double precision, booleans, JSONB, enums, and timestamp precision/time-zone behavior.
+
+- Prisma defines 462 scalar columns and DEV contains exactly 462 corresponding public-table columns: zero missing and zero extra.
+- All non-time types match exactly. In particular, `AtsInterviewRecording.byteSize` is correctly represented as Prisma `BigInt?` and PostgreSQL `bigint`; it is not live-only drift.
+- The only 39 differences are the previously documented `timestamp(3) without time zone` Prisma defaults versus live `timestamptz(6)` columns. They are intentionally accepted because absolute instants are safer for scheduling, signatures, magic-link expiry, audit events, and cross-time-zone processing. Prisma maps both to JavaScript `Date` without breaking current reads or writes.
+- Downgrading live columns would lose time-zone semantics, while annotating 39 Prisma fields solely to silence offline diff output provides no user-visible improvement. Neither change is justified during stabilization.
+
+Current classification: **zero actionable physical column-type gaps**.
+
 ## Fully matching tables (21 of 36 exact; the other 15 differ only by the items above)
 
 User, Client, Document, Authorization, AuthCptCode, Session, ContactLog, RbtOnboarding, NoteDeficiency, PARequest, GoalTemplate, Notification, SkillTarget, SessionTrialData, BehaviorTarget, BehaviorLog, StaffCredential, EVVLog, ScheduleAppointment, AuditLogVault, AtsCandidate
