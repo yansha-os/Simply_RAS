@@ -34,7 +34,7 @@ Live DB: 39 tables, 477 columns, 13 enums. Schema: 36 models, 13 enums.
 
 ### 1. `ActionItem.creatorId` — resolved 2026-09-07
 
-Schema declares `creatorId String? @db.Uuid`; the live column was `NOT NULL`. The current action supplies the authenticated creator ID, but the database now also matches the optional Prisma field. Prisma does not declare `onDelete: SetNull` for this relation, so the existing `RESTRICT` rule remains intentional.
+Schema declares `creatorId String? @db.Uuid`; the live column was `NOT NULL`. The current action supplies the authenticated creator ID, but the database now also matches the optional Prisma field. Prisma's generated DDL assigns `ON DELETE SET NULL` to this optional relation; the follow-up [`2026-09-07-182830Z-action-item-creator-delete-rule.sql`](../../sql/2026-09-07-182830Z-action-item-creator-delete-rule.sql) corrects the historical live `RESTRICT` drift.
 
 ### 2. `ReAuthPacket.attendancePct` — resolved 2026-09-07
 
