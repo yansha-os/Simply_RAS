@@ -327,6 +327,19 @@ Before rollout, prove at minimum:
 
 Run negative tests before positive tests are accepted as evidence.
 
+## DEV least-privilege verification — 2026-09-07
+
+The public-schema grant reduction in [`../../sql/2026-09-07-192400Z-public-schema-least-privilege.sql`](../../sql/2026-09-07-192400Z-public-schema-least-privilege.sql) was applied and independently catalog-verified on `Simple_RAS_CRM_DEV`:
+
+- `anon`/`authenticated` public-table grants: **0** (previously 252 each across 36 tables).
+- `PUBLIC`/`anon`/`authenticated` public-routine grants: **0**.
+- Untrusted explicit default privileges for future `postgres`-owned public objects: **0**.
+- `service_role` public-table grants remain intact: **252**.
+- All 36 public application tables still have RLS enabled.
+- `anon` and `authenticated` retain schema `USAGE` for Supabase Auth/Storage plumbing but have no `CREATE` privilege; public application data remains server-only through Prisma and guarded server actions.
+
+Installed extensions are limited to Supabase/platform fundamentals (`plpgsql`, `pg_stat_statements`, `pgcrypto`, `uuid-ossp`, and `supabase_vault`) in their expected managed schemas. Public application tables are uniformly owned by `postgres`; Auth, Storage, and Realtime objects retain their respective Supabase service owners. No ownership drift was found.
+
 ## Reference points
 
 - Shared Prisma client: `packages/db/src/index.ts`
