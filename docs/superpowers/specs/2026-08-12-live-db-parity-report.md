@@ -51,6 +51,16 @@ The canonical transaction-wrapped fix is [`2026-09-07-182218Z-nullability-parity
 - **3 legacy `ClientStatus` labels in DB** not in schema: `DOCS_PENDING`, `AUTH_INITIATED`, `AUTHORIZED`. Verified **0 Client rows** use them, so Prisma deserialization is safe. Postgres can't cheaply drop enum values; ignore. (Enum label *order* also differs from schema — only matters for `ORDER BY` on the enum column.)
 - **Session indexes:** the original audit predated `docs/sql/2026-08-12-session-indexes.sql`; the live supporting-index audit was subsequently completed and the remaining foreign-key gaps were corrected in DEV on 2026-09-07.
 
+## Foreign-key rule audit — 2026-09-07
+
+Prisma's offline generated DDL defines 58 foreign keys. `Simple_RAS_CRM_DEV` has 62. A name-and-rule catalog comparison found:
+
+- All 58 Prisma-defined constraints exist, and their `ON DELETE` behavior matches after the `ActionItem.creatorId` correction.
+- Eighteen older manually created constraints use PostgreSQL's default `ON UPDATE NO ACTION` instead of Prisma's generated `ON UPDATE CASCADE`. IDs are immutable UUID primary keys throughout these workflows, so rewriting otherwise-correct constraints would add table locks and deployment risk without measurable runtime or integrity value. This drift is intentionally accepted.
+- Four additional live constraints protect scalar ID fields that Prisma does not expose as navigation relations: `AuditLogVault.userId → User.id`, `ReAuthPacket.paRequestId → PARequest.id`, `ScheduleAppointment.bcbaId → User.id`, and `ScheduleAppointment.rbtId → User.id`. Each uses `ON DELETE SET NULL`; retaining them prevents dangling identifiers without changing application behavior.
+
+Current classification: **zero actionable foreign-key gaps**. Revisit the accepted `ON UPDATE` drift only if the system ever supports changing primary identifiers, and retire the two `ScheduleAppointment` constraints with that dead table if the approved calendar-unification cleanup is executed.
+
 ## Fully matching tables (21 of 36 exact; the other 15 differ only by the items above)
 
 User, Client, Document, Authorization, AuthCptCode, Session, ContactLog, RbtOnboarding, NoteDeficiency, PARequest, GoalTemplate, Notification, SkillTarget, SessionTrialData, BehaviorTarget, BehaviorLog, StaffCredential, EVVLog, ScheduleAppointment, AuditLogVault, AtsCandidate
