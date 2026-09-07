@@ -187,7 +187,18 @@ async function loadSnapshot(candidateId: string): Promise<InterviewPortalResult>
       lastName: true,
       role: true,
     },
-    orderBy: [{ role: 'asc' }, { firstName: 'asc' }],
+    orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
+  });
+
+  // PostgreSQL enum ordering reflects migration history, not business priority.
+  // Keep the applicant picker deterministic: HR agents first, then Head HR.
+  const sortedHrUsers = [...hrUsers].sort((a, b) => {
+    if (a.role === 'HR_AGENT' && b.role !== 'HR_AGENT') return -1;
+    if (b.role === 'HR_AGENT' && a.role !== 'HR_AGENT') return 1;
+    return (
+      a.firstName.localeCompare(b.firstName) ||
+      a.lastName.localeCompare(b.lastName)
+    );
   });
 
   const snapshot: InterviewPortalSnapshot = {
@@ -205,7 +216,7 @@ async function loadSnapshot(candidateId: string): Promise<InterviewPortalResult>
     // Approval comes only from the durable packet flag set by HR evaluation.
     interviewPassed: Boolean(flags.interviewPassed),
     interview,
-    hrMembers: hrUsers.map((user) => ({
+    hrMembers: sortedHrUsers.map((user) => ({
       id: user.id,
       name: `${user.firstName} ${user.lastName}`.trim(),
       role: user.role === 'HEAD_HR' ? 'Head of HR' : 'HR Specialist',

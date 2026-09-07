@@ -93,6 +93,15 @@ A full read-only comparison covered every Prisma scalar field and its live Postg
 
 Current classification: **zero actionable physical column-type gaps**.
 
+## Enum and sequence audit — 2026-09-07
+
+- All 15 Prisma enums exist in DEV and contain every declared label. Twelve have identical ordering.
+- `Role`, `ClientStatus`, and `SessionStatus` have historical append-order differences. DEV also retains three legacy `ClientStatus` labels (`DOCS_PENDING`, `AUTH_INITIATED`, `AUTHORIZED`), with zero live `Client` rows using them.
+- No application query sorts clients or sessions directly by the affected status enums. The applicant interview picker previously sorted `User.role` using database enum order; it now applies explicit business ordering (`HR_AGENT` before `HEAD_HR`) so migration history cannot change the UI.
+- DEV has zero identity columns and zero public sequences, matching the UUID-based Prisma design.
+
+Current classification: **zero remaining actionable enum-order, enum-usage, identity, or sequence gaps**.
+
 ## Fully matching tables (21 of 36 exact; the other 15 differ only by the items above)
 
 User, Client, Document, Authorization, AuthCptCode, Session, ContactLog, RbtOnboarding, NoteDeficiency, PARequest, GoalTemplate, Notification, SkillTarget, SessionTrialData, BehaviorTarget, BehaviorLog, StaffCredential, EVVLog, ScheduleAppointment, AuditLogVault, AtsCandidate
