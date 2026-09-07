@@ -102,6 +102,17 @@ Current classification: **zero actionable physical column-type gaps**.
 
 Current classification: **zero remaining actionable enum-order, enum-usage, identity, or sequence gaps**.
 
+## Trigger, generated-column, and function audit — 2026-09-07
+
+- Public application tables have zero non-internal table triggers and zero generated or identity columns. Prisma writes are therefore not subject to hidden row mutation.
+- The only non-extension, `postgres`-owned function outside system schemas is `public.rls_auto_enable()`. It is the function behind the enabled `ensure_rls` `ddl_command_end` event trigger and applies only to new public tables.
+- `rls_auto_enable()` is `SECURITY DEFINER`, but its `search_path` is fixed to `pg_catalog`; direct execution is revoked from `PUBLIC`, `anon`, and `authenticated`. Its definition and event-trigger wiring match the repository's verified database-advisor hardening migration.
+- Application code contains zero Supabase `.rpc(...)` calls, so no untracked database function is part of a runtime workflow.
+- The remaining non-internal table triggers are platform-owned: one Realtime subscription-filter trigger owned by `supabase_realtime_admin` and four Storage integrity/timestamp triggers owned by `supabase_storage_admin`. They are Supabase-managed infrastructure, not application drift.
+- The other enabled event triggers belong to Supabase/PostgREST extension management. They are owned by `supabase_admin` and are intentionally left untouched.
+
+Current classification: **zero actionable trigger, generated-column, or database-function gaps**.
+
 ## Fully matching tables (21 of 36 exact; the other 15 differ only by the items above)
 
 User, Client, Document, Authorization, AuthCptCode, Session, ContactLog, RbtOnboarding, NoteDeficiency, PARequest, GoalTemplate, Notification, SkillTarget, SessionTrialData, BehaviorTarget, BehaviorLog, StaffCredential, EVVLog, ScheduleAppointment, AuditLogVault, AtsCandidate
