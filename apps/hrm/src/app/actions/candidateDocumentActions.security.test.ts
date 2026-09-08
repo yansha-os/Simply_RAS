@@ -289,6 +289,23 @@ describe('attachApplicantDocuments authoritative candidate state', () => {
     expect(mocks.prisma.atsCandidate.update).not.toHaveBeenCalled();
   });
 
+  it('fails closed when a legacy upload token has no expiry', async () => {
+    mocks.prisma.candidateOnboardingPacket.findFirst.mockResolvedValue({
+      ...authorizedPacket('APPLIED', 'PENDING_HR_REVIEW'),
+      magicLinkExpiresAt: null,
+    });
+
+    const result = await attachApplicantDocuments(
+      CANDIDATE_ID,
+      CURRENT_TOKEN,
+      resumeFormData()
+    );
+
+    expect(result).toMatchObject({ success: false });
+    expect(mocks.upload).not.toHaveBeenCalled();
+    expect(mocks.prisma.candidateOnboardingPacket.updateMany).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['REJECTED', 'REJECTED'],
     ['HIRED', 'ACTIVE'],

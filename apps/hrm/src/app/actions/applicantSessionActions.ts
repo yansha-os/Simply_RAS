@@ -13,6 +13,7 @@ import {
   isCandidateDeviceSessionCurrent,
   resolveFingerprintValidCandidate,
 } from '@/lib/candidateDeviceSession';
+import { isMagicLinkExpiryCurrent } from '@/lib/magicLinkExpiry';
 
 const ATS_STAFF_ROLES = [
   'HEAD_HR',
@@ -173,14 +174,8 @@ export async function bindMagicLinkSession(magicLinkToken: string) {
     if (packet.magicLinkRevokedAt) {
       return { success: false as const, error: 'This link has been revoked. Ask HR for a new invite link.' };
     }
-    if (packet.magicLinkExpiresAt) {
-      const expiry =
-        packet.magicLinkExpiresAt instanceof Date
-          ? packet.magicLinkExpiresAt.getTime()
-          : new Date(packet.magicLinkExpiresAt).getTime();
-      if (!isNaN(expiry) && expiry < Date.now()) {
-        return { success: false as const, error: 'This link has expired. Ask HR for a new invite link.' };
-      }
+    if (!isMagicLinkExpiryCurrent(packet.magicLinkExpiresAt)) {
+      return { success: false as const, error: 'This link has expired. Ask HR for a new invite link.' };
     }
 
     if (!canBindApplicantPortal(packet.candidate)) {
@@ -212,15 +207,10 @@ export async function bindMagicLinkSession(magicLinkToken: string) {
             },
           },
         });
-        const liveExpiry = livePacket?.magicLinkExpiresAt
-          ? livePacket.magicLinkExpiresAt instanceof Date
-            ? livePacket.magicLinkExpiresAt.getTime()
-            : new Date(livePacket.magicLinkExpiresAt).getTime()
-          : null;
         if (
           !livePacket?.candidate ||
           livePacket.magicLinkRevokedAt ||
-          (liveExpiry !== null && !isNaN(liveExpiry) && liveExpiry < Date.now()) ||
+          !isMagicLinkExpiryCurrent(livePacket.magicLinkExpiresAt) ||
           !canBindApplicantPortal(livePacket.candidate)
         ) {
           return false;

@@ -181,6 +181,19 @@ describe('bindMagicLinkSession applicant-access separation', () => {
     expect(mocks.cookieSet).not.toHaveBeenCalled();
   });
 
+  it('fails closed when a legacy invite has no expiry', async () => {
+    mocks.prisma.candidateOnboardingPacket.findUnique.mockResolvedValue({
+      ...packet('PHONE_SCREEN', 'INVITATION_SENT'),
+      magicLinkExpiresAt: null,
+    });
+
+    const result = await bindMagicLinkSession(UPLOAD_ONLY_TOKEN);
+
+    expect(result).toMatchObject({ success: false });
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+    expect(mocks.cookieSet).not.toHaveBeenCalled();
+  });
+
   it('binds the current HR-invited token and activates the applicant session', async () => {
     mocks.prisma.candidateOnboardingPacket.findUnique.mockResolvedValue(
       packet('PHONE_SCREEN', 'INVITATION_SENT')

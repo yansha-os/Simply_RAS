@@ -35,16 +35,12 @@ export function magicLinkStatus(packet: PacketAuthFields): { ok: true } | { ok: 
   if (packet.magicLinkRevokedAt) {
     return { ok: false, error: 'This link has been revoked. Please contact the clinic for a new link.' };
   }
-  // NULL expiry = legacy link issued before expiry tracking; a fresh window is
-  // stamped whenever staff generate/reset a link.
-  if (packet.magicLinkExpiresAt) {
-    const expiryTime =
-      packet.magicLinkExpiresAt instanceof Date
-        ? packet.magicLinkExpiresAt.getTime()
-        : new Date(packet.magicLinkExpiresAt).getTime();
-    if (!isNaN(expiryTime) && expiryTime < Date.now()) {
-      return { ok: false, error: 'This link has expired. Please contact the clinic for a new link.' };
-    }
+  if (!packet.magicLinkExpiresAt) {
+    return { ok: false, error: 'This link has expired. Please contact the clinic for a new link.' };
+  }
+  const expiryTime = packet.magicLinkExpiresAt.getTime();
+  if (!Number.isFinite(expiryTime) || expiryTime <= Date.now()) {
+    return { ok: false, error: 'This link has expired. Please contact the clinic for a new link.' };
   }
   return { ok: true };
 }

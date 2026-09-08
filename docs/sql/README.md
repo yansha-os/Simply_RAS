@@ -42,6 +42,7 @@ When a target database needs these scripts, paste them into Supabase SQL Editor 
 | 20 | [`2026-09-07-182830Z-action-item-creator-delete-rule.sql`](2026-09-07-182830Z-action-item-creator-delete-rule.sql) | Align the optional `ActionItem.creator` relation with Prisma's generated `ON DELETE SET NULL` rule — **verified applied to `Simple_RAS_CRM_DEV` on 2026-09-07**; fails closed if the expected FK is missing |
 | 21 | [`2026-09-07-192400Z-public-schema-least-privilege.sql`](2026-09-07-192400Z-public-schema-least-privilege.sql) | Revoke public-table/sequence/function access from Supabase REST roles and harden `postgres` default privileges — **verified applied to `Simple_RAS_CRM_DEV` on 2026-09-07**; public application data remains server-only through Prisma |
 | 22 | [`2026-09-07-200123Z-null-placeholder-medicaid-ids.sql`](2026-09-07-200123Z-null-placeholder-medicaid-ids.sql) | Guardedly replace three recognized DEV placeholder Medicaid identifiers with `NULL`; never merges/deletes clients — **verified applied to `Simple_RAS_CRM_DEV` on 2026-09-07** |
+| 23 | [`2026-09-08-010551Z-magic-link-expiry-fail-closed.sql`](2026-09-08-010551Z-magic-link-expiry-fail-closed.sql) | Backfill missing parent/applicant link expiries from original issuance time and prevent future live tokens without expiry — **pending apply in Supabase**; no dependency beyond order 6 columns |
 
 Storage size source of truth for security review: CRM `client-documents` is **5 MiB** (`5,242,880` bytes), HRM `ats-applicant-docs` is **10 MiB** (`10,485,760` bytes), and `ats-interview-recordings` is **50 MiB** (`52,428,800` bytes) per the current named constants and tests. These limits and MIME allowlists were **verified in `Simple_RAS_CRM_DEV` on 2026-09-07**. No current 200 MiB recording constant exists. The RLS hardening script is policy-only and does **not** alter bucket metadata; any Dashboard cap change is separate.
 
@@ -74,6 +75,7 @@ Full walkthrough (apps, intake → payroll): [`docs/superpowers/specs/2026-08-11
 | [`2026-09-07-182830Z-action-item-creator-delete-rule.sql`](2026-09-07-182830Z-action-item-creator-delete-rule.sql) | Prisma referential-action parity for the optional `ActionItem.creator` relation |
 | [`2026-09-07-192400Z-public-schema-least-privilege.sql`](2026-09-07-192400Z-public-schema-least-privilege.sql) | Defense-in-depth least privilege for public-schema tables, sequences, functions, and future `postgres` objects |
 | [`2026-09-07-200123Z-null-placeholder-medicaid-ids.sql`](2026-09-07-200123Z-null-placeholder-medicaid-ids.sql) | Guarded DEV cleanup of recognized placeholder Medicaid identifiers without exposing their values or changing client identity |
+| [`2026-09-08-010551Z-magic-link-expiry-fail-closed.sql`](2026-09-08-010551Z-magic-link-expiry-fail-closed.sql) | Fail-closed expiry backfill and database constraints for parent/applicant magic links |
 
 ## Older numbered SQL
 

@@ -7,6 +7,7 @@ import type { Prisma, Role } from '@repo/db';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { canUseCandidateDocumentToken } from '@/lib/applicantAccessPolicy';
+import { isMagicLinkExpiryCurrent } from '@/lib/magicLinkExpiry';
 import {
   applicantDocumentMagicBytesMatchMime,
   isCandidateDocumentStoragePath,
@@ -146,14 +147,8 @@ export async function attachApplicantDocuments(
     if (packet.magicLinkRevokedAt) {
       return { success: false as const, error: 'This upload link has been revoked.' };
     }
-    if (packet.magicLinkExpiresAt) {
-      const expiry =
-        packet.magicLinkExpiresAt instanceof Date
-          ? packet.magicLinkExpiresAt.getTime()
-          : new Date(packet.magicLinkExpiresAt).getTime();
-      if (!isNaN(expiry) && expiry < Date.now()) {
-        return { success: false as const, error: 'This upload link has expired.' };
-      }
+    if (!isMagicLinkExpiryCurrent(packet.magicLinkExpiresAt)) {
+      return { success: false as const, error: 'This upload link has expired.' };
     }
     if (!canUseCandidateDocumentToken(packet.candidate)) {
       return {
