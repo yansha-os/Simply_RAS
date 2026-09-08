@@ -280,6 +280,7 @@ describe.sequential('HRM staff proxy dev-tools impersonation bypass', () => {
 
     const response = await proxy(request);
     expect(response.headers.get('x-middleware-next')).toBe('1');
+    expect(response.headers.get('x-middleware-request-x-ras-pathname')).toBe('/ats');
   });
 
   it('allows access to staff route when DevTools are enabled and userId cookie is present', async () => {

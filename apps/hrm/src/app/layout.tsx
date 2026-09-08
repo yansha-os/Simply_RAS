@@ -6,6 +6,7 @@ import '@/lib/devToolsGate';
 import { ThemeProvider } from '@/components/layout/ThemeContext';
 import { HrmLayoutWrapper } from '@/components/layout/HrmLayoutWrapper';
 import { Toaster } from 'sonner';
+import { HrmServerAccessBoundary } from '@/components/layout/HrmServerAccessBoundary';
 
 const inter = Inter({
   variable: '--font-inter',
@@ -82,7 +83,9 @@ export default function RootLayout({
             <div className="shooting-star shooting-star-2"></div>
           </div>
 
-          <HrmLayoutWrapper>{children}</HrmLayoutWrapper>
+          <HrmServerAccessBoundary>
+            <HrmLayoutWrapper>{children}</HrmLayoutWrapper>
+          </HrmServerAccessBoundary>
           <Toaster position="bottom-right" theme="dark" toastOptions={{ style: { background: '#09090b', border: '1px solid rgba(255,255,255,0.1)', color: '#fff' } }} />
         </ThemeProvider>
       </body>

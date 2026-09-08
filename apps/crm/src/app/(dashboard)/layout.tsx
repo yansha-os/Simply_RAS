@@ -4,12 +4,17 @@ import { Toaster } from 'sonner';
 import { Header } from '@/components/layout/Header';
 import { GlobalStaffChat } from '@/components/GlobalStaffChat';
 import { DevToolsWrapper } from '@/components/DevToolsWrapper';
+import { redirect } from 'next/navigation';
+import { requireStaff } from '@/lib/auth-guard';
 
-export default function DashboardLayout({
+export default async function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const gate = await requireStaff();
+  if (!gate.ok) redirect('/login?error=inactive_or_unauthorized');
+
   return (
     <div className="flex h-screen overflow-hidden bg-transparent">
       <Sidebar />

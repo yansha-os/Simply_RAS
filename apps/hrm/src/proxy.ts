@@ -6,37 +6,7 @@ import {
   resolveFingerprintValidCandidate,
 } from '@/lib/candidateDeviceSession'
 import { isDevToolsEnabled } from '@/lib/devToolsGate'
-
-const PUBLIC_EXACT = new Set(['/', '/login', '/public', '/apply', '/api/health'])
-
-function isPublicPath(pathname: string): boolean {
-  if (PUBLIC_EXACT.has(pathname)) return true
-  if (pathname.startsWith('/magic-link')) return true
-  return false
-}
-
-/** Applicant portal under /rbt/* (not /rbt-manager). */
-function isApplicantPath(pathname: string): boolean {
-  if (pathname === '/rbt' || pathname.startsWith('/rbt/')) {
-    if (pathname.startsWith('/rbt-manager')) return false
-    return true
-  }
-  return false
-}
-
-function isStaffProtectedPath(pathname: string): boolean {
-  if (isPublicPath(pathname) || isApplicantPath(pathname)) return false
-  return (
-    pathname.startsWith('/hr-dashboard') ||
-    pathname.startsWith('/ats') ||
-    pathname.startsWith('/clients') ||
-    pathname.startsWith('/onboarding') ||
-    pathname.startsWith('/payroll') ||
-    pathname.startsWith('/session-emr') ||
-    pathname.startsWith('/rbt-manager') ||
-    pathname.startsWith('/api/')
-  )
-}
+import { isApplicantPath, isStaffProtectedPath } from '@/lib/routeAccess'
 
 function secureCookieOptions(maxAge: number) {
   return {
@@ -85,6 +55,11 @@ async function hasFingerprintValidCandidateSession(
 
 export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname
+  const forwardedHeaders = new Headers(request.headers)
+  forwardedHeaders.delete('x-ras-pathname')
+  if (isStaffProtectedPath(pathname)) {
+    forwardedHeaders.set('x-ras-pathname', pathname)
+  }
 
   // Magic-link: ensure device fingerprint cookie, let the page bind the DB session
   if (pathname.startsWith('/magic-link/')) {
@@ -102,11 +77,10 @@ export async function proxy(request: NextRequest) {
         ? existingFp
         : crypto.randomUUID()
 
-    const requestHeaders = new Headers(request.headers)
-    requestHeaders.set('x-device-fingerprint', fingerprint)
+    forwardedHeaders.set('x-device-fingerprint', fingerprint)
 
     const response = NextResponse.next({
-      request: { headers: requestHeaders },
+      request: { headers: forwardedHeaders },
     })
     response.cookies.set(
       DEVICE_FINGERPRINT_COOKIE,
@@ -118,7 +92,7 @@ export async function proxy(request: NextRequest) {
 
   let response = NextResponse.next({
     request: {
-      headers: request.headers,
+      headers: forwardedHeaders,
     },
   })
 
@@ -151,7 +125,8 @@ export async function proxy(request: NextRequest) {
       },
       setAll(cookiesToSet) {
         cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
-        response = NextResponse.next({ request })
+        forwardedHeaders.set('cookie', request.cookies.toString())
+        response = NextResponse.next({ request: { headers: forwardedHeaders } })
         cookiesToSet.forEach(({ name, value, options }) =>
           response.cookies.set(name, value, options)
         )
