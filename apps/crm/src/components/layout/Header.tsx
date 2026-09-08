@@ -81,7 +81,7 @@ export function Header() {
                 <button
                   onClick={() => {
                     setShowDropdown(false);
-                    toast.info('Opened Account Security & Password Manager');
+                    router.push('/account/security');
                   }}
                   className="w-full text-left px-4 py-2.5 text-xs text-zinc-200 hover:bg-white/10 hover:text-white transition-colors flex items-center gap-2.5 cursor-pointer font-sans"
                 >
