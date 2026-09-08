@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { prisma } from '@/lib/prisma';
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
-import { headers } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { isDevToolsEnabled } from '@/lib/devToolsGate';
 import {
   loginRateLimitKey,
@@ -122,6 +122,28 @@ export async function login(prevState: { error?: string } | null, formData: Form
       throw err; // Next.js redirect
     }
     return { error: 'Sign-in failed. Please try again.' };
+  }
+}
+
+export async function logout(): Promise<{ success: boolean; error?: string }> {
+  try {
+    const supabase = await createClient();
+    const { error } = await supabase.auth.signOut({ scope: 'local' });
+    if (error) {
+      return { success: false, error: 'Sign-out failed. Please try again.' };
+    }
+
+    const cookieStore = await cookies();
+    cookieStore.delete('dev_impersonate_user_id');
+    cookieStore.delete('dev_impersonate_role');
+    revalidatePath('/', 'layout');
+    return { success: true };
+  } catch (error) {
+    console.error(
+      'Action failed [logout]:',
+      error instanceof Error ? error.message : 'Unknown error'
+    );
+    return { success: false, error: 'Sign-out failed. Please try again.' };
   }
 }
 

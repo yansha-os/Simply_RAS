@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useTransition } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import NotificationBell from '@/components/layout/NotificationBell';
 import { Search, LogOut, ShieldCheck, Palette, Lock } from 'lucide-react';
@@ -8,6 +8,7 @@ import { useHrmRole } from '@/lib/useHrmRole';
 import { useTheme } from './ThemeContext';
 import ThemeSettingsModal from './ThemeSettingsModal';
 import { toast } from 'sonner';
+import { logout } from '@/app/login/actions';
 import {
   ensureActiveApplicantId,
   getActiveApplicantEmail,
@@ -18,6 +19,7 @@ export function HrmHeader() {
   const pathname = usePathname();
   const router = useRouter();
   const { role } = useHrmRole();
+  const [isSigningOut, startSignOut] = useTransition();
   const [showDropdown, setShowDropdown] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const { setIsSettingsOpen, colorMode } = useTheme();
@@ -197,18 +199,26 @@ export function HrmHeader() {
 
                 <div className={`border-t pt-1 ${isRbtLightMode ? 'border-orange-100' : 'border-white/10'}`}>
                   <button
-                    className="w-full text-left px-4 py-2.5 text-xs text-rose-600 hover:bg-rose-50 transition-colors flex items-center gap-2.5 cursor-pointer font-extrabold"
+                    disabled={isSigningOut}
+                    className="w-full text-left px-4 py-2.5 text-xs text-rose-600 hover:bg-rose-50 transition-colors flex items-center gap-2.5 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 font-extrabold"
                     onClick={() => {
                       setShowDropdown(false);
-                      localStorage.removeItem('hrm_active_role');
-                      localStorage.removeItem('hrm_active_user');
-                      window.dispatchEvent(new Event('hrm_role_changed'));
-                      toast.success('Signed out successfully! Redirecting to login...');
-                      router.push('/login');
+                      startSignOut(async () => {
+                        const result = await logout();
+                        if (!result.success) {
+                          toast.error(result.error || 'Sign-out failed.');
+                          return;
+                        }
+                        localStorage.removeItem('hrm_active_role');
+                        localStorage.removeItem('hrm_active_user');
+                        window.dispatchEvent(new Event('hrm_role_changed'));
+                        router.replace('/login');
+                        router.refresh();
+                      });
                     }}
                   >
                     <LogOut className="w-4 h-4 text-rose-600" />
-                    <span>Sign Out</span>
+                    <span>{isSigningOut ? 'Signing Out…' : 'Sign Out'}</span>
                   </button>
                 </div>
               </div>

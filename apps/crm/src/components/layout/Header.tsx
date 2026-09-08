@@ -1,13 +1,17 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import { Search, LogOut, Palette, Lock } from 'lucide-react';
 import NotificationBell from './NotificationBell';
 import { useTheme } from './ThemeContext';
 import ThemeSettingsModal from './ThemeSettingsModal';
 import { toast } from 'sonner';
+import { logout } from '@/app/login/actions';
 
 export function Header() {
+  const router = useRouter();
+  const [isSigningOut, startSignOut] = useTransition();
   const [showDropdown, setShowDropdown] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const { setIsSettingsOpen } = useTheme();
@@ -87,14 +91,23 @@ export function Header() {
 
                 <div className="border-t border-white/10 pt-1">
                   <button
-                    className="w-full text-left px-4 py-2.5 text-xs text-rose-400 hover:bg-rose-500/10 transition-colors flex items-center gap-2.5 cursor-pointer font-sans"
+                    disabled={isSigningOut}
+                    className="w-full text-left px-4 py-2.5 text-xs text-rose-400 hover:bg-rose-500/10 transition-colors flex items-center gap-2.5 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 font-sans"
                     onClick={() => {
                       setShowDropdown(false);
-                      toast.success('Signed out cleanly');
+                      startSignOut(async () => {
+                        const result = await logout();
+                        if (!result.success) {
+                          toast.error(result.error || 'Sign-out failed.');
+                          return;
+                        }
+                        router.replace('/login');
+                        router.refresh();
+                      });
                     }}
                   >
                     <LogOut className="w-4 h-4 text-rose-400" />
-                    <span>Sign Out</span>
+                    <span>{isSigningOut ? 'Signing Out…' : 'Sign Out'}</span>
                   </button>
                 </div>
               </div>
