@@ -28,19 +28,42 @@ app's `package.json`). Both apps share **one** Supabase Postgres via the same
 | `NEXT_PUBLIC_HRM_URL` | public | Self-referencing links in notifications — `actions/atsActions.ts` |
 | `NEXT_PUBLIC_ENABLE_DEV_TOOLS` | public | Dev Tools + impersonation gate — **must be unset or `false` in prod** — `devToolsGate.ts`, `HrmDevToolsUI.tsx`, `sessionStudio.ts`, `applicantSessionActions.ts`, `resolveHrmRole.ts`, `login/*` |
 
-## Supabase MFA & auth rate limits (dashboard tasks — gap 18)
+## Supabase Auth dashboard baseline
 
-No custom MFA is built in code. Both are configured in the Supabase dashboard
-for the shared project and then apply to staff sign-in in both apps:
+The deployed environment selects its Supabase project through the URL, anon key,
+and database URL above. Keep DEV and production settings aligned deliberately;
+database branching does not automatically copy every Auth dashboard setting.
 
-- **MFA (TOTP):** Dashboard → **Authentication → Multi-Factor (MFA)** → enable
-  **TOTP (App Authenticator)**. To *require* it for staff, set the project's
-  MFA enforcement (Pro plan: "Require MFA") or add an RLS/AAL2 policy; users
-  enroll an authenticator app on first login after enablement.
-- **Auth rate limits:** Dashboard → **Authentication → Rate Limits** — review
-  the built-in per-IP limits for token/sign-in endpoints. These complement the
-  app-side in-memory limiter (5 attempts per email+IP per 15 min in each app's
-  `login/actions.ts`), which is per-server-process only.
+Live DEV audit verified **2026-09-07** (project ref
+`tgygctyjgarhxvnpmihn`; no credentials recorded):
+
+- Public signup, anonymous sign-in, and manual identity linking are disabled;
+  email confirmation and secure email change are enabled.
+- Email passwords require at least 12 characters containing lowercase,
+  uppercase, digits, and symbols. Password changes require both a recent login
+  and the current password.
+- Access tokens expire after 3,600 seconds. Potentially compromised refresh
+  tokens are detected and revoked; the refresh-token reuse interval is 10
+  seconds.
+- TOTP is available. AAL1 sessions are limited to 15 minutes, but AAL2 is not
+  enforced because the only current Auth user has no verified MFA factor.
+- Per-IP Auth limits observed: 150 token refreshes, 30 token verifications, and
+  30 sign-up/sign-in requests per five minutes. These complement the app-side
+  in-memory limiter (5 attempts per email+IP per 15 minutes in each app's
+  `login/actions.ts`), which remains per-server-process only.
+
+Before production launch:
+
+- Enroll and verify at least two recoverable administrator MFA factors before
+  enforcing AAL2; enforcing it with zero verified factors can lock out the sole
+  administrator.
+- Configure the real production Site URL and exact allow-listed redirect URLs;
+  DEV currently contains only `http://localhost:3000` and no additional URLs.
+- Mirror and re-audit the production project's Auth controls independently.
+- Enable leaked-password protection and CAPTCHA when the selected Supabase plan
+  supports them. The audited Free plan exposes neither as an active protection.
+- Reassess time-boxed sessions, inactivity timeout, and single-session controls
+  if production moves to a plan that supports them.
 
 ## Production notes
 
