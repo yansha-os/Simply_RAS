@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
+import { getAuthCookieOptions } from '@/lib/supabase/cookieOptions'
 import {
   CANDIDATE_SESSION_COOKIE,
   DEVICE_FINGERPRINT_COOKIE,
@@ -120,6 +121,7 @@ export async function proxy(request: NextRequest) {
   }
 
   const supabase = createServerClient(supabaseUrl, supabaseKey, {
+    cookieOptions: getAuthCookieOptions(),
     cookies: {
       getAll() {
         return request.cookies.getAll()

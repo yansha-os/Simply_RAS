@@ -18,7 +18,7 @@ npm run start:hrm          # next start -p 3001  (separate process/host)
 
 Per-app env at build **and** run time (see [`ENV.md`](./ENV.md) for the full table):
 
-- Both: `DATABASE_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- Both: `DATABASE_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_CRM_URL`, `NEXT_PUBLIC_HRM_URL`
 - CRM: `NEXT_PUBLIC_HRM_URL` → the deployed HRM origin
 - HRM: `NEXT_PUBLIC_CRM_URL`, `NEXT_PUBLIC_HRM_URL` (self), `SUPABASE_SERVICE_ROLE_KEY` (server-only secret)
 - `NEXT_PUBLIC_ENABLE_DEV_TOOLS` — **must be unset or `false`** in every deployed env. `src/lib/devToolsGate.ts` (both apps, imported by both root layouts) **throws at boot** if it is `true` while `NODE_ENV=production`; the app will not start. This is intentional — unset the flag and rebuild, do not patch the gate.
@@ -27,6 +27,13 @@ Per-app env at build **and** run time (see [`ENV.md`](./ENV.md) for the full tab
 Topology notes:
 
 - Cross-app navigation is by absolute URL via `NEXT_PUBLIC_HRM_URL` / `NEXT_PUBLIC_CRM_URL` — set them to the real public origins or deep links 404.
+- Cross-app login continuity is available only when both apps use the same
+  Supabase project and sibling custom domains controlled by the organization.
+  In that topology, set the same `NEXT_PUBLIC_AUTH_COOKIE_DOMAIN` (for example
+  `.example.com`) in both builds. Never set `.onrender.com`, `.vercel.app`, or
+  another shared hosting-provider parent; the runtime rejects these values.
+  Leave the variable unset for localhost or unrelated origins, where sessions
+  are intentionally host-only and users sign in separately to each app.
 - `NEXT_PUBLIC_*` values are **baked in at build time** — changing them requires a rebuild, not just a restart.
 - HRM allows 200mb server-action bodies (interview uploads, `next.config.ts`); keep any reverse proxy body limit at least that high for HRM.
 - CI (`.github/workflows/ci.yml`) builds both apps with dummy env — a green CI build does not validate your real env values.

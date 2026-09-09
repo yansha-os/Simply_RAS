@@ -16,6 +16,9 @@
 # next.js
 /.next/
 apps/*/.next/
+# Next.js 16 dev-server generated agent hints; root AGENTS.md remains authoritative.
+apps/*/AGENTS.md
+apps/*/CLAUDE.md
 out/
 
 # production

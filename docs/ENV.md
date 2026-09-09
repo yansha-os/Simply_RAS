@@ -13,7 +13,9 @@ app's `package.json`). Both apps share **one** Supabase Postgres via the same
 | `DATABASE_URL` | server | Shared Postgres (Supabase transaction pooler, port `6543`) — read by `packages/db/src/index.ts`; TLS is required in code |
 | `NEXT_PUBLIC_SUPABASE_URL` | public | Supabase project URL — `lib/supabase/{server,client}.ts`, `middleware.ts` |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | public | Supabase anon key — same call sites as above |
+| `NEXT_PUBLIC_CRM_URL` | public | CRM's deployed origin; required with a shared Auth cookie domain |
 | `NEXT_PUBLIC_HRM_URL` | public | Cross-app deep links / redirects to HRM — `middleware.ts`, `login/actions.ts` |
+| `NEXT_PUBLIC_AUTH_COOKIE_DOMAIN` | public | Optional organization-owned parent domain shared by CRM/HRM Auth cookies (for example `.example.com`); omit on localhost |
 | `NEXT_PUBLIC_ENABLE_DEV_TOOLS` | public | Dev Tools + impersonation gate — **must be unset or `false` in prod** — `devToolsGate.ts`, `DevToolsUI.tsx`, `useHrmRole.ts`, `login/*` |
 
 ## HRM (`apps/hrm`, port 3001)
@@ -26,6 +28,7 @@ app's `package.json`). Both apps share **one** Supabase Postgres via the same
 | `SUPABASE_SERVICE_ROLE_KEY` | **server-only, secret** | Admin client (RLS bypass) for Storage uploads without a session — `lib/supabase/admin.ts`. Never expose with `NEXT_PUBLIC_` |
 | `NEXT_PUBLIC_CRM_URL` | public | Deep links back into CRM — `actions/atsActions.ts`, `lib/syncSessionStudioTargets.ts` |
 | `NEXT_PUBLIC_HRM_URL` | public | Self-referencing links in notifications — `actions/atsActions.ts` |
+| `NEXT_PUBLIC_AUTH_COOKIE_DOMAIN` | public | Same optional organization-owned parent domain configured in CRM; never use a hosting-provider parent such as `.onrender.com` |
 | `NEXT_PUBLIC_ENABLE_DEV_TOOLS` | public | Dev Tools + impersonation gate — **must be unset or `false` in prod** — `devToolsGate.ts`, `HrmDevToolsUI.tsx`, `sessionStudio.ts`, `applicantSessionActions.ts`, `resolveHrmRole.ts`, `login/*` |
 
 ## Supabase Auth dashboard baseline
@@ -77,5 +80,11 @@ Before production launch:
 - `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` are **required in
   prod**: with `NODE_ENV=production` a missing value throws on first Supabase
   client creation (`lib/supabase/env.ts`) instead of silently using placeholders.
+- Cross-app single sign-on requires both apps to use the same Supabase project
+  and controlled sibling origins such as `crm.example.com` / `hrm.example.com`.
+  Set the identical `NEXT_PUBLIC_AUTH_COOKIE_DOMAIN=.example.com` at build time
+  in both apps. The app rejects public hosting parents and any configured app
+  URL outside that domain. Leave it unset for localhost or unrelated origins;
+  those deployments require a separate login in each app.
 - `NODE_ENV` is read directly in both apps (login bypass, dev-tools gating) but is
   set by Next.js/host, not by `.env`.
