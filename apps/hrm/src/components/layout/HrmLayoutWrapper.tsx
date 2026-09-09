@@ -19,7 +19,8 @@ export function HrmLayoutWrapper({ children }: { children: React.ReactNode }) {
     pathname === '/' ||
     pathname === '/apply' ||
     pathname === '/public' ||
-    pathname === '/login';
+    pathname === '/login' ||
+    pathname === '/mfa';
   const isSessionStudio = pathname.startsWith('/rbt/session');
 
   if (isPublicRoute || isSessionStudio) {

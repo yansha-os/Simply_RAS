@@ -10,6 +10,7 @@ const OTHER_FINGERPRINT = '55555555-5555-4555-8555-555555555555';
 const mocks = vi.hoisted(() => ({
   findDeviceSession: vi.fn(),
   getUser: vi.fn(),
+  getAuthenticatorAssuranceLevel: vi.fn(),
 }));
 
 vi.mock('@/lib/prisma', () => ({
@@ -24,6 +25,7 @@ vi.mock('@supabase/ssr', () => ({
   createServerClient: vi.fn(() => ({
     auth: {
       getUser: mocks.getUser,
+      mfa: { getAuthenticatorAssuranceLevel: mocks.getAuthenticatorAssuranceLevel },
     },
   })),
 }));
@@ -253,6 +255,21 @@ describe.sequential('HRM applicant proxy device-session security', () => {
 });
 
 describe.sequential('HRM staff proxy dev-tools impersonation bypass', () => {
+  it('redirects an enrolled AAL1 session to the MFA challenge', async () => {
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://supabase.example.test');
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY', 'unit-test-anon-key');
+    mocks.getUser.mockResolvedValue({ data: { user: { id: 'user-1' } } });
+    mocks.getAuthenticatorAssuranceLevel.mockResolvedValue({
+      data: { currentLevel: 'aal1', nextLevel: 'aal2' },
+      error: null,
+    });
+
+    const response = await proxy(new NextRequest('https://hrm.example.test/ats'));
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get('location')).toBe('https://hrm.example.test/mfa?next=%2Fats');
+  });
+
   it('redirects unauthenticated staff route to /login when DevTools are disabled', async () => {
     vi.stubEnv('NODE_ENV', 'development');
     vi.stubEnv('NEXT_PUBLIC_ENABLE_DEV_TOOLS', 'false');

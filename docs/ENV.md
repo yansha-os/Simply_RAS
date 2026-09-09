@@ -45,8 +45,10 @@ Live DEV audit verified **2026-09-07** (project ref
 - Access tokens expire after 3,600 seconds. Potentially compromised refresh
   tokens are detected and revoked; the refresh-token reuse interval is 10
   seconds.
-- TOTP is available. AAL1 sessions are limited to 15 minutes, but AAL2 is not
-  enforced because the only current Auth user has no verified MFA factor.
+- TOTP enrollment and factor management are available at `/account/security`
+  in both apps. Each app's proxy enforces AAL2 for users who have a verified
+  factor and redirects their AAL1 sessions to `/mfa`; unenrolled users remain
+  allowed until rollout is complete. AAL1 sessions are limited to 15 minutes.
 - Per-IP Auth limits observed: 150 token refreshes, 30 token verifications, and
   30 sign-up/sign-in requests per five minutes. These complement the app-side
   in-memory limiter (5 attempts per email+IP per 15 minutes in each app's
@@ -54,9 +56,9 @@ Live DEV audit verified **2026-09-07** (project ref
 
 Before production launch:
 
-- Enroll and verify at least two recoverable administrator MFA factors before
-  enforcing AAL2; enforcing it with zero verified factors can lock out the sole
-  administrator.
+- Enroll and verify at least two administrator authenticators before enabling
+  project-wide AAL2 enforcement. The UI prevents removal of the sole verified
+  factor; Supabase does not currently provide recovery codes.
 - Configure the real production Site URL and exact allow-listed redirect URLs;
   DEV currently contains only `http://localhost:3000` and no additional URLs.
 - Mirror and re-audit the production project's Auth controls independently.

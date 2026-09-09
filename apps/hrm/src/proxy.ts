@@ -55,6 +55,7 @@ async function hasFingerprintValidCandidateSession(
 
 export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname
+  const isMfaPath = pathname === '/mfa'
   const forwardedHeaders = new Headers(request.headers)
   forwardedHeaders.delete('x-ras-pathname')
   if (isStaffProtectedPath(pathname)) {
@@ -147,6 +148,38 @@ export async function proxy(request: NextRequest) {
   }
 
   const isStaffDevBypassed = isStaffDevToolsBypassEnabled(request)
+  if (isMfaPath && !user && !isStaffDevBypassed) {
+    const url = request.nextUrl.clone()
+    url.pathname = '/login'
+    url.search = ''
+    return NextResponse.redirect(url)
+  }
+
+  if (user && !isStaffDevBypassed) {
+    const { data: aal, error: aalError } =
+      await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
+
+    if (isMfaPath && !aalError && aal.currentLevel === 'aal2') {
+      const requestedNext = request.nextUrl.searchParams.get('next')
+      const safeNext =
+        requestedNext?.startsWith('/') && !requestedNext.startsWith('//')
+          ? requestedNext
+          : '/'
+      return NextResponse.redirect(new URL(safeNext, request.url))
+    }
+
+    if (
+      isStaffProtectedPath(pathname) &&
+      (aalError || (aal.nextLevel === 'aal2' && aal.currentLevel !== 'aal2'))
+    ) {
+      const url = request.nextUrl.clone()
+      url.pathname = '/mfa'
+      url.search = ''
+      url.searchParams.set('next', pathname)
+      return NextResponse.redirect(url)
+    }
+  }
+
   if (isStaffProtectedPath(pathname) && !user && !isStaffDevBypassed) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'

@@ -22,6 +22,7 @@ export function isStaffProtectedPath(pathname: string): boolean {
     pathname.startsWith('/payroll') ||
     pathname.startsWith('/session-emr') ||
     pathname.startsWith('/rbt-manager') ||
+    pathname.startsWith('/account') ||
     pathname.startsWith('/api/')
   );
 }

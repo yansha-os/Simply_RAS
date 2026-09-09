@@ -72,6 +72,7 @@ function hrmRedirectUrl(pathname: string): string {
 
 export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname
+  const isMfaPath = pathname === '/mfa'
 
   // HR product is HRM-only — bounce legacy CRM /portal-hr routes
   if (pathname === '/portal-hr' || pathname.startsWith('/portal-hr/')) {
@@ -148,6 +149,38 @@ export async function proxy(request: NextRequest) {
   } = await supabase.auth.getUser()
 
   const isDevBypassed = isDevToolsBypassEnabled(request)
+  if (isMfaPath && !user && !isDevBypassed) {
+    const url = request.nextUrl.clone()
+    url.pathname = '/login'
+    url.search = ''
+    return NextResponse.redirect(url)
+  }
+
+  if (user && !isDevBypassed) {
+    const { data: aal, error: aalError } =
+      await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
+
+    if (isMfaPath && !aalError && aal.currentLevel === 'aal2') {
+      const requestedNext = request.nextUrl.searchParams.get('next')
+      const safeNext =
+        requestedNext?.startsWith('/') && !requestedNext.startsWith('//')
+          ? requestedNext
+          : '/'
+      return NextResponse.redirect(new URL(safeNext, request.url))
+    }
+
+    if (
+      isProtectedPath(pathname) &&
+      (aalError || (aal.nextLevel === 'aal2' && aal.currentLevel !== 'aal2'))
+    ) {
+      const url = request.nextUrl.clone()
+      url.pathname = '/mfa'
+      url.search = ''
+      url.searchParams.set('next', pathname)
+      return NextResponse.redirect(url)
+    }
+  }
+
   if (isProtectedPath(pathname) && !user && !isDevBypassed) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'

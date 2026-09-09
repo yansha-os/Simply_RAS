@@ -2,3 +2,4 @@
 export * from '../../../apps/crm/src/components/ui/Button';
 export * from '../../../apps/crm/src/components/ui/Card';
 export * from './MfaSecurityPanel';
+export * from './MfaChallengePanel';
