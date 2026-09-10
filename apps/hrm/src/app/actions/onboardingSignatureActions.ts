@@ -12,6 +12,7 @@ import {
   getOnboardingDoc,
   HARASSMENT_QUIZ,
   HARASSMENT_QUIZ_PASS_PCT,
+  ONBOARDING_COMPLETION_ACTIONS,
   ONBOARDING_TOTAL_STEPS,
 } from '@/lib/onboardingDocuments';
 import {
@@ -38,6 +39,7 @@ const ATS_STAFF_ROLES = [
   'ADMIN',
   'SUPER_ADMIN',
 ] as Role[];
+const AUDIT_EXPORT_ROLES = ['HEAD_HR', 'CEO', 'ADMIN', 'SUPER_ADMIN'] as Role[];
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -598,9 +600,18 @@ export async function getOnboardingStepState() {
 
     const [events, packet] = await Promise.all([
       prisma.onboardingSignatureEvent.findMany({
-        where: { candidateId: session.candidateId },
+        where: {
+          candidateId: session.candidateId,
+          actionType: { in: [...ONBOARDING_COMPLETION_ACTIONS] },
+        },
         orderBy: { createdAt: 'desc' },
         take: 200,
+        select: {
+          stepNumber: true,
+          actionType: true,
+          auditHash: true,
+          createdAt: true,
+        },
       }),
       prisma.candidateOnboardingPacket.findUnique({
         where: { candidateId: session.candidateId },
@@ -620,7 +631,12 @@ export async function getOnboardingStepState() {
         ls54Version: packet?.ls54Version ?? 0,
         ls54SentAt: packet?.ls54SentAt?.toISOString() ?? null,
         ls54Payload: packet?.ls54Payload ?? null,
-        events: events.map(toDto),
+        events: events.map((event) => ({
+          stepNumber: event.stepNumber,
+          actionType: event.actionType,
+          auditHash: event.auditHash,
+          createdAt: event.createdAt.toISOString(),
+        })),
       },
     };
   } catch (error) {
@@ -651,7 +667,7 @@ export async function getCandidateOnboardingAudit(candidateId: string) {
 /** Full audit export pack for Head HR download (JSON). */
 export async function exportCandidateAuditPack(candidateId: string) {
   try {
-    await requireRole(ATS_STAFF_ROLES);
+    await requireRole(AUDIT_EXPORT_ROLES);
     if (!isUuid(candidateId)) {
       return { success: false as const, error: 'Invalid candidate.', data: null };
     }

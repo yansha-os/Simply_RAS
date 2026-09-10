@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => {
   const remove = vi.fn();
   const storageFrom = vi.fn(() => ({ upload, remove }));
   return {
+    requireRole: vi.fn(),
     upload,
     remove,
     storageClient: { storage: { from: storageFrom } },
@@ -19,7 +20,7 @@ const mocks = vi.hoisted(() => {
     prisma: {
       $transaction: vi.fn(),
       applicantDeviceSession: { findUnique: vi.fn() },
-      onboardingSignatureEvent: { create: vi.fn(), count: vi.fn() },
+      onboardingSignatureEvent: { create: vi.fn(), count: vi.fn(), findMany: vi.fn() },
       candidateOnboardingPacket: {
         findUnique: vi.fn(),
         updateMany: vi.fn(),
@@ -36,7 +37,7 @@ vi.mock('@/lib/supabase/server', () => ({
   createClient: vi.fn(async () => mocks.storageClient),
 }));
 vi.mock('@/lib/devToolsGate', () => ({ isDevToolsEnabled: () => false }));
-vi.mock('@/lib/auth-guard', () => ({ requireRole: vi.fn() }));
+vi.mock('@/lib/auth-guard', () => ({ requireRole: mocks.requireRole }));
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
 vi.mock('next/headers', () => ({
   cookies: vi.fn(async () => ({ get: mocks.cookieGet })),
@@ -44,6 +45,8 @@ vi.mock('next/headers', () => ({
 }));
 
 import {
+  exportCandidateAuditPack,
+  getOnboardingStepState,
   recordOnboardingAdvance,
   recordOnboardingSignature,
   submitHarassmentQuiz,
@@ -66,6 +69,7 @@ beforeEach(() => {
     createdAt: new Date('2026-09-06T12:00:00.000Z'),
   });
   mocks.prisma.onboardingSignatureEvent.count.mockResolvedValue(0);
+  mocks.prisma.onboardingSignatureEvent.findMany.mockResolvedValue([]);
   mocks.prisma.candidateOnboardingPacket.updateMany.mockResolvedValue({ count: 1 });
   mocks.prisma.candidateOnboardingPacket.findUnique.mockResolvedValue({ formData: {} });
   mocks.prisma.$transaction.mockImplementation(
@@ -74,6 +78,61 @@ beforeEach(() => {
 });
 
 describe('onboarding action integrity', () => {
+  it('returns only minimal completion evidence to the applicant UI', async () => {
+    mocks.prisma.onboardingSignatureEvent.findMany.mockResolvedValue([
+      {
+        stepNumber: 1,
+        actionType: 'SIGNED',
+        auditHash: 'hash-1',
+        createdAt: new Date('2026-09-09T12:00:00.000Z'),
+        ipAddress: '203.0.113.10',
+        userAgent: 'private-agent',
+        deviceFingerprint: FINGERPRINT,
+        quizAnswers: { private: true },
+      },
+    ]);
+
+    const result = await getOnboardingStepState();
+
+    expect(result).toMatchObject({
+      success: true,
+      data: {
+        events: [
+          {
+            stepNumber: 1,
+            actionType: 'SIGNED',
+            auditHash: 'hash-1',
+            createdAt: '2026-09-09T12:00:00.000Z',
+          },
+        ],
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain('203.0.113.10');
+    expect(JSON.stringify(result)).not.toContain('private-agent');
+    expect(mocks.prisma.onboardingSignatureEvent.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: {
+          stepNumber: true,
+          actionType: true,
+          auditHash: true,
+          createdAt: true,
+        },
+      })
+    );
+  });
+
+  it('restricts full audit-pack exports to leadership roles', async () => {
+    const result = await exportCandidateAuditPack('not-a-uuid');
+
+    expect(result).toMatchObject({ success: false, error: 'Invalid candidate.' });
+    expect(mocks.requireRole).toHaveBeenCalledWith([
+      'HEAD_HR',
+      'CEO',
+      'ADMIN',
+      'SUPER_ADMIN',
+    ]);
+  });
+
   it('rejects incomplete quiz answers before database work', async () => {
     const result = await submitHarassmentQuiz({ '1': 0 });
 
