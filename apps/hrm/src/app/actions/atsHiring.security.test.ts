@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
     atsCandidate: {
       findUnique: vi.fn(),
       update: vi.fn(),
+      delete: vi.fn(),
     },
     applicantDeviceSession: {
       updateMany: vi.fn(),
@@ -69,6 +70,7 @@ vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }));
 
 import {
   advanceAtsStage,
+  deleteAtsCandidate,
   hireCandidate,
   setAtsStage,
 } from './atsActions';
@@ -228,5 +230,86 @@ describe('ATS hiring Server Action boundary', () => {
       notificationLinkUrl: expect.stringMatching(/\/portal-clinical$/),
     });
     expect(mocks.notifyUsers).not.toHaveBeenCalled();
+  });
+});
+
+describe('ATS candidate deletion retention boundary', () => {
+  const pristineCandidate = {
+    stage: 'APPLIED',
+    activationStatus: 'PENDING_HR_REVIEW',
+    userId: null,
+    interview: null,
+    _count: {
+      helpTickets: 0,
+      interviewRecordings: 0,
+      deviceSessions: 0,
+      signatureEvents: 0,
+    },
+    onboardingPacket: {
+      inviteSentAt: null,
+      inviteAcceptedAt: null,
+      resumeStoragePath: null,
+      govtIdStoragePath: null,
+      ls54StoragePath: null,
+      w4Complete: false,
+      i9Complete: false,
+      directDepositComplete: false,
+      cprUploaded: false,
+      tasksDone: false,
+      availabilityDone: false,
+      simulationDone: false,
+      interviewBooked: false,
+      interviewPassed: false,
+      certUploaded: false,
+      backgroundCleared: false,
+      clearedForHire: false,
+    },
+  };
+
+  it('denies unauthenticated deletion before reading candidate data', async () => {
+    mocks.requireStaff.mockResolvedValue({
+      ok: false,
+      error: 'Not authenticated. Please sign in.',
+    });
+
+    const result = await deleteAtsCandidate(CANDIDATE_ID);
+
+    expect(result).toEqual({ success: false, error: 'Not authenticated. Please sign in.' });
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+    expect(mocks.prisma.atsCandidate.delete).not.toHaveBeenCalled();
+  });
+
+  it('retains candidates with durable onboarding evidence', async () => {
+    mocks.prisma.atsCandidate.findUnique.mockResolvedValue({
+      ...pristineCandidate,
+      onboardingPacket: {
+        ...pristineCandidate.onboardingPacket,
+        resumeStoragePath: `${CANDIDATE_ID}/resume.pdf`,
+      },
+    });
+
+    const result = await deleteAtsCandidate(CANDIDATE_ID);
+
+    expect(result).toMatchObject({
+      success: false,
+      error: expect.stringMatching(/must be retained/i),
+    });
+    expect(mocks.prisma.atsCandidate.delete).not.toHaveBeenCalled();
+  });
+
+  it('deletes only a pristine application inside a serializable transaction', async () => {
+    mocks.prisma.atsCandidate.findUnique.mockResolvedValue(pristineCandidate);
+    mocks.prisma.atsCandidate.delete.mockResolvedValue({ id: CANDIDATE_ID });
+
+    const result = await deleteAtsCandidate(CANDIDATE_ID);
+
+    expect(result).toEqual({ success: true });
+    expect(mocks.prisma.atsCandidate.delete).toHaveBeenCalledWith({
+      where: { id: CANDIDATE_ID },
+    });
+    expect(mocks.prisma.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      { isolationLevel: 'Serializable' }
+    );
   });
 });

@@ -1261,16 +1261,105 @@ export async function rejectCandidate(candidateId: string) {
 }
 
 export async function deleteAtsCandidate(candidateId: string) {
-  try {
-    await requireRole(ATS_STAFF_ROLES);
+  const gate = await requireStaff(ATS_STAFF_ROLES);
+  if (!gate.ok) return { success: false, error: gate.error };
 
-    await prisma.atsCandidate.delete({ where: { id: candidateId } });
+  try {
+    const outcome = await prisma.$transaction(
+      async (tx) => {
+        const candidate = await tx.atsCandidate.findUnique({
+          where: { id: candidateId },
+          select: {
+            stage: true,
+            activationStatus: true,
+            userId: true,
+            onboardingPacket: {
+              select: {
+                inviteSentAt: true,
+                inviteAcceptedAt: true,
+                resumeStoragePath: true,
+                govtIdStoragePath: true,
+                ls54StoragePath: true,
+                w4Complete: true,
+                i9Complete: true,
+                directDepositComplete: true,
+                cprUploaded: true,
+                tasksDone: true,
+                availabilityDone: true,
+                simulationDone: true,
+                interviewBooked: true,
+                interviewPassed: true,
+                certUploaded: true,
+                backgroundCleared: true,
+                clearedForHire: true,
+              },
+            },
+            interview: { select: { id: true } },
+            _count: {
+              select: {
+                helpTickets: true,
+                interviewRecordings: true,
+                deviceSessions: true,
+                signatureEvents: true,
+              },
+            },
+          },
+        });
+
+        if (!candidate) return 'missing' as const;
+
+        const packet = candidate.onboardingPacket;
+        const hasRetainedEvidence =
+          candidate.stage !== 'APPLIED' ||
+          candidate.activationStatus !== 'PENDING_HR_REVIEW' ||
+          candidate.userId !== null ||
+          candidate.interview !== null ||
+          Object.values(candidate._count).some((count) => count > 0) ||
+          Boolean(
+            packet &&
+              (packet.inviteSentAt ||
+                packet.inviteAcceptedAt ||
+                packet.resumeStoragePath ||
+                packet.govtIdStoragePath ||
+                packet.ls54StoragePath ||
+                packet.w4Complete ||
+                packet.i9Complete ||
+                packet.directDepositComplete ||
+                packet.cprUploaded ||
+                packet.tasksDone ||
+                packet.availabilityDone ||
+                packet.simulationDone ||
+                packet.interviewBooked ||
+                packet.interviewPassed ||
+                packet.certUploaded ||
+                packet.backgroundCleared ||
+                packet.clearedForHire)
+          );
+
+        if (hasRetainedEvidence) return 'retained' as const;
+
+        await tx.atsCandidate.delete({ where: { id: candidateId } });
+        return 'deleted' as const;
+      },
+      { isolationLevel: 'Serializable' }
+    );
+
+    if (outcome === 'missing') {
+      return { success: false, error: 'Candidate not found.' };
+    }
+    if (outcome === 'retained') {
+      return {
+        success: false,
+        error:
+          'Candidates with onboarding, interview, or hiring evidence must be retained. Mark the candidate as rejected instead.',
+      };
+    }
 
     revalidatePath('/ats');
-        return { success: true };
+    return { success: true };
   } catch (error: unknown) {
     console.error('deleteAtsCandidate failed:', error instanceof Error ? error.message : error);
-    return { success: false, error: readErrorMessage(error) || 'Failed to delete candidate.' };
+    return { success: false, error: 'Failed to delete candidate.' };
   }
 }
 
