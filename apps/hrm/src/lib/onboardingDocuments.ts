@@ -300,6 +300,11 @@ export const ONBOARDING_DOCS: OnboardingDocDef[] = [
   },
 ];
 
+export const ONBOARDING_COMPLETION_EVENT_FILTERS = ONBOARDING_DOCS.map((doc) => ({
+  stepNumber: doc.step,
+  actionType: COMPLETION_ACTION_BY_KIND[doc.kind] ?? '',
+})).filter((event) => event.actionType.length > 0);
+
 export type Ls54Status = 'NONE' | 'DRAFT' | 'SENT' | 'IN_DISCUSSION' | 'SIGNED' | 'DECLINED';
 
 export type Ls54Payload = {

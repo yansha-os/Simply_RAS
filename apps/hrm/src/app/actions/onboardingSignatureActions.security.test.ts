@@ -111,6 +111,7 @@ describe('onboarding action integrity', () => {
     expect(JSON.stringify(result)).not.toContain('private-agent');
     expect(mocks.prisma.onboardingSignatureEvent.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
+        distinct: ['stepNumber'],
         select: {
           stepNumber: true,
           actionType: true,
@@ -119,6 +120,9 @@ describe('onboarding action integrity', () => {
         },
       })
     );
+    const query = mocks.prisma.onboardingSignatureEvent.findMany.mock.calls[0]?.[0];
+    expect(query).not.toHaveProperty('take');
+    expect(query?.where?.OR).toHaveLength(27);
   });
 
   it('restricts full audit-pack exports to leadership roles', async () => {

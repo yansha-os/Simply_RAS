@@ -12,7 +12,7 @@ import {
   getOnboardingDoc,
   HARASSMENT_QUIZ,
   HARASSMENT_QUIZ_PASS_PCT,
-  ONBOARDING_COMPLETION_ACTIONS,
+  ONBOARDING_COMPLETION_EVENT_FILTERS,
   ONBOARDING_TOTAL_STEPS,
 } from '@/lib/onboardingDocuments';
 import {
@@ -602,10 +602,10 @@ export async function getOnboardingStepState() {
       prisma.onboardingSignatureEvent.findMany({
         where: {
           candidateId: session.candidateId,
-          actionType: { in: [...ONBOARDING_COMPLETION_ACTIONS] },
+          OR: [...ONBOARDING_COMPLETION_EVENT_FILTERS],
         },
         orderBy: { createdAt: 'desc' },
-        take: 200,
+        distinct: ['stepNumber'],
         select: {
           stepNumber: true,
           actionType: true,
