@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
 import { cookies } from 'next/headers';
 import { getCurrentUser } from '@/lib/auth';
-import { requireRole } from '@/lib/auth-guard';
+import { requireRole, requireStaff } from '@/lib/auth-guard';
 import { isDevToolsEnabled } from '@/lib/devToolsGate';
 import { newMagicLinkExpiry } from '@/lib/magicLinkExpiry';
 import {
@@ -23,6 +23,15 @@ const ATS_STAFF_ROLES = [
   'HEAD_HR',
   'HR',
   'HR_AGENT',
+  'CEO',
+  'OPS_DIRECTOR',
+  'ADMIN',
+  'SUPER_ADMIN',
+] as Role[];
+
+const INTERVIEW_RELEASE_ROLES = [
+  'HEAD_HR',
+  'HR',
   'CEO',
   'OPS_DIRECTOR',
   'ADMIN',
@@ -498,6 +507,44 @@ export async function claimAtsInterview(candidateId: string) {
       success: false,
       error: error instanceof Error ? error.message : 'Failed to claim interview.',
     };
+  }
+}
+
+/** Leadership: release an unstarted interview claim back to the HR queue. */
+export async function releaseAtsInterviewClaim(candidateId: string) {
+  const gate = await requireStaff(INTERVIEW_RELEASE_ROLES);
+  if (!gate.ok) return { success: false, error: gate.error };
+
+  try {
+    const released = await prisma.atsInterview.updateMany({
+      where: {
+        candidateId,
+        claimedByUserId: { not: null },
+        hrJoinedAt: null,
+        completedAt: null,
+        status: { in: ['SCHEDULED', 'IN_PROGRESS'] },
+      },
+      data: {
+        claimedByUserId: null,
+        status: 'SCHEDULED',
+      },
+    });
+    if (released.count !== 1) {
+      return {
+        success: false,
+        error: 'This interview is unclaimed, already joined, or already completed. Reload before retrying.',
+      };
+    }
+
+    revalidatePath(`/ats/applicant/${candidateId}`);
+    revalidatePath('/ats');
+    return { success: true };
+  } catch (error: unknown) {
+    console.error(
+      'releaseAtsInterviewClaim failed:',
+      error instanceof Error ? error.message : 'Unknown'
+    );
+    return { success: false, error: 'Failed to release the interview claim.' };
   }
 }
 

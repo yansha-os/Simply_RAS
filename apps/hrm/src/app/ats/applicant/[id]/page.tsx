@@ -60,6 +60,7 @@ import {
   saveInterviewScorecard,
   saveInterviewScriptProgress,
   markHrJoinedInterview,
+  releaseAtsInterviewClaim,
   completeAtsInterview,
 } from '@/app/actions/hrInterviewActions';
 import type { AtsCandidateData } from '@/lib/atsStage';
@@ -119,7 +120,8 @@ export default function ApplicantProfilePage() {
   const [showDecisionModal, setShowDecisionModal] = useState(false);
   const [recommendationChoice, setRecommendationChoice] = useState<'RECOMMEND_HIRE' | 'REJECT' | 'NO_OPINION'>('RECOMMEND_HIRE');
   const [recommendationExplanation, setRecommendationExplanation] = useState('');
-  const [, setIsClaimedByMe] = useState(true);
+  const [isInterviewClaimed, setIsInterviewClaimed] = useState(false);
+  const [isReleasingInterview, setIsReleasingInterview] = useState(false);
   const [completedScriptSteps, setCompletedScriptSteps] = useState<number[]>([]);
 
   // In-Browser Video Recording State
@@ -435,7 +437,7 @@ export default function ApplicantProfilePage() {
             ...(interviewRow.scorecard as typeof prev),
           }));
         }
-        if (interviewRow.claimedByUserId) setIsClaimedByMe(true);
+        setIsInterviewClaimed(Boolean(interviewRow.claimedByUserId));
         if (interviewRow.recommendation === 'ADVANCE' || interviewRow.recommendation === 'RECOMMEND_HIRE') {
           setRecommendationDecision('RECOMMEND_HIRE');
         } else if (interviewRow.recommendation === 'REJECT') {
@@ -689,6 +691,23 @@ export default function ApplicantProfilePage() {
       toast.error('Could not copy the invitation. Check clipboard permission and try again.');
     } finally {
       setIsCopyingMagicLink(false);
+    }
+  };
+
+  const handleReleaseInterviewClaim = async () => {
+    setIsReleasingInterview(true);
+    try {
+      const result = await releaseAtsInterviewClaim(applicantId);
+      if (!result.success) {
+        toast.error(result.error || 'Failed to release interview claim.');
+        return;
+      }
+      setIsInterviewClaimed(false);
+      toast.success('Interview claim released back to the HR queue.');
+    } catch {
+      toast.error('Failed to release interview claim. Please try again.');
+    } finally {
+      setIsReleasingInterview(false);
     }
   };
 
@@ -1534,8 +1553,20 @@ export default function ApplicantProfilePage() {
                   <span className="text-xs text-zinc-400 font-mono font-normal">• {interviewPayload?.date || 'Fri, Aug 7'} at {interviewPayload?.time || '3:00 PM'}</span>
                 </h2>
                 <p className="text-[11px] text-zinc-400 font-mono flex items-center gap-2 mt-0.5">
-                  <span>Claimed by <strong className="text-white">Marcus Vance</strong></span>
-                  <button onClick={() => toast.info('Claim ownership updated')} className="text-rose-400 hover:underline cursor-pointer">Force Unclaim</button>
+                  <span>
+                    {isInterviewClaimed ? 'Claimed' : 'Assigned'} to{' '}
+                    <strong className="text-white">{interviewPayload?.hrInterviewer || 'HR queue'}</strong>
+                  </span>
+                  {isInterviewClaimed && ['HEAD_HR', 'HR', 'CEO', 'OPS_DIRECTOR', 'ADMIN', 'SUPER_ADMIN'].includes(role) ? (
+                    <button
+                      type="button"
+                      onClick={() => void handleReleaseInterviewClaim()}
+                      disabled={isReleasingInterview}
+                      className="text-rose-400 hover:underline disabled:text-zinc-600 cursor-pointer disabled:cursor-not-allowed"
+                    >
+                      {isReleasingInterview ? 'Releasing…' : 'Force Unclaim'}
+                    </button>
+                  ) : null}
                 </p>
               </div>
             </div>

@@ -8,20 +8,24 @@ const FINGERPRINT = '44444444-4444-4444-8444-444444444444';
 const mocks = vi.hoisted(() => ({
   getCurrentUser: vi.fn(),
   requireRole: vi.fn(),
+  requireStaff: vi.fn(),
   resolveFingerprintValidCandidate: vi.fn(),
   cookieGet: vi.fn(),
   revalidatePath: vi.fn(),
   prisma: {
     user: { findFirst: vi.fn(), findMany: vi.fn() },
     atsCandidate: { findUnique: vi.fn(), update: vi.fn() },
-    atsInterview: { findUnique: vi.fn(), upsert: vi.fn() },
+    atsInterview: { findUnique: vi.fn(), upsert: vi.fn(), updateMany: vi.fn() },
     notification: { create: vi.fn() },
   },
 }));
 
 vi.mock('@/lib/prisma', () => ({ prisma: mocks.prisma }));
 vi.mock('@/lib/auth', () => ({ getCurrentUser: mocks.getCurrentUser }));
-vi.mock('@/lib/auth-guard', () => ({ requireRole: mocks.requireRole }));
+vi.mock('@/lib/auth-guard', () => ({
+  requireRole: mocks.requireRole,
+  requireStaff: mocks.requireStaff,
+}));
 vi.mock('@/lib/devToolsGate', () => ({ isDevToolsEnabled: () => false }));
 vi.mock('@/lib/magicLinkExpiry', () => ({
   newMagicLinkExpiry: () => new Date('2026-10-01T00:00:00.000Z'),
@@ -46,6 +50,7 @@ import {
   bookHrInterview,
   getAtsInterview,
   getHrMembers,
+  releaseAtsInterviewClaim,
 } from './hrInterviewActions';
 
 function interviewRow() {
@@ -74,10 +79,57 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.getCurrentUser.mockResolvedValue(null);
   mocks.resolveFingerprintValidCandidate.mockResolvedValue(null);
+  mocks.requireStaff.mockResolvedValue({
+    ok: true,
+    user: { id: INTERVIEWER_ID, role: 'HEAD_HR', isActive: true },
+  });
   mocks.cookieGet.mockImplementation((name: string) => {
     if (name === 'ras_device_session_token') return { value: CANDIDATE_ID };
     if (name === 'device_fingerprint') return { value: FINGERPRINT };
     return undefined;
+  });
+});
+
+describe('HR interview claim release', () => {
+  it('denies unauthorized releases before touching interview data', async () => {
+    mocks.requireStaff.mockResolvedValue({
+      ok: false,
+      error: 'You are not authorized to perform this action.',
+    });
+
+    const result = await releaseAtsInterviewClaim(CANDIDATE_ID);
+
+    expect(result).toEqual({
+      success: false,
+      error: 'You are not authorized to perform this action.',
+    });
+    expect(mocks.prisma.atsInterview.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('conditionally releases only an unstarted active claim', async () => {
+    mocks.prisma.atsInterview.updateMany.mockResolvedValue({ count: 1 });
+
+    const result = await releaseAtsInterviewClaim(CANDIDATE_ID);
+
+    expect(result).toEqual({ success: true });
+    expect(mocks.prisma.atsInterview.updateMany).toHaveBeenCalledWith({
+      where: {
+        candidateId: CANDIDATE_ID,
+        claimedByUserId: { not: null },
+        hrJoinedAt: null,
+        completedAt: null,
+        status: { in: ['SCHEDULED', 'IN_PROGRESS'] },
+      },
+      data: { claimedByUserId: null, status: 'SCHEDULED' },
+    });
+  });
+
+  it('reports a stale or already-started claim without claiming success', async () => {
+    mocks.prisma.atsInterview.updateMany.mockResolvedValue({ count: 0 });
+
+    const result = await releaseAtsInterviewClaim(CANDIDATE_ID);
+
+    expect(result).toMatchObject({ success: false, error: expect.stringMatching(/already/i) });
   });
 });
 
