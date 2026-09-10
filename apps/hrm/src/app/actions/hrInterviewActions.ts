@@ -687,12 +687,26 @@ export async function saveInterviewScorecard(
 
 export async function saveInterviewScriptProgress(
   candidateId: string,
-  completedSteps: number[]
+  completedSteps: unknown
 ) {
-  try {
-    await requireRole(ATS_STAFF_ROLES);
+  const gate = await requireStaff(ATS_STAFF_ROLES);
+  if (!gate.ok) return { success: false, error: gate.error };
+  if (!isUuid(candidateId)) return { success: false, error: 'Invalid candidate ID.' };
+  if (
+    !Array.isArray(completedSteps) ||
+    completedSteps.length > 11 ||
+    completedSteps.some(
+      (step) => typeof step !== 'number' || !Number.isInteger(step) || step < 0 || step > 10
+    ) ||
+    new Set(completedSteps).size !== completedSteps.length
+  ) {
+    return { success: false, error: 'Interview script progress is invalid.' };
+  }
 
-    const scriptProgress = { completedSteps };
+  const normalizedSteps = [...completedSteps].sort((left, right) => left - right);
+
+  try {
+    const scriptProgress = { completedSteps: normalizedSteps };
     const updated = await prisma.atsInterview.upsert({
       where: { candidateId },
       create: {

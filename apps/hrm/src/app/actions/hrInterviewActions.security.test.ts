@@ -52,6 +52,7 @@ import {
   getHrMembers,
   releaseAtsInterviewClaim,
   saveInterviewScorecard,
+  saveInterviewScriptProgress,
 } from './hrInterviewActions';
 
 function interviewRow() {
@@ -170,6 +171,48 @@ describe('HR interview scorecard persistence', () => {
       expect.objectContaining({
         where: { candidateId: CANDIDATE_ID },
         update: { scorecard: validScorecard },
+      })
+    );
+  });
+});
+
+describe('HR interview script progress persistence', () => {
+  it('denies unauthorized saves before writing data', async () => {
+    mocks.requireStaff.mockResolvedValue({ ok: false, error: 'Forbidden.' });
+
+    const result = await saveInterviewScriptProgress(CANDIDATE_ID, [0]);
+
+    expect(result).toEqual({ success: false, error: 'Forbidden.' });
+    expect(mocks.prisma.atsInterview.upsert).not.toHaveBeenCalled();
+  });
+
+  it('rejects duplicate, out-of-range, fractional, nonnumeric, and oversized progress', async () => {
+    const invalidProgress: unknown[] = [
+      [0, 0],
+      [-1],
+      [11],
+      [1.5],
+      ['1'],
+      Array.from({ length: 12 }, (_, index) => index),
+    ];
+
+    for (const progress of invalidProgress) {
+      const result = await saveInterviewScriptProgress(CANDIDATE_ID, progress);
+
+      expect(result).toEqual({ success: false, error: 'Interview script progress is invalid.' });
+      expect(mocks.prisma.atsInterview.upsert).not.toHaveBeenCalled();
+    }
+  });
+
+  it('sorts and persists a unique valid step set', async () => {
+    mocks.prisma.atsInterview.upsert.mockResolvedValue(interviewRow());
+
+    const result = await saveInterviewScriptProgress(CANDIDATE_ID, [10, 0, 4]);
+
+    expect(result.success).toBe(true);
+    expect(mocks.prisma.atsInterview.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: { scriptProgress: { completedSteps: [0, 4, 10] } },
       })
     );
   });

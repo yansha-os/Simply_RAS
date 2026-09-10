@@ -131,6 +131,7 @@ export default function ApplicantProfilePage() {
   const [isInterviewClaimed, setIsInterviewClaimed] = useState(false);
   const [isReleasingInterview, setIsReleasingInterview] = useState(false);
   const [completedScriptSteps, setCompletedScriptSteps] = useState<number[]>([]);
+  const [isSavingScriptProgress, setIsSavingScriptProgress] = useState(false);
 
   // In-Browser Video Recording State
   const [isRecording, setIsRecording] = useState(false);
@@ -680,6 +681,32 @@ export default function ApplicantProfilePage() {
       return false;
     } finally {
       setIsSavingScorecard(false);
+    }
+  };
+
+  const handleScriptStepToggle = async (stepIndex: number, title: string) => {
+    if (isSavingScriptProgress) return;
+    const wasComplete = completedScriptSteps.includes(stepIndex);
+    const updated = wasComplete
+      ? completedScriptSteps.filter((index) => index !== stepIndex)
+      : [...completedScriptSteps, stepIndex].sort((left, right) => left - right);
+
+    setCompletedScriptSteps(updated);
+    setIsSavingScriptProgress(true);
+    try {
+      const result = await saveInterviewScriptProgress(applicantId, updated);
+      if (!result.success) {
+        setCompletedScriptSteps(completedScriptSteps);
+        toast.error(result.error || 'Failed to save interview script progress.');
+        return;
+      }
+      if (wasComplete) toast.info(`Marked "${title}" as incomplete`);
+      else toast.success(`Completed "${title}"`);
+    } catch {
+      setCompletedScriptSteps(completedScriptSteps);
+      toast.error('Failed to save interview script progress. Please try again.');
+    } finally {
+      setIsSavingScriptProgress(false);
     }
   };
 
@@ -1808,27 +1835,18 @@ export default function ApplicantProfilePage() {
                         <div className="pt-2 flex justify-end border-t border-white/5">
                           <button
                             type="button"
-                            onClick={() => {
-                              if (isDone) {
-                                const updated = completedScriptSteps.filter((i) => i !== idx);
-                                setCompletedScriptSteps(updated);
-                                void saveInterviewScriptProgress(applicantId, updated);
-                                toast.info(`Marked "${step.title}" as incomplete`);
-                              } else {
-                                const updated = [...completedScriptSteps, idx];
-                                setCompletedScriptSteps(updated);
-                                void saveInterviewScriptProgress(applicantId, updated);
-                                toast.success(`✓ Completed "${step.title}"!`);
-                              }
-                            }}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition-all cursor-pointer ${
-                              isDone
-                                ? 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
-                                : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-md'
+                            onClick={() => void handleScriptStepToggle(idx, step.title)}
+                            disabled={isSavingScriptProgress}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition-all ${
+                              isSavingScriptProgress
+                                ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
+                                : isDone
+                                ? 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700 cursor-pointer'
+                                : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-md cursor-pointer'
                             }`}
                           >
-                            <Check className="w-3.5 h-3.5" />
-                            <span>{isDone ? 'Mark Incomplete' : 'Mark Done'}</span>
+                            {isSavingScriptProgress ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                            <span>{isSavingScriptProgress ? 'Saving…' : isDone ? 'Mark Incomplete' : 'Mark Done'}</span>
                           </button>
                         </div>
                       </div>
@@ -2195,12 +2213,14 @@ export default function ApplicantProfilePage() {
                   const isScriptComplete = completedScriptSteps.length === 11;
                   const isScorecardComplete = ratedCount === 8;
                   const isRecordingComplete = recordedVideos.length >= 1;
-                  const canSubmitDecision = isScriptComplete && isScorecardComplete && isRecordingComplete;
+                  const isInterviewEvidenceSaving = isSavingScriptProgress || isSavingScorecard;
+                  const canSubmitDecision =
+                    isScriptComplete && isScorecardComplete && isRecordingComplete && !isInterviewEvidenceSaving;
 
                   return (
                     <div className="flex items-center justify-between border-t border-white/10 pt-4">
                       <div className="text-[11px] font-mono">
-                        {!canSubmitDecision ? (
+                        {!isScriptComplete || !isScorecardComplete || !isRecordingComplete ? (
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="text-amber-400 font-bold flex items-center gap-1.5 bg-amber-500/10 px-3 py-1.5 rounded-xl border border-amber-500/30">
                               <AlertTriangle className="w-4 h-4 text-amber-400 animate-pulse" />
@@ -2226,6 +2246,11 @@ export default function ApplicantProfilePage() {
                               </span>
                             )}
                           </div>
+                        ) : isInterviewEvidenceSaving ? (
+                          <span className="text-blue-400 font-bold flex items-center gap-1.5 bg-blue-500/10 px-3 py-1.5 rounded-xl border border-blue-500/30">
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            <span>Saving interview evidence before decision submission…</span>
+                          </span>
                         ) : (
                           <span className="text-emerald-400 font-bold flex items-center gap-1.5 bg-emerald-500/10 px-3 py-1.5 rounded-xl border border-emerald-500/30">
                             <CheckCircle2 className="w-4 h-4 text-emerald-400" />
