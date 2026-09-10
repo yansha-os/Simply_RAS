@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
 import { HR_ROLES, requireRole, requireStaff } from '@/lib/auth-guard';
 import { getCurrentUser } from '@/lib/auth';
-import { newMagicLinkExpiry } from '@/lib/magicLinkExpiry';
+import { isMagicLinkExpiryCurrent, newMagicLinkExpiry } from '@/lib/magicLinkExpiry';
 import { resolveActingRbtContext } from '@/lib/resolveActingRbt';
 import {
   formatManagerEtDate,
@@ -1223,6 +1223,70 @@ export async function revokeCandidateMagicLink(candidateId: string) {
   } catch (error: unknown) {
     console.error('revokeCandidateMagicLink failed:', error instanceof Error ? error.message : error);
     return { success: false, error: readErrorMessage(error) || 'Failed to revoke magic link.' };
+  }
+}
+
+/** Staff: revoke bound devices while preserving a still-active invitation token. */
+export async function resetCandidateDeviceLock(candidateId: string) {
+  const gate = await requireStaff(ATS_STAFF_ROLES);
+  if (!gate.ok) return { success: false, error: gate.error };
+
+  try {
+    const outcome = await prisma.$transaction(
+      async (tx) => {
+        const packet = await tx.candidateOnboardingPacket.findUnique({
+          where: { candidateId },
+          select: {
+            id: true,
+            magicLinkToken: true,
+            magicLinkExpiresAt: true,
+            magicLinkRevokedAt: true,
+          },
+        });
+
+        if (!packet) return { status: 'missing' as const };
+        if (
+          !packet.magicLinkToken ||
+          packet.magicLinkRevokedAt ||
+          !isMagicLinkExpiryCurrent(packet.magicLinkExpiresAt)
+        ) {
+          return { status: 'inactive' as const };
+        }
+
+        const now = new Date();
+        const revoked = await tx.applicantDeviceSession.updateMany({
+          where: { candidateId, revokedAt: null },
+          data: { revokedAt: now },
+        });
+        await tx.candidateOnboardingPacket.update({
+          where: { id: packet.id },
+          data: { deviceFingerprint: null, deviceBoundAt: null },
+        });
+
+        return { status: 'reset' as const, revokedSessions: revoked.count };
+      },
+      { isolationLevel: 'Serializable' }
+    );
+
+    if (outcome.status === 'missing') {
+      return { success: false, error: 'No onboarding packet for this candidate.' };
+    }
+    if (outcome.status === 'inactive') {
+      return {
+        success: false,
+        error: 'The invitation is expired or revoked. Send a new invitation instead.',
+      };
+    }
+
+    revalidatePath('/ats');
+    revalidatePath(`/ats/applicant/${candidateId}`);
+    return { success: true, revokedSessions: outcome.revokedSessions };
+  } catch (error: unknown) {
+    console.error(
+      'resetCandidateDeviceLock failed:',
+      error instanceof Error ? error.message : 'Unknown error'
+    );
+    return { success: false, error: 'Failed to reset candidate device access.' };
   }
 }
 

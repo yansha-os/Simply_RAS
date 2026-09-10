@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => {
     },
     candidateOnboardingPacket: {
       create: vi.fn(),
+      findUnique: vi.fn(),
       update: vi.fn(),
       updateMany: vi.fn(),
     },
@@ -40,6 +41,8 @@ vi.mock('@/lib/auth-guard', () => ({
 vi.mock('@/lib/auth', () => ({ getCurrentUser: mocks.getCurrentUser }));
 vi.mock('@/lib/magicLinkExpiry', () => ({
   newMagicLinkExpiry: mocks.newMagicLinkExpiry,
+  isMagicLinkExpiryCurrent: (expiresAt: Date | null, now = Date.now()) =>
+    Boolean(expiresAt && expiresAt.getTime() > now),
 }));
 vi.mock('@/lib/resolveActingRbt', () => ({
   resolveActingRbtContext: vi.fn(),
@@ -54,7 +57,12 @@ vi.mock('@/lib/rbtManagerMetrics', () => ({
 vi.mock('@/lib/clinicTimezone', () => ({ startOfClinicDay: vi.fn() }));
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }));
 
-import { addAtsCandidate, inviteCandidate, setAtsStage } from './atsActions';
+import {
+  addAtsCandidate,
+  inviteCandidate,
+  resetCandidateDeviceLock,
+  setAtsStage,
+} from './atsActions';
 
 function candidate(token: string, activationStatus = 'PENDING_HR_REVIEW') {
   return {
@@ -96,6 +104,14 @@ beforeEach(() => {
   mocks.requireRole.mockResolvedValue({
     id: '33333333-3333-4333-8333-333333333333',
     role: 'HR',
+  });
+  mocks.requireStaff.mockResolvedValue({
+    ok: true,
+    user: {
+      id: '33333333-3333-4333-8333-333333333333',
+      role: 'HR',
+      isActive: true,
+    },
   });
   mocks.prisma.$transaction.mockImplementation(
     async (operation: (tx: typeof mocks.prisma) => unknown) => operation(mocks.prisma)
@@ -162,7 +178,6 @@ describe('inviteCandidate access rotation', () => {
     expect(second.magicLinkUrl).toContain(secondToken);
     expect(mocks.prisma.applicantDeviceSession.updateMany).toHaveBeenCalledTimes(2);
   });
-
   it.each(['HIRED', 'REJECTED'])('does not resurrect a %s candidate', async (stage) => {
     mocks.prisma.atsCandidate.findUnique.mockResolvedValue({
       ...candidate(PRE_APPROVAL_TOKEN),
@@ -200,6 +215,61 @@ describe('terminal candidate session revocation', () => {
       where: { candidateId: CANDIDATE_ID },
       data: { magicLinkRevokedAt: expect.any(Date) },
     });
+  });
+});
+
+describe('candidate device-lock reset', () => {
+  it('denies unauthorized reset attempts before database access', async () => {
+    mocks.requireStaff.mockResolvedValue({
+      ok: false,
+      error: 'Not authenticated. Please sign in.',
+    });
+
+    const result = await resetCandidateDeviceLock(CANDIDATE_ID);
+
+    expect(result).toEqual({ success: false, error: 'Not authenticated. Please sign in.' });
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('refuses reset when the retained invitation is no longer active', async () => {
+    mocks.prisma.candidateOnboardingPacket.findUnique.mockResolvedValue({
+      id: '22222222-2222-4222-8222-222222222222',
+      magicLinkToken: PRE_APPROVAL_TOKEN,
+      magicLinkExpiresAt: new Date('2026-08-01T12:00:00.000Z'),
+      magicLinkRevokedAt: null,
+    });
+
+    const result = await resetCandidateDeviceLock(CANDIDATE_ID);
+
+    expect(result).toMatchObject({ success: false, error: expect.stringMatching(/expired/i) });
+    expect(mocks.prisma.applicantDeviceSession.updateMany).not.toHaveBeenCalled();
+    expect(mocks.prisma.candidateOnboardingPacket.update).not.toHaveBeenCalled();
+  });
+
+  it('revokes live sessions and clears the packet binding atomically', async () => {
+    mocks.prisma.candidateOnboardingPacket.findUnique.mockResolvedValue({
+      id: '22222222-2222-4222-8222-222222222222',
+      magicLinkToken: PRE_APPROVAL_TOKEN,
+      magicLinkExpiresAt: new Date(Date.now() + 60_000),
+      magicLinkRevokedAt: null,
+    });
+    mocks.prisma.applicantDeviceSession.updateMany.mockResolvedValue({ count: 2 });
+
+    const result = await resetCandidateDeviceLock(CANDIDATE_ID);
+
+    expect(result).toEqual({ success: true, revokedSessions: 2 });
+    expect(mocks.prisma.applicantDeviceSession.updateMany).toHaveBeenCalledWith({
+      where: { candidateId: CANDIDATE_ID, revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
+    });
+    expect(mocks.prisma.candidateOnboardingPacket.update).toHaveBeenCalledWith({
+      where: { id: '22222222-2222-4222-8222-222222222222' },
+      data: { deviceFingerprint: null, deviceBoundAt: null },
+    });
+    expect(mocks.prisma.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      { isolationLevel: 'Serializable' }
+    );
   });
 });
 

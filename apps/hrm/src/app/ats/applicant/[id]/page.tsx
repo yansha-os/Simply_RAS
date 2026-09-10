@@ -46,6 +46,7 @@ import {
   getAtsCandidates,
   deleteAtsCandidate,
   inviteCandidate,
+  resetCandidateDeviceLock,
   updateCandidateProgress,
   getOnboardingProgress,
   getHiredCandidateSummary,
@@ -163,6 +164,25 @@ export default function ApplicantProfilePage() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteConfirmationText, setDeleteConfirmationText] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isResettingDeviceLock, setIsResettingDeviceLock] = useState(false);
+
+  const handleResetDeviceLock = async () => {
+    setIsResettingDeviceLock(true);
+    try {
+      const result = await resetCandidateDeviceLock(applicantId);
+      if (!result.success) {
+        toast.error(result.error || 'Device access reset failed.');
+        return;
+      }
+      toast.success(
+        `Device access reset. ${result.revokedSessions} active session${result.revokedSessions === 1 ? '' : 's'} revoked; the next valid-link visit can re-bind.`
+      );
+    } catch {
+      toast.error('Device access reset failed. Please try again.');
+    } finally {
+      setIsResettingDeviceLock(false);
+    }
+  };
 
   const handleDeleteApplicant = async () => {
     if (deleteConfirmationText.trim() !== 'DELETE') {
@@ -734,13 +754,12 @@ export default function ApplicantProfilePage() {
                   </button>
                   <span className="text-[10px] text-zinc-600">•</span>
                   <button
-                    onClick={() => {
-                      toast.success(`🔓 Device lock reset for ${applicant.name}! Next device click will re-bind candidate.`);
-                    }}
-                    className="text-[10px] text-amber-400 hover:text-amber-300 underline font-mono cursor-pointer"
+                    onClick={handleResetDeviceLock}
+                    disabled={isResettingDeviceLock}
+                    className="text-[10px] text-amber-400 hover:text-amber-300 disabled:text-zinc-600 underline font-mono cursor-pointer disabled:cursor-not-allowed"
                     title="Clear hardware device binding lock"
                   >
-                    Reset Device Lock
+                    {isResettingDeviceLock ? 'Resetting…' : 'Reset Device Lock'}
                   </button>
                 </div>
               </div>
