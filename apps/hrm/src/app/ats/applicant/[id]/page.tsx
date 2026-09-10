@@ -84,6 +84,10 @@ type WebKitAudioWindow = typeof window & {
   webkitAudioContext?: typeof AudioContext;
 };
 
+type ScorecardCategoryKey = 'communication' | 'adaptability' | 'professionalism' |
+  'empathy' | 'abaBasics' | 'documentation' | 'reliability' | 'availabilityFit';
+type InterviewScorecard = Record<ScorecardCategoryKey, { score: number | null; comment: string }>;
+
 function uploadedDocumentImageLoader({ src }: ImageLoaderProps): string {
   return src;
 }
@@ -106,7 +110,7 @@ export default function ApplicantProfilePage() {
   const [candidateCityZip, setCandidateCityZip] = useState('Bronx, NY 10451');
   const [candidateAvailabilityNotes, setCandidateAvailabilityNotes] = useState('Mon-Fri 3pm-8pm');
   const [syncRbtProfileOnSave, setSyncRbtProfileOnSave] = useState(true);
-  const [scorecardCategories, setScorecardCategories] = useState<{ [key: string]: { score: number | null; comment: string } }>({
+  const [scorecardCategories, setScorecardCategories] = useState<InterviewScorecard>({
     communication: { score: null, comment: '' },
     adaptability: { score: null, comment: '' },
     professionalism: { score: null, comment: '' },
@@ -116,6 +120,10 @@ export default function ApplicantProfilePage() {
     reliability: { score: null, comment: '' },
     availabilityFit: { score: null, comment: '' },
   });
+  const [isScorecardDirty, setIsScorecardDirty] = useState(false);
+  const [isSavingScorecard, setIsSavingScorecard] = useState(false);
+  const [isSubmittingDecision, setIsSubmittingDecision] = useState(false);
+  const scorecardRevisionRef = React.useRef(0);
   const [recommendationDecision, setRecommendationDecision] = useState<'RECOMMEND_HIRE' | 'REJECT' | 'NO_OPINION' | null>(null);
   const [showDecisionModal, setShowDecisionModal] = useState(false);
   const [recommendationChoice, setRecommendationChoice] = useState<'RECOMMEND_HIRE' | 'REJECT' | 'NO_OPINION'>('RECOMMEND_HIRE');
@@ -641,6 +649,38 @@ export default function ApplicantProfilePage() {
       return;
     }
     toast.success('Interviewer notes saved to candidate dossier.');
+  };
+
+  const updateScorecardCategory = (
+    key: ScorecardCategoryKey,
+    update: Partial<InterviewScorecard[ScorecardCategoryKey]>
+  ) => {
+    scorecardRevisionRef.current += 1;
+    setIsScorecardDirty(true);
+    setScorecardCategories((current) => ({
+      ...current,
+      [key]: { ...current[key], ...update },
+    }));
+  };
+
+  const persistScorecard = async (showSuccessToast = true) => {
+    const revisionBeingSaved = scorecardRevisionRef.current;
+    setIsSavingScorecard(true);
+    try {
+      const result = await saveInterviewScorecard(applicantId, scorecardCategories);
+      if (!result.success) {
+        toast.error(result.error || 'Failed to save scorecard.');
+        return false;
+      }
+      if (scorecardRevisionRef.current === revisionBeingSaved) setIsScorecardDirty(false);
+      if (showSuccessToast) toast.success('Interview scorecard saved.');
+      return true;
+    } catch {
+      toast.error('Failed to save scorecard. Please try again.');
+      return false;
+    } finally {
+      setIsSavingScorecard(false);
+    }
   };
 
   const handleApproveAndInvite = async () => {
@@ -1967,7 +2007,7 @@ export default function ApplicantProfilePage() {
 
                     {/* 8 SCORECARD CATEGORY ROWS */}
                     <div className="space-y-3">
-                      {[
+                      {([
                         { key: 'communication', title: 'Communication' },
                         { key: 'adaptability', title: 'Adaptability' },
                         { key: 'professionalism', title: 'Professionalism' },
@@ -1976,7 +2016,7 @@ export default function ApplicantProfilePage() {
                         { key: 'documentation', title: 'Documentation accuracy' },
                         { key: 'reliability', title: 'Reliability' },
                         { key: 'availabilityFit', title: 'Availability fit' },
-                      ].map((cat) => {
+                      ] satisfies { key: ScorecardCategoryKey; title: string }[]).map((cat) => {
                         const current = scorecardCategories[cat.key];
                         return (
                           <div key={cat.key} className={`rounded-2xl p-3.5 space-y-2 transition-all ${
@@ -2001,14 +2041,7 @@ export default function ApplicantProfilePage() {
                                     <button
                                       key={val}
                                       type="button"
-                                      onClick={() => {
-                                        const updated = {
-                                          ...scorecardCategories,
-                                          [cat.key]: { ...current, score: val }
-                                        };
-                                        setScorecardCategories(updated);
-                                        void saveInterviewScorecard(applicantId, updated);
-                                      }}
+                                      onClick={() => updateScorecardCategory(cat.key, { score: val })}
                                       className={`w-7 h-7 rounded-full text-xs font-mono font-extrabold flex items-center justify-center transition-all cursor-pointer ${
                                         current.score === val
                                           ? 'bg-blue-600 text-white shadow-lg scale-105 border border-blue-400'
@@ -2024,15 +2057,9 @@ export default function ApplicantProfilePage() {
                                 <input
                                   type="text"
                                   placeholder="Comment..."
+                                  maxLength={1000}
                                   value={current.comment}
-                                  onChange={(e) => {
-                                    const updated = {
-                                      ...scorecardCategories,
-                                      [cat.key]: { ...current, comment: e.target.value }
-                                    };
-                                    setScorecardCategories(updated);
-                                    void saveInterviewScorecard(applicantId, updated);
-                                  }}
+                                  onChange={(e) => updateScorecardCategory(cat.key, { comment: e.target.value })}
                                   className="bg-zinc-950 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white placeholder-zinc-500 font-mono focus:border-brand-orange-500 focus:outline-none max-w-[220px] w-full"
                                 />
                               </div>
@@ -2040,6 +2067,24 @@ export default function ApplicantProfilePage() {
                           </div>
                         );
                       })}
+                    </div>
+                    <div className="flex items-center justify-end gap-3">
+                      <span className={`text-[11px] font-mono ${isScorecardDirty ? 'text-amber-400' : 'text-emerald-400'}`}>
+                        {isScorecardDirty ? 'Unsaved scorecard changes' : 'Scorecard saved'}
+                      </span>
+                      <Button
+                        type="button"
+                        onClick={() => void persistScorecard()}
+                        disabled={!isScorecardDirty || isSavingScorecard}
+                        className={`h-10 rounded-xl px-4 text-xs font-bold ${
+                          isScorecardDirty && !isSavingScorecard
+                            ? 'bg-blue-600 text-white hover:bg-blue-500 cursor-pointer'
+                            : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
+                        }`}
+                      >
+                        {isSavingScorecard ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                        {isSavingScorecard ? 'Saving…' : 'Save Scorecard'}
+                      </Button>
                     </div>
                   </div>
                 )}
@@ -2320,7 +2365,14 @@ export default function ApplicantProfilePage() {
 
               <Button
                 type="button"
-                onClick={() => {
+                disabled={isSubmittingDecision}
+                onClick={async () => {
+                  if (isSubmittingDecision) return;
+                  setIsSubmittingDecision(true);
+                  if (isScorecardDirty && !(await persistScorecard(false))) {
+                    setIsSubmittingDecision(false);
+                    return;
+                  }
                   setRecommendationDecision(recommendationChoice);
                   const mapped =
                     recommendationChoice === 'RECOMMEND_HIRE'
@@ -2328,27 +2380,25 @@ export default function ApplicantProfilePage() {
                       : recommendationChoice === 'REJECT'
                         ? 'REJECT'
                         : 'HOLD';
-                  void completeAtsInterview(applicantId, {
+                  const res = await completeAtsInterview(applicantId, {
                     recommendation: mapped,
                     interviewPassed: recommendationChoice !== 'REJECT',
-                  }).then((res) => {
-                    if (!res.success) {
-                      toast.error(res.error || 'Failed to submit decision');
-                      return;
-                    }
-                    setShowDecisionModal(false);
-                    toast.success(
-                      `Interview decision (${recommendationChoice.replace('_', ' ')}) submitted to Head of HR!`
-                    );
-                    setTimeout(() => {
-                      router.push('/ats');
-                    }, 600);
                   });
+                  if (!res.success) {
+                    toast.error(res.error || 'Failed to submit decision');
+                    setIsSubmittingDecision(false);
+                    return;
+                  }
+                  setShowDecisionModal(false);
+                  toast.success(
+                    `Interview decision (${recommendationChoice.replace('_', ' ')}) submitted to Head of HR!`
+                  );
+                  setTimeout(() => router.push('/ats'), 600);
                 }}
-                className="bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs px-6 h-11 rounded-xl shadow-lg shadow-emerald-600/30 flex items-center gap-2 cursor-pointer"
+                className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-800 disabled:text-zinc-500 text-white font-extrabold text-xs px-6 h-11 rounded-xl shadow-lg shadow-emerald-600/30 flex items-center gap-2 cursor-pointer disabled:cursor-not-allowed"
               >
-                <CheckCircle2 className="w-4 h-4" />
-                <span>Confirm &amp; Submit to Head of HR</span>
+                {isSubmittingDecision ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                <span>{isSubmittingDecision ? 'Submitting…' : 'Confirm & Submit to Head of HR'}</span>
               </Button>
             </div>
           </div>

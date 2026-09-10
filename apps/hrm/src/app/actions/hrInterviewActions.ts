@@ -41,6 +41,40 @@ const INTERVIEW_RELEASE_ROLES = [
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+const INTERVIEW_SCORECARD_KEYS = [
+  'communication', 'adaptability', 'professionalism', 'empathy',
+  'abaBasics', 'documentation', 'reliability', 'availabilityFit',
+] as const;
+
+type InterviewScorecard = Record<
+  (typeof INTERVIEW_SCORECARD_KEYS)[number],
+  { score: number | null; comment: string }
+>;
+
+function validateInterviewScorecard(value: unknown): InterviewScorecard | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const input = value as Record<string, unknown>;
+  if (
+    Object.keys(input).length !== INTERVIEW_SCORECARD_KEYS.length ||
+    !INTERVIEW_SCORECARD_KEYS.every((key) => Object.hasOwn(input, key))
+  ) return null;
+
+  const validated: Partial<InterviewScorecard> = {};
+  for (const key of INTERVIEW_SCORECARD_KEYS) {
+    const category = input[key];
+    if (!category || typeof category !== 'object' || Array.isArray(category)) return null;
+    const fields = category as Record<string, unknown>;
+    const { score, comment } = fields;
+    if (
+      !(score === null || (typeof score === 'number' && Number.isInteger(score) && score >= 1 && score <= 5)) ||
+      typeof comment !== 'string' || comment.length > 1_000
+    ) return null;
+    validated[key] = { score, comment: comment.trim() };
+  }
+
+  return validated as InterviewScorecard;
+}
+
 export interface HrMember {
   id: string;
   name: string;
@@ -612,11 +646,17 @@ export async function saveInterviewNotes(candidateId: string, notes: string) {
 
 export async function saveInterviewScorecard(
   candidateId: string,
-  scorecard: Record<string, unknown>
+  scorecard: unknown
 ) {
+  const gate = await requireStaff(ATS_STAFF_ROLES);
+  if (!gate.ok) return { success: false, error: gate.error };
+  if (!isUuid(candidateId)) return { success: false, error: 'Invalid candidate ID.' };
+
+  const validatedScorecard = validateInterviewScorecard(scorecard);
+  if (!validatedScorecard) return { success: false, error: 'Scorecard data is invalid.' };
+
   try {
-    await requireRole(ATS_STAFF_ROLES);
-    const scorecardJson = scorecard as Prisma.InputJsonValue;
+    const scorecardJson = validatedScorecard as Prisma.InputJsonValue;
 
     const updated = await prisma.atsInterview.upsert({
       where: { candidateId },

@@ -51,6 +51,7 @@ import {
   getAtsInterview,
   getHrMembers,
   releaseAtsInterviewClaim,
+  saveInterviewScorecard,
 } from './hrInterviewActions';
 
 function interviewRow() {
@@ -130,6 +131,47 @@ describe('HR interview claim release', () => {
     const result = await releaseAtsInterviewClaim(CANDIDATE_ID);
 
     expect(result).toMatchObject({ success: false, error: expect.stringMatching(/already/i) });
+  });
+});
+
+describe('HR interview scorecard persistence', () => {
+  const validScorecard = Object.fromEntries(
+    [
+      'communication', 'adaptability', 'professionalism', 'empathy',
+      'abaBasics', 'documentation', 'reliability', 'availabilityFit',
+    ].map((key) => [key, { score: 4, comment: `${key} evidence` }])
+  );
+
+  it('denies unauthorized saves before validating or writing data', async () => {
+    mocks.requireStaff.mockResolvedValue({ ok: false, error: 'Forbidden.' });
+
+    const result = await saveInterviewScorecard(CANDIDATE_ID, validScorecard);
+
+    expect(result).toEqual({ success: false, error: 'Forbidden.' });
+    expect(mocks.prisma.atsInterview.upsert).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed categories and out-of-range ratings', async () => {
+    const malformed = { ...validScorecard, communication: { score: 6, comment: 'No' } };
+
+    const result = await saveInterviewScorecard(CANDIDATE_ID, malformed);
+
+    expect(result).toEqual({ success: false, error: 'Scorecard data is invalid.' });
+    expect(mocks.prisma.atsInterview.upsert).not.toHaveBeenCalled();
+  });
+
+  it('persists the exact validated scorecard contract', async () => {
+    mocks.prisma.atsInterview.upsert.mockResolvedValue(interviewRow());
+
+    const result = await saveInterviewScorecard(CANDIDATE_ID, validScorecard);
+
+    expect(result.success).toBe(true);
+    expect(mocks.prisma.atsInterview.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { candidateId: CANDIDATE_ID },
+        update: { scorecard: validScorecard },
+      })
+    );
   });
 });
 
