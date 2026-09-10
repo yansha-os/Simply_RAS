@@ -175,5 +175,14 @@
     "skills": ["crm-app-map", "hrm-app-map", "server-action-pattern", "verification-before-completion"],
     "started_at": "2026-09-05T21:15:00Z",
     "scope": "Stabilize the existing CRM/HRM system for a controlled ABA pilot: release hygiene, security verification, workflow invariants, staging/manual QA, and pilot go/no-go evidence. No new product-surface expansion unless it closes a pilot blocker."
+  },
+  {
+    "id": "TASK-20260910-01",
+    "title": "Enterprise Multi-State v1 Acceptance Program",
+    "status": "IN_PROGRESS",
+    "spec": "docs/superpowers/specs/2026-09-10-enterprise-multistate-v1-roadmap.md",
+    "skills": ["crm-app-map", "hrm-app-map", "docs-library", "server-action-pattern", "verification-before-completion"],
+    "started_at": "2026-09-10T14:09:13Z",
+    "scope": "Deliver a synthetic/deidentified-data v1 enterprise acceptance baseline with simple measurable workflows, structural multi-state support, strict security and clinical integrity, reversible delivery, performance budgets, and evidence-backed v2 PHI authorization."
   }
 ]}
