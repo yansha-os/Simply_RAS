@@ -46,6 +46,7 @@ import {
   getAtsCandidates,
   deleteAtsCandidate,
   inviteCandidate,
+  getActiveCandidateMagicLink,
   resetCandidateDeviceLock,
   updateCandidateProgress,
   getOnboardingProgress,
@@ -165,6 +166,7 @@ export default function ApplicantProfilePage() {
   const [deleteConfirmationText, setDeleteConfirmationText] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
   const [isResettingDeviceLock, setIsResettingDeviceLock] = useState(false);
+  const [isCopyingMagicLink, setIsCopyingMagicLink] = useState(false);
 
   const handleResetDeviceLock = async () => {
     setIsResettingDeviceLock(true);
@@ -392,7 +394,6 @@ export default function ApplicantProfilePage() {
             : candidateData?.appliedDate || new Date().toISOString().split('T')[0],
           activationStatus: candidateData?.activationStatus || 'PENDING_HR_REVIEW',
           userId: candidateData?.userId,
-          magicLinkToken: candidateData?.magicLinkToken,
         };
       } else if (!candidateData) {
         candidateData = {
@@ -655,7 +656,6 @@ export default function ApplicantProfilePage() {
             ...prev,
             stage: res.candidate?.stage || 'PHONE_SCREEN',
             activationStatus: res.candidate?.activationStatus || 'INVITATION_SENT',
-            magicLinkToken: res.candidate?.magicLinkToken ?? prev.magicLinkToken,
           }
         : null
     );
@@ -672,14 +672,24 @@ export default function ApplicantProfilePage() {
     }
   };
 
-  const copyMagicLink = () => {
+  const copyMagicLink = async () => {
     if (!applicant) return;
-    const token = applicant.magicLinkToken || applicant.id;
-    const link = `${window.location.origin}/magic-link/${token}`;
-    navigator.clipboard.writeText(link);
-    setCopied(true);
-    toast.success('Magic link copied to clipboard!');
-    setTimeout(() => setCopied(false), 2500);
+    setIsCopyingMagicLink(true);
+    try {
+      const result = await getActiveCandidateMagicLink(applicant.id);
+      if (!result.success || !result.magicLinkUrl) {
+        toast.error(result.error || 'No active invitation is available.');
+        return;
+      }
+      await navigator.clipboard.writeText(result.magicLinkUrl);
+      setCopied(true);
+      toast.success('Active magic link copied to clipboard.');
+      setTimeout(() => setCopied(false), 2500);
+    } catch {
+      toast.error('Could not copy the invitation. Check clipboard permission and try again.');
+    } finally {
+      setIsCopyingMagicLink(false);
+    }
   };
 
   if (isLoading) {
@@ -746,11 +756,12 @@ export default function ApplicantProfilePage() {
                 <span className="text-xs font-bold text-emerald-400 block">✓ Magic Link Issued</span>
                 <div className="flex items-center gap-3 mt-0.5">
                   <button
-                    onClick={copyMagicLink}
-                    className="text-[10px] text-zinc-300 hover:text-white underline font-mono flex items-center gap-1 cursor-pointer"
+                    onClick={() => void copyMagicLink()}
+                    disabled={isCopyingMagicLink}
+                    className="text-[10px] text-zinc-300 hover:text-white disabled:text-zinc-600 underline font-mono flex items-center gap-1 cursor-pointer disabled:cursor-not-allowed"
                   >
                     {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                    <span>{copied ? 'Copied URL!' : 'Copy Magic Link URL'}</span>
+                    <span>{isCopyingMagicLink ? 'Checking…' : copied ? 'Copied URL!' : 'Copy Magic Link URL'}</span>
                   </button>
                   <span className="text-[10px] text-zinc-600">•</span>
                   <button

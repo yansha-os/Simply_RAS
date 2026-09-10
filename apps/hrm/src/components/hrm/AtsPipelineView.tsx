@@ -41,7 +41,7 @@ export interface Candidate {
   appliedDate: string;
   updatedAt?: string;
   activationStatus: 'PENDING_HR_REVIEW' | 'INVITATION_SENT' | 'ACCOUNT_ACTIVE' | 'ACTIVE' | 'REJECTED';
-  magicLinkToken?: string | null;
+  magicLinkUrl?: string;
   reqTasks?: boolean;
   certDone?: boolean;
   reqSim?: boolean;
@@ -257,7 +257,7 @@ export default function AtsPipelineView() {
           res.candidate.activationStatus === 'ACTIVE'
             ? 'ACCOUNT_ACTIVE'
             : (res.candidate.activationStatus as Candidate['activationStatus']),
-        magicLinkToken: res.candidate.magicLinkToken,
+        magicLinkUrl: res.magicLinkUrl,
       });
     }
 
@@ -273,11 +273,19 @@ export default function AtsPipelineView() {
     }
   };
 
-  const copyInviteLink = (url: string) => {
-    navigator.clipboard.writeText(url);
-    setCopiedLink(true);
-    toast.success('Magic link copied to clipboard!');
-    setTimeout(() => setCopiedLink(false), 2500);
+  const copyInviteLink = async (url: string | undefined) => {
+    if (!url) {
+      toast.error('No active invitation URL is available.');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedLink(true);
+      toast.success('Magic link copied to clipboard!');
+      setTimeout(() => setCopiedLink(false), 2500);
+    } catch {
+      toast.error('Could not copy the invitation. Check clipboard permission and try again.');
+    }
   };
 
   const activePipelineCandidates = candidates.filter(
@@ -414,16 +422,13 @@ export default function AtsPipelineView() {
                 </span>
                 <div className="flex items-center justify-between gap-2 break-all rounded-lg border border-white/10 bg-black/50 p-2.5 font-mono text-xs text-emerald-400">
                   <span>
-                    {`${typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3001'}/magic-link/${activeInviteCandidate.magicLinkToken || activeInviteCandidate.id}`}
+                    {activeInviteCandidate.magicLinkUrl || 'Invitation URL unavailable'}
                   </span>
                   <button
                     type="button"
-                    onClick={() =>
-                      copyInviteLink(
-                        `${window.location.origin}/magic-link/${activeInviteCandidate.magicLinkToken || activeInviteCandidate.id}`
-                      )
-                    }
-                    className="shrink-0 cursor-pointer rounded-md bg-zinc-800 p-1.5 text-white transition-colors hover:bg-brand-orange-500"
+                    onClick={() => void copyInviteLink(activeInviteCandidate.magicLinkUrl)}
+                    disabled={!activeInviteCandidate.magicLinkUrl}
+                    className="shrink-0 cursor-pointer disabled:cursor-not-allowed rounded-md bg-zinc-800 p-1.5 text-white transition-colors hover:bg-brand-orange-500 disabled:text-zinc-600 disabled:hover:bg-zinc-800"
                   >
                     {copiedLink ? (
                       <Check className="h-4 w-4 text-emerald-400" />

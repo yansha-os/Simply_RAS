@@ -64,7 +64,6 @@ export interface AtsCandidateData {
   appliedDate: string;
   activationStatus: AtsActivationStatus;
   userId?: string | null;
-  magicLinkToken?: string | null;
   reqTasks?: boolean;
   reqAvail?: boolean;
   reqSim?: boolean;

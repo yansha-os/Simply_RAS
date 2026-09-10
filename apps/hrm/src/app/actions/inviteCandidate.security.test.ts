@@ -59,6 +59,7 @@ vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }));
 
 import {
   addAtsCandidate,
+  getActiveCandidateMagicLink,
   inviteCandidate,
   resetCandidateDeviceLock,
   setAtsStage,
@@ -270,6 +271,52 @@ describe('candidate device-lock reset', () => {
       expect.any(Function),
       { isolationLevel: 'Serializable' }
     );
+  });
+});
+
+describe('active candidate invitation lookup', () => {
+  it('does not read invitation data for unauthorized staff', async () => {
+    mocks.requireStaff.mockResolvedValue({
+      ok: false,
+      error: 'You are not authorized to perform this action.',
+    });
+
+    const result = await getActiveCandidateMagicLink(CANDIDATE_ID);
+
+    expect(result).toEqual({
+      success: false,
+      error: 'You are not authorized to perform this action.',
+    });
+    expect(mocks.prisma.candidateOnboardingPacket.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('returns no capability for a revoked invitation', async () => {
+    mocks.prisma.candidateOnboardingPacket.findUnique.mockResolvedValue({
+      magicLinkToken: PRE_APPROVAL_TOKEN,
+      magicLinkExpiresAt: new Date(Date.now() + 60_000),
+      magicLinkRevokedAt: new Date(),
+    });
+
+    const result = await getActiveCandidateMagicLink(CANDIDATE_ID);
+
+    expect(result).toMatchObject({ success: false });
+    expect(result).not.toHaveProperty('magicLinkUrl');
+    expect(JSON.stringify(result)).not.toContain(PRE_APPROVAL_TOKEN);
+  });
+
+  it('returns the URL only for a currently active invitation', async () => {
+    mocks.prisma.candidateOnboardingPacket.findUnique.mockResolvedValue({
+      magicLinkToken: PRE_APPROVAL_TOKEN,
+      magicLinkExpiresAt: new Date(Date.now() + 60_000),
+      magicLinkRevokedAt: null,
+    });
+
+    const result = await getActiveCandidateMagicLink(CANDIDATE_ID);
+
+    expect(result).toEqual({
+      success: true,
+      magicLinkUrl: `http://localhost:3001/magic-link/${PRE_APPROVAL_TOKEN}`,
+    });
   });
 });
 

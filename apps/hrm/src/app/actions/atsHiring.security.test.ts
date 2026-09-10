@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   prisma: {
     $transaction: vi.fn(),
     atsCandidate: {
+      findMany: vi.fn(),
       findUnique: vi.fn(),
       update: vi.fn(),
       delete: vi.fn(),
@@ -71,6 +72,7 @@ vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }));
 import {
   advanceAtsStage,
   deleteAtsCandidate,
+  getAtsCandidates,
   hireCandidate,
   setAtsStage,
 } from './atsActions';
@@ -311,5 +313,20 @@ describe('ATS candidate deletion retention boundary', () => {
       expect.any(Function),
       { isolationLevel: 'Serializable' }
     );
+  });
+});
+
+describe('ATS candidate list capability minimization', () => {
+  it('does not serialize invitation tokens in the broad pipeline response', async () => {
+    mocks.prisma.atsCandidate.findMany.mockResolvedValue([
+      candidate('PHONE_SCREEN'),
+    ]);
+
+    const result = await getAtsCandidates();
+
+    expect(result).toMatchObject({ success: true });
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0]).not.toHaveProperty('magicLinkToken');
+    expect(JSON.stringify(result)).not.toContain('current-token');
   });
 });

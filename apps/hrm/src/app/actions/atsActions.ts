@@ -40,7 +40,6 @@ import {
 import { hireCandidateDomain } from '@/lib/hiringDomain';
 
 const PACKET_PROGRESS_SELECT = {
-  magicLinkToken: true,
   ls54Status: true,
   tasksDone: true,
   tasksCompletedSteps: true,
@@ -281,7 +280,6 @@ function toCandidateRow(c: {
   userId: string | null;
   dossier: unknown;
   onboardingPacket: {
-    magicLinkToken: string | null;
     tasksDone?: boolean;
     availabilityDone?: boolean;
     simulationDone?: boolean;
@@ -351,7 +349,6 @@ function toCandidateRow(c: {
     updatedAt: c.updatedAt.toISOString(),
     activationStatus: (c.activationStatus as AtsActivationStatus) || 'PENDING_HR_REVIEW',
     userId: c.userId,
-    magicLinkToken: c.onboardingPacket?.magicLinkToken ?? null,
     reqTasks: progress.tasksDone,
     reqAvail: progress.availabilityDone,
     reqSim: progress.simulationDone,
@@ -1287,6 +1284,44 @@ export async function resetCandidateDeviceLock(candidateId: string) {
       error instanceof Error ? error.message : 'Unknown error'
     );
     return { success: false, error: 'Failed to reset candidate device access.' };
+  }
+}
+
+/** Staff: fetch a currently usable invitation without exposing tokens in ATS list payloads. */
+export async function getActiveCandidateMagicLink(candidateId: string) {
+  const gate = await requireStaff(ATS_STAFF_ROLES);
+  if (!gate.ok) return { success: false, error: gate.error };
+
+  try {
+    const packet = await prisma.candidateOnboardingPacket.findUnique({
+      where: { candidateId },
+      select: {
+        magicLinkToken: true,
+        magicLinkExpiresAt: true,
+        magicLinkRevokedAt: true,
+      },
+    });
+    if (
+      !packet?.magicLinkToken ||
+      packet.magicLinkRevokedAt ||
+      !isMagicLinkExpiryCurrent(packet.magicLinkExpiresAt)
+    ) {
+      return {
+        success: false,
+        error: 'No active invitation is available. Send a new invitation instead.',
+      };
+    }
+
+    return {
+      success: true,
+      magicLinkUrl: `${hrmBaseUrl()}/magic-link/${packet.magicLinkToken}`,
+    };
+  } catch (error: unknown) {
+    console.error(
+      'getActiveCandidateMagicLink failed:',
+      error instanceof Error ? error.message : 'Unknown error'
+    );
+    return { success: false, error: 'Failed to load the candidate invitation.' };
   }
 }
 
