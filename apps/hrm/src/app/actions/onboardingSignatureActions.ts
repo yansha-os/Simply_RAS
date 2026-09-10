@@ -532,32 +532,46 @@ export async function submitHarassmentQuiz(answers: Record<string, number>) {
     const session = await resolveApplicantId();
     if (!session.ok) return { success: false as const, error: session.error };
 
+    const canonicalAnswers: Record<string, number> = {};
+    for (const question of HARASSMENT_QUIZ) {
+      const chosen = answers[String(question.id)];
+      if (!Number.isInteger(chosen) || chosen < 0 || chosen >= question.options.length) {
+        return { success: false as const, error: 'Answer every quiz question before submitting.' };
+      }
+      canonicalAnswers[String(question.id)] = chosen;
+    }
+
     const scored = HARASSMENT_QUIZ.map((q) => {
-      const chosen = answers[String(q.id)];
-      return typeof chosen === 'number' && chosen === q.correctIndex;
+      return canonicalAnswers[String(q.id)] === q.correctIndex;
     });
     const correct = scored.filter(Boolean).length;
     const pct = Math.round((correct / HARASSMENT_QUIZ.length) * 100);
     const passed = pct >= HARASSMENT_QUIZ_PASS_PCT;
 
-    const prior = await prisma.onboardingSignatureEvent.count({
-      where: {
-        candidateId: session.candidateId,
-        documentKey: 'sh-training-quiz',
-        actionType: { in: ['QUIZ_PASSED', 'QUIZ_FAILED'] },
+    const meta = await clientMeta();
+    const { attempt, event } = await prisma.$transaction(
+      async (tx) => {
+        const prior = await tx.onboardingSignatureEvent.count({
+          where: {
+            candidateId: session.candidateId,
+            documentKey: 'sh-training-quiz',
+            actionType: { in: ['QUIZ_PASSED', 'QUIZ_FAILED'] },
+          },
+        });
+        const attempt = prior + 1;
+        const event = await persistEvent({
+          candidateId: session.candidateId,
+          stepNumber: 25,
+          actionType: passed ? 'QUIZ_PASSED' : 'QUIZ_FAILED',
+          quizScore: pct,
+          quizAttempt: attempt,
+          quizAnswers: canonicalAnswers,
+          fingerprint: session.fingerprint,
+        }, tx, meta);
+        return { attempt, event };
       },
-    });
-    const attempt = prior + 1;
-
-    const event = await persistEvent({
-      candidateId: session.candidateId,
-      stepNumber: 25,
-      actionType: passed ? 'QUIZ_PASSED' : 'QUIZ_FAILED',
-      quizScore: pct,
-      quizAttempt: attempt,
-      quizAnswers: answers,
-      fingerprint: session.fingerprint,
-    });
+      { isolationLevel: 'Serializable' }
+    );
 
     revalidatePath('/rbt', 'layout');
     return {

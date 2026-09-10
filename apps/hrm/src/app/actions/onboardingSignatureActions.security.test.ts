@@ -46,6 +46,7 @@ vi.mock('next/headers', () => ({
 import {
   recordOnboardingAdvance,
   recordOnboardingSignature,
+  submitHarassmentQuiz,
   submitOnboardingEmbeddedForm,
   uploadOnboardingFile,
 } from './onboardingSignatureActions';
@@ -64,6 +65,7 @@ beforeEach(() => {
     auditHash: 'audit-hash',
     createdAt: new Date('2026-09-06T12:00:00.000Z'),
   });
+  mocks.prisma.onboardingSignatureEvent.count.mockResolvedValue(0);
   mocks.prisma.candidateOnboardingPacket.updateMany.mockResolvedValue({ count: 1 });
   mocks.prisma.candidateOnboardingPacket.findUnique.mockResolvedValue({ formData: {} });
   mocks.prisma.$transaction.mockImplementation(
@@ -72,6 +74,38 @@ beforeEach(() => {
 });
 
 describe('onboarding action integrity', () => {
+  it('rejects incomplete quiz answers before database work', async () => {
+    const result = await submitHarassmentQuiz({ '1': 0 });
+
+    expect(result).toEqual({
+      success: false,
+      error: 'Answer every quiz question before submitting.',
+    });
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+    expect(mocks.prisma.onboardingSignatureEvent.create).not.toHaveBeenCalled();
+  });
+
+  it('stores only canonical quiz answers and allocates the attempt transactionally', async () => {
+    mocks.prisma.onboardingSignatureEvent.count.mockResolvedValue(2);
+    const answers = Object.fromEntries(
+      Array.from({ length: 10 }, (_, index) => [String(index + 1), 0])
+    );
+    answers.untrusted = 999;
+
+    const result = await submitHarassmentQuiz(answers);
+
+    expect(result).toMatchObject({ success: true, data: { attempt: 3 } });
+    expect(mocks.prisma.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      { isolationLevel: 'Serializable' }
+    );
+    const auditWrite = mocks.prisma.onboardingSignatureEvent.create.mock.calls[0]?.[0];
+    expect(auditWrite?.data?.quizAttempt).toBe(3);
+    expect(auditWrite?.data?.quizAnswers).toEqual(
+      Object.fromEntries(Array.from({ length: 10 }, (_, index) => [String(index + 1), 0]))
+    );
+  });
+
   it('encrypts a W-4 SSN before writing the onboarding packet', async () => {
     const result = await submitOnboardingEmbeddedForm({
       stepNumber: 20,
