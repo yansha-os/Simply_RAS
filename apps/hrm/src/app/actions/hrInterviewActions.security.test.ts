@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   resolveFingerprintValidCandidate: vi.fn(),
   cookieGet: vi.fn(),
   revalidatePath: vi.fn(),
+  updateCandidateProgress: vi.fn(),
   prisma: {
     user: { findFirst: vi.fn(), findMany: vi.fn() },
     atsCandidate: { findUnique: vi.fn(), update: vi.fn() },
@@ -45,9 +46,13 @@ vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }));
 vi.mock('next/headers', () => ({
   cookies: vi.fn(async () => ({ get: mocks.cookieGet })),
 }));
+vi.mock('@/app/actions/atsActions', () => ({
+  updateCandidateProgress: mocks.updateCandidateProgress,
+}));
 
 import {
   bookHrInterview,
+  completeAtsInterview,
   getAtsInterview,
   getHrMembers,
   releaseAtsInterviewClaim,
@@ -74,6 +79,21 @@ function interviewRow() {
     recommendation: null,
     completedAt: null,
     interviewer: { firstName: 'Harper', lastName: 'Reed', role: 'HR_AGENT' },
+  };
+}
+
+function completedEvidenceInterviewRow() {
+  const row = interviewRow();
+  return {
+    ...row,
+    scorecard: Object.fromEntries(
+      [
+        'communication', 'adaptability', 'professionalism', 'empathy',
+        'abaBasics', 'documentation', 'reliability', 'availabilityFit',
+      ].map((key) => [key, { score: 4, comment: `${key} evidence` }])
+    ),
+    scriptProgress: { completedSteps: Array.from({ length: 11 }, (_, index) => index) },
+    _count: { recordings: 1 },
   };
 }
 
@@ -215,6 +235,83 @@ describe('HR interview script progress persistence', () => {
         update: { scriptProgress: { completedSteps: [0, 4, 10] } },
       })
     );
+  });
+});
+
+describe('HR interview completion evidence gate', () => {
+  it('denies unauthorized completion before reading interview evidence', async () => {
+    mocks.requireStaff.mockResolvedValue({ ok: false, error: 'Forbidden.' });
+
+    const result = await completeAtsInterview(CANDIDATE_ID, { recommendation: 'ADVANCE' });
+
+    expect(result).toEqual({ success: false, error: 'Forbidden.' });
+    expect(mocks.prisma.atsInterview.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('refuses completion when durable script, scorecard, or recording evidence is missing', async () => {
+    mocks.prisma.atsInterview.findUnique.mockResolvedValue({
+      ...interviewRow(),
+      _count: { recordings: 0 },
+    });
+
+    const result = await completeAtsInterview(CANDIDATE_ID, { recommendation: 'ADVANCE' });
+
+    expect(result).toMatchObject({ success: false, error: expect.stringMatching(/scorecard/i) });
+    expect(mocks.prisma.atsInterview.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('conditionally completes only the unchanged durable evidence set', async () => {
+    const evidence = completedEvidenceInterviewRow();
+    mocks.prisma.atsInterview.findUnique
+      .mockResolvedValueOnce(evidence)
+      .mockResolvedValueOnce({
+        ...evidence,
+        status: 'COMPLETED',
+        recommendation: 'ADVANCE',
+        completedAt: new Date('2026-09-10T15:00:00.000Z'),
+      });
+    mocks.prisma.atsInterview.updateMany.mockResolvedValue({ count: 1 });
+    mocks.updateCandidateProgress.mockResolvedValue({ success: true });
+
+    const result = await completeAtsInterview(CANDIDATE_ID, { recommendation: 'ADVANCE' });
+
+    expect(result.success).toBe(true);
+    expect(mocks.prisma.atsInterview.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: evidence.id,
+          completedAt: null,
+          recordings: { some: {} },
+        }),
+      })
+    );
+    expect(mocks.updateCandidateProgress).toHaveBeenCalledWith(CANDIDATE_ID, {});
+  });
+
+  it('rejects a stale completion when evidence changes concurrently', async () => {
+    mocks.prisma.atsInterview.findUnique.mockResolvedValue(completedEvidenceInterviewRow());
+    mocks.prisma.atsInterview.updateMany.mockResolvedValue({ count: 0 });
+
+    const result = await completeAtsInterview(CANDIDATE_ID, { recommendation: 'ADVANCE' });
+
+    expect(result).toMatchObject({ success: false, error: expect.stringMatching(/changed/i) });
+    expect(mocks.updateCandidateProgress).not.toHaveBeenCalled();
+  });
+
+  it('repairs candidate progress when a completed request is retried', async () => {
+    mocks.prisma.atsInterview.findUnique.mockResolvedValue({
+      ...completedEvidenceInterviewRow(),
+      status: 'COMPLETED',
+      recommendation: 'ADVANCE',
+      completedAt: new Date('2026-09-10T15:00:00.000Z'),
+    });
+    mocks.updateCandidateProgress.mockResolvedValue({ success: true });
+
+    const result = await completeAtsInterview(CANDIDATE_ID, { recommendation: 'ADVANCE' });
+
+    expect(result.success).toBe(true);
+    expect(mocks.prisma.atsInterview.updateMany).not.toHaveBeenCalled();
+    expect(mocks.updateCandidateProgress).toHaveBeenCalledWith(CANDIDATE_ID, {});
   });
 });
 

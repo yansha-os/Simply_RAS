@@ -75,6 +75,20 @@ function validateInterviewScorecard(value: unknown): InterviewScorecard | null {
   return validated as InterviewScorecard;
 }
 
+function readCompletedInterviewSteps(value: unknown): number[] | null {
+  const record = asRecord(value);
+  const steps = Array.isArray(record.completedSteps) ? record.completedSteps : null;
+  if (
+    !steps ||
+    steps.length !== 11 ||
+    steps.some(
+      (step) => typeof step !== 'number' || !Number.isInteger(step) || step < 0 || step > 10
+    ) ||
+    new Set(steps).size !== 11
+  ) return null;
+  return [...steps].sort((left, right) => left - right) as number[];
+}
+
 export interface HrMember {
   id: string;
   name: string;
@@ -738,33 +752,98 @@ export async function completeAtsInterview(
   candidateId: string,
   input: { recommendation?: string; interviewPassed?: boolean } = {}
 ) {
+  const gate = await requireStaff(ATS_STAFF_ROLES);
+  if (!gate.ok) return { success: false, error: gate.error };
+  if (!isUuid(candidateId)) return { success: false, error: 'Invalid candidate ID.' };
+  if (input.interviewPassed !== undefined && typeof input.interviewPassed !== 'boolean') {
+    return { success: false, error: 'Interview decision is invalid.' };
+  }
+
+  const interviewPassed = input.interviewPassed !== false;
+  const recommendation = input.recommendation || (interviewPassed ? 'ADVANCE' : 'REJECT');
+  if (!['ADVANCE', 'REJECT', 'HOLD'].includes(recommendation)) {
+    return { success: false, error: 'Interview recommendation is invalid.' };
+  }
+
   try {
-    await requireRole(ATS_STAFF_ROLES);
-
-    const interviewPassed = input.interviewPassed !== false;
-    const recommendation = input.recommendation || (interviewPassed ? 'ADVANCE' : 'REJECT');
-
-    const updated = await prisma.atsInterview.upsert({
+    const interview = await prisma.atsInterview.findUnique({
       where: { candidateId },
-      create: {
-        candidateId,
+      include: {
+        interviewer: { select: { firstName: true, lastName: true, role: true } },
+        _count: { select: { recordings: true } },
+      },
+    });
+    if (!interview) {
+      return { success: false, error: 'Interview evidence was not found.' };
+    }
+    if (interview.status === 'COMPLETED' && interview.completedAt) {
+      if (interview.recommendation !== recommendation) {
+        return { success: false, error: 'This interview was already completed with another decision.' };
+      }
+      const { updateCandidateProgress } = await import('@/app/actions/atsActions');
+      const sync = await updateCandidateProgress(candidateId, {});
+      if (!sync.success) {
+        return {
+          success: false,
+          error: 'The interview is complete, but its candidate pipeline could not be synchronized. Retry.',
+        };
+      }
+      revalidatePath(`/ats/applicant/${candidateId}`);
+      revalidatePath('/ats');
+      revalidatePath('/rbt/interview');
+      return { success: true, interview: toInterviewDto(interview) };
+    }
+
+    const scorecard = validateInterviewScorecard(interview.scorecard);
+    if (!scorecard || Object.values(scorecard).some((category) => category.score === null)) {
+      return { success: false, error: 'Complete and save all eight scorecard ratings first.' };
+    }
+    if (!readCompletedInterviewSteps(interview.scriptProgress)) {
+      return { success: false, error: 'Complete and save all eleven interview script steps first.' };
+    }
+    if (interview._count.recordings < 1) {
+      return { success: false, error: 'Save at least one interview recording first.' };
+    }
+
+    const completion = await prisma.atsInterview.updateMany({
+      where: {
+        id: interview.id,
+        completedAt: null,
+        status: { in: ['SCHEDULED', 'IN_PROGRESS'] },
+        scorecard: { equals: interview.scorecard as Prisma.InputJsonValue },
+        scriptProgress: { equals: interview.scriptProgress as Prisma.InputJsonValue },
+        recordings: { some: {} },
+      },
+      data: {
         status: 'COMPLETED',
         recommendation,
         completedAt: new Date(),
       },
-      update: {
-        status: 'COMPLETED',
-        recommendation,
-        completedAt: new Date(),
-      },
+    });
+    if (completion.count !== 1) {
+      return {
+        success: false,
+        error: 'Interview evidence changed before submission. Reload and review it before retrying.',
+      };
+    }
+
+    const updated = await prisma.atsInterview.findUnique({
+      where: { id: interview.id },
       include: {
         interviewer: { select: { firstName: true, lastName: true, role: true } },
       },
     });
+    if (!updated) return { success: false, error: 'Completed interview could not be reloaded.' };
 
     // Refresh packet flags and stage from the completed AtsInterview evidence.
     const { updateCandidateProgress } = await import('@/app/actions/atsActions');
-    await updateCandidateProgress(candidateId, {});
+    const sync = await updateCandidateProgress(candidateId, {});
+    if (!sync.success) {
+      return {
+        success: false,
+        error: 'The interview is complete, but its candidate pipeline could not be synchronized. Retry.',
+      };
+    }
 
     revalidatePath(`/ats/applicant/${candidateId}`);
     revalidatePath('/ats');
