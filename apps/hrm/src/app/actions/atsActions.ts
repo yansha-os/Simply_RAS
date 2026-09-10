@@ -16,7 +16,11 @@ import {
 import { startOfClinicDay } from '@/lib/clinicTimezone';
 import type { Role } from '@repo/db';
 import { extractSubmissionFingerprint } from '@repo/db/session-note-attestation';
-import { ONBOARDING_TOTAL_STEPS } from '@/lib/onboardingDocuments';
+import {
+  isOnboardingCompletionEvent,
+  ONBOARDING_COMPLETION_ACTIONS,
+  ONBOARDING_TOTAL_STEPS,
+} from '@/lib/onboardingDocuments';
 import {
   NYC_BOROUGHS,
   TRANSPORT_MODES,
@@ -102,13 +106,6 @@ const STAFF_PROGRESS_KEYS = new Set([
   ...APPLICANT_PROGRESS_KEYS,
   'backgroundCleared',
 ]);
-const COMPLETION_AUDIT_ACTIONS = new Set([
-  'SIGNED',
-  'FORM_SUBMITTED',
-  'UPLOADED',
-  'QUIZ_PASSED',
-]);
-
 type ValidatedProgressPatch = Pick<
   OnboardingProgressPatch,
   | 'availabilityGrid'
@@ -225,10 +222,7 @@ function completedOnboardingSteps(
       events
         .filter(
           (event) =>
-            COMPLETION_AUDIT_ACTIONS.has(event.actionType) &&
-            Number.isInteger(event.stepNumber) &&
-            event.stepNumber >= 1 &&
-            event.stepNumber <= ONBOARDING_TOTAL_STEPS
+            isOnboardingCompletionEvent(event)
         )
         .map((event) => event.stepNumber)
     ),
@@ -1301,7 +1295,7 @@ export async function updateCandidateProgress(
         onboardingPacket: { select: PACKET_PROGRESS_SELECT },
         signatureEvents: {
           where: {
-            actionType: { in: [...COMPLETION_AUDIT_ACTIONS] },
+            actionType: { in: [...ONBOARDING_COMPLETION_ACTIONS] },
           },
           select: {
             stepNumber: true,

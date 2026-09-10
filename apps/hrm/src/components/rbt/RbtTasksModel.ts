@@ -1,4 +1,8 @@
-import { getOnboardingDoc, ONBOARDING_TOTAL_STEPS } from '@/lib/onboardingDocuments';
+import {
+  getOnboardingDoc,
+  isOnboardingCompletionEvent,
+  ONBOARDING_TOTAL_STEPS,
+} from '@/lib/onboardingDocuments';
 
 export type TaskKind = 'ONBOARDING' | 'PAY_HOLD' | 'JOB_APP';
 export type TaskFilter = 'ALL' | TaskKind;
@@ -62,13 +66,6 @@ const APP_STATUS_LABEL: Record<string, string> = {
   WITHDRAWN: 'Withdrawn',
 };
 
-const COMPLETION_AUDIT_ACTIONS = new Set([
-  'SIGNED',
-  'FORM_SUBMITTED',
-  'UPLOADED',
-  'QUIZ_PASSED',
-]);
-
 const EASTERN_DATE_TIME = new Intl.DateTimeFormat('en-US', {
   timeZone: 'America/New_York',
   month: 'short',
@@ -104,7 +101,7 @@ export function completedTaskStepsFromAudit(
 ): number[] {
   return mergeCompletedTaskSteps(
     events
-      .filter((event) => COMPLETION_AUDIT_ACTIONS.has(event.actionType))
+      .filter(isOnboardingCompletionEvent)
       .map((event) => event.stepNumber)
   );
 }

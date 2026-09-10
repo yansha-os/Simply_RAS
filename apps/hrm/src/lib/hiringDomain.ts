@@ -5,17 +5,13 @@ import type { Prisma } from '@repo/db';
 import { prisma } from '@/lib/prisma';
 import {
   LS54_DOCUMENT_KEY,
+  isOnboardingCompletionEvent,
+  ONBOARDING_COMPLETION_ACTIONS,
   ONBOARDING_TOTAL_STEPS,
 } from '@/lib/onboardingDocuments';
 import { validateAvailabilitySubmission } from '@/app/(dashboard)/rbt/availability/availabilityModel';
 import { notifyUsers } from '@/app/actions/notifications';
 
-const COMPLETION_AUDIT_ACTIONS = new Set([
-  'SIGNED',
-  'FORM_SUBMITTED',
-  'UPLOADED',
-  'QUIZ_PASSED',
-]);
 const TERMINAL_STAGES = new Set(['HIRED', 'REJECTED']);
 const SERIALIZABLE_RETRY_LIMIT = 3;
 
@@ -122,10 +118,7 @@ export function evaluateHireReadiness(
     candidate.signatureEvents
       .filter(
         (event) =>
-          event.stepNumber >= 1 &&
-          event.stepNumber <= ONBOARDING_TOTAL_STEPS &&
-          Number.isInteger(event.stepNumber) &&
-          COMPLETION_AUDIT_ACTIONS.has(event.actionType)
+          isOnboardingCompletionEvent(event)
       )
       .map((event) => event.stepNumber)
   );
@@ -354,7 +347,7 @@ async function loadHireCandidate(
           OR: [
             {
               stepNumber: { gte: 1, lte: ONBOARDING_TOTAL_STEPS },
-              actionType: { in: [...COMPLETION_AUDIT_ACTIONS] },
+              actionType: { in: [...ONBOARDING_COMPLETION_ACTIONS] },
             },
             {
               documentKey: LS54_DOCUMENT_KEY,

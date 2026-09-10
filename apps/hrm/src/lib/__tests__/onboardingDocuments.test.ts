@@ -8,6 +8,7 @@ import {
   ONBOARDING_TOTAL_STEPS,
   buildDefaultLs54Payload,
   getOnboardingDoc,
+  isOnboardingCompletionEvent,
   pdfUrl,
 } from '../onboardingDocuments';
 
@@ -45,6 +46,19 @@ describe('getOnboardingDoc / pdfUrl', () => {
 
   it('builds public PDF urls under the onboarding-docs base', () => {
     expect(pdfUrl('nda.pdf')).toBe(`${ONBOARDING_PDF_BASE}/nda.pdf`);
+  });
+});
+
+describe('isOnboardingCompletionEvent', () => {
+  it('accepts only the completion action required by each document kind', () => {
+    expect(isOnboardingCompletionEvent({ stepNumber: 1, actionType: 'SIGNED' })).toBe(true);
+    expect(isOnboardingCompletionEvent({ stepNumber: 20, actionType: 'FORM_SUBMITTED' })).toBe(true);
+    expect(isOnboardingCompletionEvent({ stepNumber: 24, actionType: 'UPLOADED' })).toBe(true);
+    expect(isOnboardingCompletionEvent({ stepNumber: 25, actionType: 'QUIZ_PASSED' })).toBe(true);
+    expect(isOnboardingCompletionEvent({ stepNumber: 1, actionType: 'UPLOADED' })).toBe(false);
+    expect(isOnboardingCompletionEvent({ stepNumber: 20, actionType: 'SIGNED' })).toBe(false);
+    expect(isOnboardingCompletionEvent({ stepNumber: 25, actionType: 'QUIZ_FAILED' })).toBe(false);
+    expect(isOnboardingCompletionEvent({ stepNumber: 999, actionType: 'SIGNED' })).toBe(false);
   });
 });
 

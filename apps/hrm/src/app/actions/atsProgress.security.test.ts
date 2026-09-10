@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { completionActionForOnboardingStep } from '@/lib/onboardingDocuments';
 
 const CANDIDATE_ID = '11111111-1111-4111-8111-111111111111';
 const APPLICANT_ID = '22222222-2222-4222-8222-222222222222';
@@ -112,7 +113,7 @@ function candidate(options?: {
     },
     signatureEvents: (options?.signatureSteps ?? []).map((stepNumber) => ({
       stepNumber,
-      actionType: 'SIGNED',
+      actionType: completionActionForOnboardingStep(stepNumber)!,
     })),
     interview: options?.interview ?? null,
     helpTickets: [],

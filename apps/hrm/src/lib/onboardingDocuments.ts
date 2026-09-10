@@ -28,6 +28,19 @@ export const ONBOARDING_TOTAL_STEPS = 27;
 export const ONBOARDING_PDF_BASE = '/onboarding-docs';
 export const LS54_DOCUMENT_KEY = 'ls-54';
 export const LS54_DOCUMENT_TITLE = 'NYS Wage Notice (LS-54)';
+export const ONBOARDING_COMPLETION_ACTIONS = [
+  'SIGNED',
+  'FORM_SUBMITTED',
+  'UPLOADED',
+  'QUIZ_PASSED',
+] as const;
+const COMPLETION_ACTION_BY_KIND: Partial<Record<OnboardingStepKind, string>> = {
+  ESIGN: 'SIGNED',
+  ACK: 'SIGNED',
+  EMBEDDED: 'FORM_SUBMITTED',
+  UPLOAD: 'UPLOADED',
+  QUIZ: 'QUIZ_PASSED',
+};
 
 export const ONBOARDING_DOCS: OnboardingDocDef[] = [
   {
@@ -346,6 +359,22 @@ export function buildDefaultLs54Payload(
 
 export function getOnboardingDoc(step: number): OnboardingDocDef {
   return ONBOARDING_DOCS.find((d) => d.step === step) ?? ONBOARDING_DOCS[0];
+}
+
+export function isOnboardingCompletionEvent(event: {
+  stepNumber: number;
+  actionType: string;
+}): boolean {
+  if (!Number.isInteger(event.stepNumber)) return false;
+  return completionActionForOnboardingStep(event.stepNumber) === event.actionType;
+}
+
+export function completionActionForOnboardingStep(stepNumber: number): string | null {
+  if (!Number.isInteger(stepNumber)) return null;
+  const doc = ONBOARDING_DOCS.find((candidate) => candidate.step === stepNumber);
+  if (!doc) return null;
+
+  return COMPLETION_ACTION_BY_KIND[doc.kind] ?? null;
 }
 
 export function pdfUrl(file: string): string {

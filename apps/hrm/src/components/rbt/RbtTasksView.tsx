@@ -17,7 +17,11 @@ import {
 import { toast } from 'sonner';
 import { getHrMembers } from '@/app/actions/hrInterviewActions';
 import { getActiveApplicantId, getActiveApplicantName } from '@/lib/syncAtsProgress';
-import { getOnboardingDoc, ONBOARDING_TOTAL_STEPS } from '@/lib/onboardingDocuments';
+import {
+  getOnboardingDoc,
+  isOnboardingCompletionEvent,
+  ONBOARDING_TOTAL_STEPS,
+} from '@/lib/onboardingDocuments';
 import { OnboardingConfirmModal } from '@/components/rbt/OnboardingConfirmModal';
 import {
   HarassmentQuizPanel,
@@ -317,12 +321,8 @@ function ApplicantOnboardingTasksHub() {
         setTasksDone(true);
       }
       const latest = res.data.events.find(
-        (e) =>
-          e.stepNumber === currentStep &&
-          (e.actionType === 'SIGNED' ||
-            e.actionType === 'FORM_SUBMITTED' ||
-            e.actionType === 'UPLOADED' ||
-            e.actionType === 'QUIZ_PASSED')
+        (event) =>
+          event.stepNumber === currentStep && isOnboardingCompletionEvent(event)
       );
       setLastAuditHash(latest?.auditHash ?? null);
       setProgressIssue(null);

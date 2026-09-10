@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HireReadinessEvidence } from './hiringDomain';
+import { completionActionForOnboardingStep } from './onboardingDocuments';
 
 const CANDIDATE_ID = '11111111-1111-4111-8111-111111111111';
 const ACTOR_ID = '22222222-2222-4222-8222-222222222222';
@@ -58,10 +59,7 @@ vi.mock('@/app/actions/notifications', () => ({
   notifyUsers: mocks.notifyUsers,
 }));
 
-import {
-  evaluateHireReadiness,
-  hireCandidateDomain,
-} from './hiringDomain';
+import { evaluateHireReadiness, hireCandidateDomain } from './hiringDomain';
 
 function validEvidence(): HireReadinessEvidence {
   return {
@@ -102,7 +100,7 @@ function validEvidence(): HireReadinessEvidence {
       ...Array.from({ length: ONBOARDING_TOTAL_STEPS }, (_, index) => ({
         stepNumber: index + 1,
         documentKey: `onboarding-step-${index + 1}`,
-        actionType: 'SIGNED',
+        actionType: completionActionForOnboardingStep(index + 1)!,
         auditHash: `task-audit-${index + 1}`,
         quizAnswers: null,
         deviceFingerprint: FINGERPRINT,

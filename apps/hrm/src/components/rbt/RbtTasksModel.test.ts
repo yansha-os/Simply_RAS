@@ -171,12 +171,14 @@ describe('RBT task model', () => {
   it('reconciles durable audit completion with the progress snapshot', () => {
     const auditSteps = completedTaskStepsFromAudit([
       { stepNumber: 2, actionType: 'SIGNED' },
-      { stepNumber: 3, actionType: 'FORM_SUBMITTED' },
+      { stepNumber: 20, actionType: 'FORM_SUBMITTED' },
       { stepNumber: 4, actionType: 'QUIZ_FAILED' },
+      { stepNumber: 1, actionType: 'UPLOADED' },
+      { stepNumber: 20, actionType: 'SIGNED' },
       { stepNumber: 99, actionType: 'UPLOADED' },
     ]);
 
-    expect(auditSteps).toEqual([2, 3]);
-    expect(mergeCompletedTaskSteps([1, 2], auditSteps)).toEqual([1, 2, 3]);
+    expect(auditSteps).toEqual([2, 20]);
+    expect(mergeCompletedTaskSteps([1, 2], auditSteps)).toEqual([1, 2, 20]);
   });
 });
