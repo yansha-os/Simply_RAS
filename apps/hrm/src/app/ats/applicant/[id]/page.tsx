@@ -64,7 +64,12 @@ import {
   completeAtsInterview,
 } from '@/app/actions/hrInterviewActions';
 import type { AtsCandidateData } from '@/lib/atsStage';
-import { saveRecordingBlob, getRecordingsFromIDB, deleteRecordingFromIDB } from '@/lib/recordingsDb';
+import {
+  saveRecordingBlob,
+  getRecordingsFromIDB,
+  deleteRecordingFromIDB,
+  type RecordedVideoItem,
+} from '@/lib/recordingsDb';
 
 type ApplicantProfileTab =
   | 'OVERVIEW'
@@ -136,7 +141,7 @@ export default function ApplicantProfilePage() {
   // In-Browser Video Recording State
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
-  const [recordedVideos, setRecordedVideos] = useState<{ id: string; title: string; url: string; duration: number; timestamp: string }[]>([]);
+  const [recordedVideos, setRecordedVideos] = useState<RecordedVideoItem[]>([]);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [activeVideoUrl, setActiveVideoUrl] = useState<string | null>(null);
   const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);
@@ -584,7 +589,11 @@ export default function ApplicantProfilePage() {
             }
             setRecordedVideos((prev) => [res.item!, ...prev.filter((v) => v.id !== res.item!.id)]);
             setActiveVideoUrl(res.item!.url);
-            toast.success(`${title} saved successfully.`);
+            if (res.item.durable) {
+              toast.success(`${title} saved to secure server storage.`);
+            } else {
+              toast.warning(res.error || `${title} is preserved only on this device. Retry before completing the interview.`);
+            }
           })
           .catch((err) => {
             setUploadProgress(null);
@@ -1902,8 +1911,8 @@ export default function ApplicantProfilePage() {
                     }`}
                   >
                     <Video className="w-3.5 h-3.5" />
-                    <span>Recording ({recordedVideos.length})</span>
-                    {recordedVideos.length > 0 && (
+                    <span>Recording ({recordedVideos.filter((video) => video.durable).length}/{recordedVideos.length})</span>
+                    {recordedVideos.some((video) => video.durable) && (
                       <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
                     )}
                   </button>
@@ -2169,6 +2178,9 @@ export default function ApplicantProfilePage() {
                                       <span>{vid.title}</span>
                                     </div>
                                     <span className="text-[10px] font-mono text-zinc-500 block mt-0.5">Recorded at {vid.timestamp}</span>
+                                    <span className={`text-[10px] font-mono font-bold block mt-1 ${vid.durable ? 'text-emerald-400' : 'text-amber-400'}`}>
+                                      {vid.durable ? 'Secure server copy' : 'Local recovery copy — not submission-ready'}
+                                    </span>
                                   </div>
 
                                   <div className="flex items-center gap-2">
@@ -2212,7 +2224,8 @@ export default function ApplicantProfilePage() {
                   const ratedCount = Object.values(scorecardCategories).filter(c => c.score !== null).length;
                   const isScriptComplete = completedScriptSteps.length === 11;
                   const isScorecardComplete = ratedCount === 8;
-                  const isRecordingComplete = recordedVideos.length >= 1;
+                  const durableRecordingCount = recordedVideos.filter((video) => video.durable).length;
+                  const isRecordingComplete = durableRecordingCount >= 1;
                   const isInterviewEvidenceSaving = isSavingScriptProgress || isSavingScorecard;
                   const canSubmitDecision =
                     isScriptComplete && isScorecardComplete && isRecordingComplete && !isInterviewEvidenceSaving;
@@ -2242,7 +2255,11 @@ export default function ApplicantProfilePage() {
                             {!isRecordingComplete && (
                               <span className="bg-rose-400/20 text-rose-300 font-extrabold px-3 py-1.5 rounded-xl border border-rose-400/40 shadow-sm animate-pulse flex items-center gap-1">
                                 <Video className="w-3.5 h-3.5 text-rose-400" />
-                                <span>⚠️ Record at least 1 Interview Take</span>
+                                <span>
+                                  ⚠️ {recordedVideos.length > 0
+                                    ? 'Save at least 1 Interview Take to secure server storage'
+                                    : 'Record at least 1 Interview Take'}
+                                </span>
                               </span>
                             )}
                           </div>

@@ -15,7 +15,7 @@ import {
   normalizeMimeType,
 } from '@/lib/uploadValidation';
 
-/** UI shape for interview takes (Storage-backed with local IndexedDB fallback). */
+/** UI shape for durable server takes and legacy local recovery copies. */
 export interface RecordedVideoItem {
   id: string;
   applicantId: string;
@@ -23,6 +23,7 @@ export interface RecordedVideoItem {
   url: string;
   duration: number;
   timestamp: string;
+  durable: boolean;
 }
 
 function toItem(dto: InterviewRecordingDto): RecordedVideoItem {
@@ -33,6 +34,7 @@ function toItem(dto: InterviewRecordingDto): RecordedVideoItem {
     url: dto.url,
     duration: dto.duration,
     timestamp: dto.timestamp,
+    durable: true,
   };
 }
 
@@ -83,6 +85,7 @@ async function saveToIDBStore(item: {
         url,
         duration: item.duration,
         timestamp: item.timestamp,
+        durable: false,
       });
     };
     req.onerror = () => reject(req.error);
@@ -106,6 +109,7 @@ async function getFromIDBStore(applicantId: string): Promise<RecordedVideoItem[]
           url: URL.createObjectURL(row.blob),
           duration: row.duration,
           timestamp: row.timestamp,
+          durable: false,
         }));
         resolve(items);
       };
@@ -161,6 +165,7 @@ function putToSignedUrl(
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('PUT', signedUrl);
+    xhr.timeout = 120_000;
     xhr.setRequestHeader('content-type', contentType);
     xhr.setRequestHeader('x-upsert', 'false');
     xhr.upload.onprogress = (event) => {
@@ -172,14 +177,12 @@ function putToSignedUrl(
       resolve({ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status });
     xhr.onerror = () => reject(new Error('Network error during upload'));
     xhr.onabort = () => reject(new Error('Upload was cancelled'));
+    xhr.ontimeout = () => reject(new Error('Upload timed out'));
     xhr.send(blob);
   });
 }
 
-/**
- * Storage upload with transparent IndexedDB fallback so recordings are
- * NEVER lost even if remote storage is unreachable or unconfigured.
- */
+/** Upload directly to private server storage and finalize durable metadata. */
 export async function saveRecordingBlob(params: {
   applicantId: string;
   title: string;
@@ -199,73 +202,50 @@ export async function saveRecordingBlob(params: {
     return { success: false, error: RECORDING_TOO_LARGE_ERROR };
   }
 
-  const recordingId = crypto.randomUUID();
-  const timestamp = new Date().toLocaleTimeString([], {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-
-  // Attempt remote Supabase Storage upload with a 10-second max timeout
+  // Interview recordings are sensitive evidence: only secure server storage
+  // counts as a successful save. Legacy IndexedDB entries remain readable so
+  // staff can identify and delete older recovery copies.
   try {
-    const remoteUploadPromise = (async () => {
-      const authz = await createInterviewRecordingUpload({
-        candidateId: params.applicantId,
-        mimeType: mime,
-        byteSize: params.blob.size,
-      });
-
-      if (authz.success && authz.data) {
-        const put = await putToSignedUrl(
-          authz.data.signedUrl,
-          params.blob,
-          mime,
-          params.onProgress
-        );
-
-        if (put.ok) {
-          const res = await finalizeInterviewRecording({
-            recordingId: authz.data.recordingId,
-            candidateId: params.applicantId,
-            title: params.title,
-            durationSeconds: params.duration,
-            mimeType: mime,
-          });
-
-          if (res.success && res.data) {
-            return toItem(res.data);
-          }
-        }
-      }
-      return null;
-    })();
-
-    const timeoutPromise = new Promise<null>((resolve) =>
-      setTimeout(() => resolve(null), 10000)
-    );
-
-    const remoteItem = await Promise.race([remoteUploadPromise, timeoutPromise]);
-    if (remoteItem) {
-      return { success: true, item: remoteItem };
-    }
-  } catch (err) {
-    console.warn('Remote recording storage upload failed, using local IndexedDB fallback:', err);
-  }
-
-  // Fallback: Save directly to IndexedDB
-  try {
-    if (params.onProgress) params.onProgress(100);
-    const localItem = await saveToIDBStore({
-      id: recordingId,
-      applicantId: params.applicantId,
-      title: params.title,
-      duration: params.duration,
-      timestamp,
-      blob: params.blob,
+    const authz = await createInterviewRecordingUpload({
+      candidateId: params.applicantId,
+      mimeType: mime,
+      byteSize: params.blob.size,
     });
-    return { success: true, item: localItem };
-  } catch (idbErr) {
-    console.error('Failed to save to IndexedDB fallback:', idbErr);
-    return { success: false, error: 'Failed to save recording to storage.' };
+    if (!authz.success || !authz.data) {
+      return { success: false, error: authz.error || 'Recording upload could not be authorized.' };
+    }
+
+    const put = await putToSignedUrl(
+      authz.data.signedUrl,
+      params.blob,
+      mime,
+      params.onProgress
+    );
+    if (!put.ok) {
+      return { success: false, error: `Recording upload failed (HTTP ${put.status}).` };
+    }
+
+    const finalized = await finalizeInterviewRecording({
+      recordingId: authz.data.recordingId,
+      candidateId: params.applicantId,
+      title: params.title,
+      durationSeconds: params.duration,
+      mimeType: mime,
+    });
+    if (!finalized.success || !finalized.data) {
+      return { success: false, error: finalized.error || 'Recording upload could not be finalized.' };
+    }
+
+    return { success: true, item: toItem(finalized.data) };
+  } catch (error) {
+    console.warn(
+      'Remote recording storage upload failed:',
+      error instanceof Error ? error.message : 'Unknown error'
+    );
+    return {
+      success: false,
+      error: 'Recording was not saved to secure server storage. Check the connection and retry.',
+    };
   }
 }
 
