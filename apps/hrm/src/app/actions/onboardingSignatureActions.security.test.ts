@@ -247,6 +247,31 @@ describe('onboarding action integrity', () => {
     }
   });
 
+  it('removes a newly uploaded object and creates no audit event when packet completion fails', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    mocks.prisma.candidateOnboardingPacket.updateMany.mockResolvedValue({ count: 0 });
+    const formData = new FormData();
+    formData.append('stepNumber', '24');
+    formData.append(
+      'file',
+      new File([new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d])], 'i9.pdf', {
+        type: 'application/pdf',
+      })
+    );
+
+    try {
+      const result = await uploadOnboardingFile(formData);
+
+      expect(result).toMatchObject({ success: false });
+      expect(mocks.prisma.onboardingSignatureEvent.create).not.toHaveBeenCalled();
+      expect(mocks.remove).toHaveBeenCalledWith([
+        expect.stringMatching(new RegExp(`^onboarding/${CANDIDATE_ID}/`)),
+      ]);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
   it('rejects non-sequential advance audit events', async () => {
     const result = await recordOnboardingAdvance(1, 3);
 

@@ -281,13 +281,6 @@ export async function recordOnboardingSignature(input: {
       fingerprint: session.fingerprint,
     });
 
-    if (stepNumber === 20) {
-      await prisma.candidateOnboardingPacket.updateMany({
-        where: { candidateId: session.candidateId },
-        data: { w4Complete: true },
-      });
-    }
-
     revalidatePath('/rbt', 'layout');
     return {
       success: true as const,
@@ -482,30 +475,39 @@ export async function uploadOnboardingFile(formData: FormData) {
     }
     uploadedStoragePath = storagePath;
 
-    const event = await persistEvent({
-      candidateId: session.candidateId,
-      stepNumber,
-      actionType: 'UPLOADED',
-      storagePath,
-      fileName: safeName,
-      fingerprint: session.fingerprint,
-      consents: { read: true, agree: true, eSign: true },
-    });
-    // The audit event is the durable owner of this object. From this point the
-    // upload is referenced and must not be removed by catch-path cleanup.
-    databaseCommitted = true;
-
     const packetPatch: Record<string, boolean> = {};
-    if (stepNumber === 20) packetPatch.w4Complete = true;
-    if (stepNumber === 22) packetPatch.directDepositComplete = true;
     if (stepNumber === 24) packetPatch.i9Complete = true;
     if (stepNumber === 27) packetPatch.cprUploaded = true;
-    if (Object.keys(packetPatch).length) {
-      await prisma.candidateOnboardingPacket.updateMany({
-        where: { candidateId: session.candidateId },
-        data: packetPatch,
-      });
-    }
+    const meta = await clientMeta();
+    const event = await prisma.$transaction(async (tx) => {
+      if (Object.keys(packetPatch).length > 0) {
+        const updated = await tx.candidateOnboardingPacket.updateMany({
+          where: { candidateId: session.candidateId },
+          data: packetPatch,
+        });
+        if (updated.count !== 1) throw new Error('Candidate onboarding packet update failed');
+      } else {
+        const packet = await tx.candidateOnboardingPacket.findUnique({
+          where: { candidateId: session.candidateId },
+          select: { id: true },
+        });
+        if (!packet) throw new Error('Candidate onboarding packet was not found');
+      }
+
+      return persistEvent({
+        candidateId: session.candidateId,
+        stepNumber,
+        actionType: 'UPLOADED',
+        storagePath,
+        fileName: safeName,
+        fingerprint: session.fingerprint,
+        consents: { read: true, agree: true, eSign: true },
+      }, tx, meta);
+    });
+    // The transaction now durably owns the Storage object. Catch-path cleanup
+    // must only remove objects that never reached this point.
+    databaseCommitted = true;
+
     revalidatePath('/rbt', 'layout');
     return {
       success: true as const,
