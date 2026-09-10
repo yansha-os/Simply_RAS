@@ -45,11 +45,13 @@ vi.mock('next/headers', () => ({
 import {
   recordOnboardingAdvance,
   recordOnboardingSignature,
+  submitOnboardingEmbeddedForm,
   uploadOnboardingFile,
 } from './onboardingSignatureActions';
 
 beforeEach(() => {
   vi.clearAllMocks();
+  process.env.ONBOARDING_FIELD_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString('base64');
   mocks.prisma.applicantDeviceSession.findUnique.mockResolvedValue({
     revokedAt: null,
     boundAt: new Date(),
@@ -62,9 +64,85 @@ beforeEach(() => {
     createdAt: new Date('2026-09-06T12:00:00.000Z'),
   });
   mocks.prisma.candidateOnboardingPacket.updateMany.mockResolvedValue({ count: 1 });
+  mocks.prisma.candidateOnboardingPacket.findUnique.mockResolvedValue({ formData: {} });
 });
 
 describe('onboarding action integrity', () => {
+  it('encrypts a W-4 SSN before writing the onboarding packet', async () => {
+    const result = await submitOnboardingEmbeddedForm({
+      stepNumber: 20,
+      signerName: 'Applicant Name',
+      payload: {
+        key: 'form-w4',
+        values: {
+          firstName: 'Applicant',
+          middleInitial: '',
+          lastName: 'Name',
+          addressLine1: '1 Main Street',
+          city: 'New York',
+          state: 'NY',
+          zipCode: '10001',
+          ssn: '123-45-6789',
+          filingStatus: 'SINGLE',
+          multipleJobsTwoJobCheckbox: false,
+          qualifyingChildrenCount: '0',
+          otherDependentsCount: '0',
+          otherCreditsAmount: '0',
+          otherIncome: '0',
+          deductions: '0',
+          extraWithholding: '0',
+          claimExempt: false,
+        },
+      },
+    });
+
+    expect(result).toMatchObject({ success: true });
+    const write = mocks.prisma.candidateOnboardingPacket.updateMany.mock.calls[0]?.[0];
+    const serialized = JSON.stringify(write?.data?.formData);
+    expect(serialized).not.toContain('123456789');
+    expect(serialized).not.toContain('123-45-6789');
+    expect(write?.data?.formData).toMatchObject({
+      embeddedForms: {
+        'form-w4': {
+          ssn: {
+            v: 1,
+            alg: 'A256GCM',
+            iv: expect.any(String),
+            ciphertext: expect.any(String),
+            tag: expect.any(String),
+          },
+        },
+      },
+    });
+  });
+
+  it('fails closed before persistence when the field-encryption key is absent', async () => {
+    delete process.env.ONBOARDING_FIELD_ENCRYPTION_KEY;
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    try {
+      const result = await submitOnboardingEmbeddedForm({
+        stepNumber: 20,
+        signerName: 'Applicant Name',
+        payload: {
+          key: 'form-w4',
+          values: {
+            firstName: 'Applicant', middleInitial: '', lastName: 'Name',
+            addressLine1: '1 Main Street', city: 'New York', state: 'NY', zipCode: '10001',
+            ssn: '123-45-6789', filingStatus: 'SINGLE', multipleJobsTwoJobCheckbox: false,
+            qualifyingChildrenCount: '0', otherDependentsCount: '0', otherCreditsAmount: '0',
+            otherIncome: '0', deductions: '0', extraWithholding: '0', claimExempt: false,
+          },
+        },
+      });
+
+      expect(result).toEqual({ success: false, error: 'Failed to save form. Please try again.' });
+      expect(mocks.prisma.candidateOnboardingPacket.updateMany).not.toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
   it('does not let an e-signature complete the embedded W-4 step', async () => {
     const result = await recordOnboardingSignature({
       stepNumber: 20,

@@ -26,6 +26,7 @@ app's `package.json`). Both apps share **one** Supabase Postgres via the same
 | `NEXT_PUBLIC_SUPABASE_URL` | public | Supabase project URL — `lib/supabase/{server,client,admin}.ts`, `middleware.ts` |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | public | Supabase anon key — same call sites as above |
 | `SUPABASE_SERVICE_ROLE_KEY` | **server-only, secret** | Admin client (RLS bypass) for Storage uploads without a session — `lib/supabase/admin.ts`. Never expose with `NEXT_PUBLIC_` |
+| `ONBOARDING_FIELD_ENCRYPTION_KEY` | **server-only, secret** | Canonical base64-encoded 32-byte AES key used to encrypt SSNs, dates of birth, and bank coordinates before onboarding form data reaches Postgres. Generate independently per environment (for example, `openssl rand -base64 32`); never rotate without a data re-encryption plan |
 | `NEXT_PUBLIC_CRM_URL` | public | Deep links back into CRM — `actions/atsActions.ts`, `lib/syncSessionStudioTargets.ts` |
 | `NEXT_PUBLIC_HRM_URL` | public | Self-referencing links in notifications — `actions/atsActions.ts` |
 | `NEXT_PUBLIC_AUTH_COOKIE_DOMAIN` | public | Same optional organization-owned parent domain configured in CRM; never use a hosting-provider parent such as `.onrender.com` |

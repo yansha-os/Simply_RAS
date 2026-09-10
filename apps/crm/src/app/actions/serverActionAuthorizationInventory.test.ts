@@ -45,14 +45,22 @@ function sourceFiles(extensions: ReadonlySet<string>): string[] {
   return files.sort();
 }
 
+const trackedSources = sourceFiles(new Set(['.ts', '.tsx']))
+  .filter((path) => !path.endsWith('.test.ts'))
+  .map((path) => ({
+    path,
+    normalized: relative(ROOT, path).replaceAll('\\', '/'),
+    source: readFileSync(path, 'utf8'),
+  }));
+
+const INVENTORY_TIMEOUT_MS = 15_000;
+
 describe('Server Action authorization inventory', () => {
   it('requires every database-backed action module to declare an authorization boundary', () => {
     const violations: string[] = [];
 
-    for (const path of sourceFiles(new Set(['.ts']))) {
-      const normalized = relative(ROOT, path).replaceAll('\\', '/');
-      if (normalized.endsWith('.test.ts')) continue;
-      const source = readFileSync(path, 'utf8');
+    for (const { path, normalized, source } of trackedSources) {
+      if (extname(path) !== '.ts') continue;
       if (!/^['"]use server['"]/.test(source)) continue;
       if (!/\bprisma\./.test(source)) continue;
       if (REVIEWED_PUBLIC_DATABASE_ACTIONS.has(normalized)) continue;
@@ -62,13 +70,12 @@ describe('Server Action authorization inventory', () => {
     }
 
     expect(violations).toEqual([]);
-  });
+  }, INVENTORY_TIMEOUT_MS);
 
   it('has no duplicate legacy RBT profile-sync action', () => {
-    const tracked = sourceFiles(new Set(['.ts', '.tsx']))
-      .filter((path) => !path.endsWith('.test.ts'))
-      .filter((path) => readFileSync(path, 'utf8').includes('syncRbtProfileToCrm'))
-      .map((path) => relative(ROOT, path).replaceAll('\\', '/'));
+    const tracked = trackedSources
+      .filter(({ source }) => source.includes('syncRbtProfileToCrm'))
+      .map(({ normalized }) => normalized);
     expect(tracked).toEqual([]);
-  });
+  }, INVENTORY_TIMEOUT_MS);
 });

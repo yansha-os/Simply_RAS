@@ -20,6 +20,7 @@ import {
   validateEmbeddedForm,
   type EmbeddedFormPayload,
 } from '@/lib/embeddedOnboardingForms';
+import { protectOnboardingFormForStorage } from '@/lib/onboardingSensitiveStorage';
 import { canUseApplicantDeviceSession } from '@/lib/applicantAccessPolicy';
 import {
   applicantDocumentMagicBytesMatchMime,
@@ -355,7 +356,12 @@ export async function submitOnboardingEmbeddedForm(input: {
     const session = await resolveApplicantId();
     if (!session.ok) return { success: false as const, error: session.error };
 
-    const stored = normalizeForStorage(input.payload);
+    const normalized = normalizeForStorage(input.payload);
+    const stored = protectOnboardingFormForStorage(
+      session.candidateId,
+      input.payload,
+      normalized
+    );
     const auditSummary = redactForAudit(input.payload);
 
     const packet = await prisma.candidateOnboardingPacket.findUnique({
