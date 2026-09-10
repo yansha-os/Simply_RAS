@@ -9,14 +9,27 @@ type EncryptedField = {
   tag: string;
 };
 
+export type OnboardingEncryptionReadiness = 'ok' | 'error';
+
+function decodeEncryptionKey(encoded: string): Buffer | null {
+  const key = Buffer.from(encoded, 'base64');
+  return key.length === 32 && key.toString('base64') === encoded ? key : null;
+}
+
+/** Non-secret readiness signal shared by health checks and encrypted writes. */
+export function getOnboardingEncryptionReadiness(): OnboardingEncryptionReadiness {
+  const encoded = process.env.ONBOARDING_FIELD_ENCRYPTION_KEY?.trim();
+  return encoded && decodeEncryptionKey(encoded) ? 'ok' : 'error';
+}
+
 function encryptionKey(): Buffer {
   const encoded = process.env.ONBOARDING_FIELD_ENCRYPTION_KEY?.trim();
   if (!encoded) {
     throw new Error('ONBOARDING_FIELD_ENCRYPTION_KEY is not configured');
   }
 
-  const key = Buffer.from(encoded, 'base64');
-  if (key.length !== 32 || key.toString('base64') !== encoded) {
+  const key = decodeEncryptionKey(encoded);
+  if (!key) {
     throw new Error('ONBOARDING_FIELD_ENCRYPTION_KEY must be a canonical base64-encoded 32-byte key');
   }
   return key;
