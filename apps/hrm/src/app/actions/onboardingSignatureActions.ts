@@ -181,9 +181,10 @@ async function persistEvent(input: {
   quizAttempt?: number | null;
   quizAnswers?: Record<string, unknown> | null;
   fingerprint?: string | null;
-}) {
+}, database: Pick<Prisma.TransactionClient, 'onboardingSignatureEvent'> = prisma,
+meta?: { ipAddress: string | null; userAgent: string | null }) {
   const doc = getOnboardingDoc(input.stepNumber);
-  const { ipAddress, userAgent } = await clientMeta();
+  const { ipAddress, userAgent } = meta ?? (await clientMeta());
   const createdAt = new Date();
   const auditHash = makeAuditHash({
     candidateId: input.candidateId,
@@ -198,7 +199,7 @@ async function persistEvent(input: {
     file: input.fileName || '',
   });
 
-  const event = await prisma.onboardingSignatureEvent.create({
+  const event = await database.onboardingSignatureEvent.create({
     data: {
       candidateId: input.candidateId,
       stepNumber: input.stepNumber,
@@ -364,43 +365,52 @@ export async function submitOnboardingEmbeddedForm(input: {
     );
     const auditSummary = redactForAudit(input.payload);
 
-    const packet = await prisma.candidateOnboardingPacket.findUnique({
-      where: { candidateId: session.candidateId },
-      select: { formData: true },
-    });
-    const prev =
-      packet?.formData && typeof packet.formData === 'object' && !Array.isArray(packet.formData)
-        ? (packet.formData as Record<string, unknown>)
-        : {};
-    const embeddedForms =
-      prev.embeddedForms && typeof prev.embeddedForms === 'object' && !Array.isArray(prev.embeddedForms)
-        ? (prev.embeddedForms as Record<string, unknown>)
-        : {};
+    const meta = await clientMeta();
+    const event = await prisma.$transaction(
+      async (tx) => {
+        const packet = await tx.candidateOnboardingPacket.findUnique({
+          where: { candidateId: session.candidateId },
+          select: { formData: true },
+        });
+        if (!packet) throw new Error('Candidate onboarding packet was not found');
 
-    await prisma.candidateOnboardingPacket.updateMany({
-      where: { candidateId: session.candidateId },
-      data: {
-        formData: {
-          ...prev,
-          embeddedForms: {
-            ...embeddedForms,
-            [input.payload.key]: stored,
+        const prev =
+          packet.formData && typeof packet.formData === 'object' && !Array.isArray(packet.formData)
+            ? (packet.formData as Record<string, unknown>)
+            : {};
+        const embeddedForms =
+          prev.embeddedForms && typeof prev.embeddedForms === 'object' && !Array.isArray(prev.embeddedForms)
+            ? (prev.embeddedForms as Record<string, unknown>)
+            : {};
+
+        const updated = await tx.candidateOnboardingPacket.updateMany({
+          where: { candidateId: session.candidateId },
+          data: {
+            formData: {
+              ...prev,
+              embeddedForms: {
+                ...embeddedForms,
+                [input.payload.key]: stored,
+              },
+            } as Prisma.InputJsonValue,
+            ...(stepNumber === 20 ? { w4Complete: true } : {}),
+            ...(stepNumber === 22 ? { directDepositComplete: true } : {}),
           },
-        } as Prisma.InputJsonValue,
-        ...(stepNumber === 20 ? { w4Complete: true } : {}),
-        ...(stepNumber === 22 ? { directDepositComplete: true } : {}),
-      },
-    });
+        });
+        if (updated.count !== 1) throw new Error('Candidate onboarding packet update failed');
 
-    const event = await persistEvent({
-      candidateId: session.candidateId,
-      stepNumber,
-      actionType: 'FORM_SUBMITTED',
-      signerName,
-      fingerprint: session.fingerprint,
-      consents: { read: true, agree: true, eSign: true },
-      quizAnswers: auditSummary,
-    });
+        return persistEvent({
+          candidateId: session.candidateId,
+          stepNumber,
+          actionType: 'FORM_SUBMITTED',
+          signerName,
+          fingerprint: session.fingerprint,
+          consents: { read: true, agree: true, eSign: true },
+          quizAnswers: auditSummary,
+        }, tx, meta);
+      },
+      { isolationLevel: 'Serializable' }
+    );
 
     revalidatePath('/rbt', 'layout');
     revalidatePath('/ats', 'layout');

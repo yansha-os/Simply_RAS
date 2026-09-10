@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => {
       return undefined;
     }),
     prisma: {
+      $transaction: vi.fn(),
       applicantDeviceSession: { findUnique: vi.fn() },
       onboardingSignatureEvent: { create: vi.fn(), count: vi.fn() },
       candidateOnboardingPacket: {
@@ -65,6 +66,9 @@ beforeEach(() => {
   });
   mocks.prisma.candidateOnboardingPacket.updateMany.mockResolvedValue({ count: 1 });
   mocks.prisma.candidateOnboardingPacket.findUnique.mockResolvedValue({ formData: {} });
+  mocks.prisma.$transaction.mockImplementation(
+    async (callback: (tx: typeof mocks.prisma) => Promise<unknown>) => callback(mocks.prisma)
+  );
 });
 
 describe('onboarding action integrity', () => {
@@ -138,6 +142,34 @@ describe('onboarding action integrity', () => {
 
       expect(result).toEqual({ success: false, error: 'Failed to save form. Please try again.' });
       expect(mocks.prisma.candidateOnboardingPacket.updateMany).not.toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it('does not create a submission event when the onboarding packet is missing', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    mocks.prisma.candidateOnboardingPacket.findUnique.mockResolvedValue(null);
+
+    try {
+      const result = await submitOnboardingEmbeddedForm({
+        stepNumber: 20,
+        signerName: 'Applicant Name',
+        payload: {
+          key: 'form-w4',
+          values: {
+            firstName: 'Applicant', middleInitial: '', lastName: 'Name',
+            addressLine1: '1 Main Street', city: 'New York', state: 'NY', zipCode: '10001',
+            ssn: '123-45-6789', filingStatus: 'SINGLE', multipleJobsTwoJobCheckbox: false,
+            qualifyingChildrenCount: '0', otherDependentsCount: '0', otherCreditsAmount: '0',
+            otherIncome: '0', deductions: '0', extraWithholding: '0', claimExempt: false,
+          },
+        },
+      });
+
+      expect(result).toMatchObject({ success: false });
+      expect(mocks.prisma.candidateOnboardingPacket.updateMany).not.toHaveBeenCalled();
+      expect(mocks.prisma.onboardingSignatureEvent.create).not.toHaveBeenCalled();
     } finally {
       consoleError.mockRestore();
     }
