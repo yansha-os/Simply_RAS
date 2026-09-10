@@ -65,6 +65,7 @@ export default function LoginPage() {
                 <Input
                   name="email"
                   type="email"
+                  autoComplete="username"
                   value={emailInput}
                   onChange={(e) => setEmailInput(e.target.value)}
                   placeholder="you@riseandshine.nyc"
@@ -78,6 +79,7 @@ export default function LoginPage() {
                 <Input
                   name="password"
                   type="password"
+                  autoComplete="current-password"
                   value={passwordInput}
                   onChange={(e) => setPasswordInput(e.target.value)}
                   placeholder="••••••••"
@@ -114,7 +116,7 @@ export default function LoginPage() {
             </Link>
           </p>
           <p className="text-[11px] text-slate-500 font-mono font-medium">
-            Protected by 256-bit SSL &amp; HIPAA Compliant Security
+            Secured with staff authentication and role-based access controls
           </p>
         </div>
       </div>

@@ -119,7 +119,7 @@ export default async function MagicLinkPage(props: { params: Promise<{ id: strin
             </div>
             <h1 className="text-2xl font-heading font-extrabold text-slate-900 mb-3">Device Locked</h1>
             <p className="text-slate-600 text-sm leading-relaxed mb-4">
-              For your security and HIPAA compliance, this portal is locked to the original device that opened this link.
+              For your security, this portal is locked to the original device that opened this link.
             </p>
             <p className="text-xs text-slate-500 leading-relaxed bg-slate-50 border border-slate-200 rounded-2xl p-4">
               Please return to your original device, or contact your care coordinator to request a fresh secure link.

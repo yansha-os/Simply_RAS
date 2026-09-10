@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "Rise & Shine | Secure Parent Portal",
-  description: "Secure HIPAA-compliant parent & client portal for Rise & Shine ABA",
+  description: "Private parent and client portal for Rise & Shine ABA",
 };
 
 export default function MagicLinkLayout({
