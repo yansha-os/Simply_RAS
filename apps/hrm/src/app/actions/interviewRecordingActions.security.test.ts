@@ -10,7 +10,6 @@ const mocks = vi.hoisted(() => {
   return {
     remove,
     storageClient: { storage: { from: storageFrom } },
-    requireRole: vi.fn(),
     requireStaff: vi.fn(),
     revalidatePath: vi.fn(),
     prisma: {
@@ -22,13 +21,15 @@ const mocks = vi.hoisted(() => {
       atsInterview: {
         findUnique: vi.fn(),
       },
+      atsCandidate: {
+        findUnique: vi.fn(),
+      },
     },
   };
 });
 
 vi.mock('@/lib/prisma', () => ({ prisma: mocks.prisma }));
 vi.mock('@/lib/auth-guard', () => ({
-  requireRole: mocks.requireRole,
   requireStaff: mocks.requireStaff,
 }));
 vi.mock('@/lib/supabase/admin', () => ({
@@ -40,14 +41,15 @@ vi.mock('@/lib/supabase/server', () => ({
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }));
 
 import {
+  createInterviewRecordingUpload,
   deleteInterviewRecording,
   discardUnfinalizedInterviewRecording,
+  finalizeInterviewRecording,
   listInterviewRecordings,
 } from './interviewRecordingActions';
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.requireRole.mockResolvedValue({ id: 'staff-id' });
   mocks.requireStaff.mockResolvedValue({ ok: true, user: { id: 'staff-id' } });
   mocks.prisma.atsInterviewRecording.findMany.mockResolvedValue([]);
   mocks.prisma.atsInterviewRecording.findUnique.mockResolvedValue({
@@ -60,6 +62,43 @@ beforeEach(() => {
   });
   mocks.prisma.atsInterviewRecording.delete.mockResolvedValue({});
   mocks.prisma.atsInterview.findUnique.mockResolvedValue({ id: INTERVIEW_ID });
+});
+
+describe('interview recording action authorization', () => {
+  it('blocks upload authorization before candidate lookup', async () => {
+    mocks.requireStaff.mockResolvedValue({ ok: false, error: 'Not authorized.' });
+
+    const result = await createInterviewRecordingUpload({
+      candidateId: CANDIDATE_ID,
+      mimeType: 'video/webm',
+      byteSize: 8,
+    });
+
+    expect(result).toEqual({ success: false, error: 'Not authorized.' });
+    expect(mocks.prisma.atsCandidate.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('blocks finalization before recording lookup', async () => {
+    mocks.requireStaff.mockResolvedValue({ ok: false, error: 'Not authorized.' });
+
+    const result = await finalizeInterviewRecording({
+      recordingId: RECORDING_ID,
+      candidateId: CANDIDATE_ID,
+      mimeType: 'video/webm',
+    });
+
+    expect(result).toEqual({ success: false, error: 'Not authorized.' });
+    expect(mocks.prisma.atsInterviewRecording.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('blocks deletion before recording lookup', async () => {
+    mocks.requireStaff.mockResolvedValue({ ok: false, error: 'Not authorized.' });
+
+    const result = await deleteInterviewRecording(RECORDING_ID);
+
+    expect(result).toEqual({ success: false, error: 'Not authorized.' });
+    expect(mocks.prisma.atsInterviewRecording.findUnique).not.toHaveBeenCalled();
+  });
 });
 
 describe('interview recording archive completeness', () => {

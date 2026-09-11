@@ -2,7 +2,7 @@
 
 import { prisma } from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
-import { requireRole, requireStaff } from '@/lib/auth-guard';
+import { requireStaff } from '@/lib/auth-guard';
 import type { Role } from '@repo/db';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
@@ -237,9 +237,10 @@ export async function createInterviewRecordingUpload(input: {
   mimeType: string;
   byteSize: number;
 }) {
-  try {
-    await requireRole(ATS_STAFF_ROLES);
+  const gate = await requireStaff(ATS_STAFF_ROLES);
+  if (!gate.ok) return { success: false as const, error: gate.error };
 
+  try {
     const candidateId = String(input.candidateId || '');
     const mimeType = normalizeMimeType(String(input.mimeType || ''));
     const byteSize = Number(input.byteSize) || 0;
@@ -332,9 +333,10 @@ export async function finalizeInterviewRecording(input: {
   durationSeconds?: number;
   mimeType: string;
 }) {
-  try {
-    const user = await requireRole(ATS_STAFF_ROLES);
+  const gate = await requireStaff(ATS_STAFF_ROLES);
+  if (!gate.ok) return { success: false as const, error: gate.error };
 
+  try {
     const recordingId = String(input.recordingId || '');
     const candidateId = String(input.candidateId || '');
     const titleRaw = String(input.title || 'Interview Take').slice(0, 120);
@@ -399,7 +401,7 @@ export async function finalizeInterviewRecording(input: {
       return { success: false as const, error: RECORDING_WRONG_TYPE_ERROR };
     }
 
-    const createdByUserId = isUuid(user.id) ? user.id : null;
+    const createdByUserId = isUuid(gate.user.id) ? gate.user.id : null;
 
     const row = await prisma.atsInterviewRecording.create({
       data: {
@@ -499,9 +501,10 @@ export async function discardUnfinalizedInterviewRecording(input: {
 }
 
 export async function deleteInterviewRecording(recordingId: string) {
-  try {
-    await requireRole(ATS_STAFF_ROLES);
+  const gate = await requireStaff(ATS_STAFF_ROLES);
+  if (!gate.ok) return { success: false as const, error: gate.error };
 
+  try {
     if (!isUuid(recordingId)) {
       return { success: false as const, error: 'Invalid recording id.' };
     }
