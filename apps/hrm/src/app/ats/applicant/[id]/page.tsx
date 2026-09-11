@@ -67,6 +67,7 @@ import {
 import type { AtsCandidateData } from '@/lib/atsStage';
 import {
   calculateRecordingDurationSeconds,
+  hasPendingRecordingEvidence,
   saveRecordingBlob,
   loadSavedRecordings,
   deleteSavedRecording,
@@ -164,6 +165,7 @@ export default function ApplicantProfilePage() {
   const [isLoadingRecordings, setIsLoadingRecordings] = useState(false);
   const [pendingRecordingDelete, setPendingRecordingDelete] = useState<RecordedVideoItem | null>(null);
   const [isDeletingRecording, setIsDeletingRecording] = useState(false);
+  const recordingEvidencePending = hasPendingRecordingEvidence(isRecording, uploadProgress);
   const mounted = useSyncExternalStore(
     subscribeToClientMount,
     getClientMountSnapshot,
@@ -606,6 +608,11 @@ export default function ApplicantProfilePage() {
 
   // In-Browser MediaRecorder Handlers with Audio Mixing (Mic + Display Audio)
   const handleStartRecording = async () => {
+    if (recordingEvidencePending) {
+      toast.error('Wait for the current recording to finish saving before starting another take.');
+      return;
+    }
+
     try {
       await releaseCaptureResources();
 
@@ -1883,15 +1890,15 @@ export default function ApplicantProfilePage() {
                     }
                     handleStartRecording();
                   }}
-                  disabled={!hasJoinedMeeting}
+                  disabled={!hasJoinedMeeting || recordingEvidencePending}
                   className={`font-extrabold text-xs px-4 py-2.5 rounded-xl flex items-center gap-2 transition-all ${
-                    hasJoinedMeeting
+                    hasJoinedMeeting && !recordingEvidencePending
                       ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 shadow-md cursor-pointer'
                       : 'bg-zinc-900 text-zinc-500 border border-white/5 cursor-not-allowed opacity-50'
                   }`}
                 >
-                  <span className={`w-2.5 h-2.5 rounded-full ${hasJoinedMeeting ? 'bg-rose-500 animate-pulse' : 'bg-zinc-600'}`} />
-                  <span>⏺️ Record Interview</span>
+                  <span className={`w-2.5 h-2.5 rounded-full ${hasJoinedMeeting && !recordingEvidencePending ? 'bg-rose-500 animate-pulse' : 'bg-zinc-600'}`} />
+                  <span>{recordingEvidencePending ? 'Securing Previous Take…' : '⏺️ Record Interview'}</span>
                 </button>
               )}
 
@@ -2448,7 +2455,8 @@ export default function ApplicantProfilePage() {
                   const isScorecardComplete = ratedCount === 8;
                   const durableRecordingCount = recordedVideos.filter((video) => video.durable).length;
                   const isRecordingComplete = durableRecordingCount >= 1;
-                  const isInterviewEvidenceSaving = isSavingScriptProgress || isSavingScorecard;
+                  const isInterviewEvidenceSaving =
+                    isSavingScriptProgress || isSavingScorecard || recordingEvidencePending;
                   const canSubmitDecision =
                     isScriptComplete && isScorecardComplete && isRecordingComplete && !isInterviewEvidenceSaving;
 

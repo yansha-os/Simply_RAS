@@ -21,6 +21,7 @@ vi.mock('@/app/actions/interviewRecordingActions', () => ({
 import {
   calculateRecordingDurationSeconds,
   deleteSavedRecording,
+  hasPendingRecordingEvidence,
   loadSavedRecordings,
   releaseRecordingCaptureResources,
   releaseLocalRecordingUrl,
@@ -178,5 +179,12 @@ describe('interview recording durability', () => {
     expect(calculateRecordingDurationSeconds(10_000, 75_999)).toBe(65);
     expect(calculateRecordingDurationSeconds(75_999, 10_000)).toBe(0);
     expect(calculateRecordingDurationSeconds(null, 75_999)).toBe(0);
+  });
+
+  it('treats active capture and every upload percentage as pending evidence', () => {
+    expect(hasPendingRecordingEvidence(true, null)).toBe(true);
+    expect(hasPendingRecordingEvidence(false, 0)).toBe(true);
+    expect(hasPendingRecordingEvidence(false, 100)).toBe(true);
+    expect(hasPendingRecordingEvidence(false, null)).toBe(false);
   });
 });

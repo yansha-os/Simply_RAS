@@ -31,6 +31,10 @@ export function calculateRecordingDurationSeconds(startedAtMs: number | null, st
   return Math.max(0, Math.floor((stoppedAtMs - startedAtMs) / 1000));
 }
 
+export function hasPendingRecordingEvidence(isRecording: boolean, uploadProgress: number | null): boolean {
+  return isRecording || uploadProgress !== null;
+}
+
 export function releaseLocalRecordingUrl(recording: Pick<RecordedVideoItem, 'url' | 'durable'>): void {
   if (!recording.durable && recording.url.startsWith('blob:')) {
     URL.revokeObjectURL(recording.url);
