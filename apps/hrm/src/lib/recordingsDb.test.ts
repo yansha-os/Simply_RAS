@@ -6,17 +6,18 @@ const RECORDING_ID = '33333333-3333-4333-8333-333333333333';
 
 const mocks = vi.hoisted(() => ({
   createUpload: vi.fn(),
+  deleteRecording: vi.fn(),
   finalize: vi.fn(),
 }));
 
 vi.mock('@/app/actions/interviewRecordingActions', () => ({
   createInterviewRecordingUpload: mocks.createUpload,
-  deleteInterviewRecording: vi.fn(),
+  deleteInterviewRecording: mocks.deleteRecording,
   finalizeInterviewRecording: mocks.finalize,
   listInterviewRecordings: vi.fn(),
 }));
 
-import { saveRecordingBlob } from './recordingsDb';
+import { deleteSavedRecording, saveRecordingBlob } from './recordingsDb';
 
 class SuccessfulUploadRequest {
   status = 200;
@@ -87,5 +88,28 @@ describe('interview recording durability', () => {
     expect(result).toEqual({ success: false, error: 'Storage unavailable.' });
     expect(mocks.finalize).not.toHaveBeenCalled();
   });
-});
 
+  it('keeps a durable recording visible when secure deletion is rejected', async () => {
+    mocks.deleteRecording.mockResolvedValue({
+      success: false,
+      error: 'Storage deletion failed. Recording metadata was retained.',
+    });
+
+    const result = await deleteSavedRecording({ id: RECORDING_ID, durable: true });
+
+    expect(result).toEqual({
+      success: false,
+      error: 'Storage deletion failed. Recording metadata was retained.',
+    });
+    expect(mocks.deleteRecording).toHaveBeenCalledWith(RECORDING_ID);
+  });
+
+  it('reports success only after secure deletion is confirmed', async () => {
+    mocks.deleteRecording.mockResolvedValue({ success: true });
+
+    const result = await deleteSavedRecording({ id: RECORDING_ID, durable: true });
+
+    expect(result).toEqual({ success: true });
+    expect(mocks.deleteRecording).toHaveBeenCalledWith(RECORDING_ID);
+  });
+});

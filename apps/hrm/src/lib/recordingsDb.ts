@@ -270,10 +270,32 @@ export async function saveRecordingToIDB(
   }
 }
 
-export async function deleteRecordingFromIDB(
-  recordingId: string
-): Promise<boolean> {
-  await deleteInterviewRecording(recordingId).catch(() => {});
-  await deleteFromIDBStore(recordingId).catch(() => {});
-  return true;
+export async function deleteSavedRecording(
+  recording: Pick<RecordedVideoItem, 'id' | 'durable'>
+): Promise<{ success: boolean; error?: string }> {
+  if (recording.durable) {
+    try {
+      const result = await deleteInterviewRecording(recording.id);
+      if (!result.success) {
+        return {
+          success: false,
+          error: result.error || 'Secure recording deletion failed. Please retry.',
+        };
+      }
+    } catch {
+      return {
+        success: false,
+        error: 'Secure recording deletion failed. Check the connection and retry.',
+      };
+    }
+
+    // A same-ID legacy recovery copy is redundant after confirmed server deletion.
+    await deleteFromIDBStore(recording.id);
+    return { success: true };
+  }
+
+  const deleted = await deleteFromIDBStore(recording.id);
+  return deleted
+    ? { success: true }
+    : { success: false, error: 'Local recovery copy could not be deleted. Please retry.' };
 }

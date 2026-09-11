@@ -67,7 +67,7 @@ import type { AtsCandidateData } from '@/lib/atsStage';
 import {
   saveRecordingBlob,
   getRecordingsFromIDB,
-  deleteRecordingFromIDB,
+  deleteSavedRecording,
   type RecordedVideoItem,
 } from '@/lib/recordingsDb';
 
@@ -635,9 +635,15 @@ export default function ApplicantProfilePage() {
 
   const handleDeleteTake = async (takeId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    const ok = await deleteRecordingFromIDB(takeId);
-    if (!ok) {
-      toast.error('Failed to delete recording');
+    const recording = recordedVideos.find((video) => video.id === takeId);
+    if (!recording) {
+      toast.error('Recording is no longer available.');
+      return;
+    }
+
+    const result = await deleteSavedRecording(recording);
+    if (!result.success) {
+      toast.error(result.error || 'Failed to delete recording');
       return;
     }
     setRecordedVideos(prev => {
@@ -647,7 +653,7 @@ export default function ApplicantProfilePage() {
       }
       return updated;
     });
-    toast.success('Interview take deleted.');
+    toast.success(recording.durable ? 'Secure interview take deleted.' : 'Local recovery copy deleted.');
   };
 
   const handleSaveNotes = async () => {
