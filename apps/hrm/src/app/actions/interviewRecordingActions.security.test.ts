@@ -17,10 +17,10 @@ const mocks = vi.hoisted(() => {
     revalidatePath: vi.fn(),
     prisma: {
       atsInterviewRecording: {
-        create: vi.fn(),
         findMany: vi.fn(),
         findUnique: vi.fn(),
         delete: vi.fn(),
+        upsert: vi.fn(),
       },
       atsInterview: {
         findUnique: vi.fn(),
@@ -61,6 +61,18 @@ beforeEach(() => {
   });
   mocks.prisma.atsInterviewRecording.findMany.mockResolvedValue([]);
   mocks.prisma.atsInterviewRecording.findUnique.mockResolvedValue({
+    id: RECORDING_ID,
+    candidateId: CANDIDATE_ID,
+    interviewId: INTERVIEW_ID,
+    storageBucket: 'ats-interview-recordings',
+    storagePath: `${CANDIDATE_ID}/${INTERVIEW_ID}/${RECORDING_ID}.webm`,
+    mimeType: 'video/webm',
+    title: 'Interview Take 1',
+    durationSeconds: 30,
+    byteSize: BigInt(16),
+    createdAt: new Date('2026-09-11T12:00:00.000Z'),
+  });
+  mocks.prisma.atsInterviewRecording.upsert.mockResolvedValue({
     id: RECORDING_ID,
     candidateId: CANDIDATE_ID,
     interviewId: INTERVIEW_ID,
@@ -137,7 +149,7 @@ describe('interview recording finalization integrity', () => {
         byteSize: 16,
       },
     });
-    expect(mocks.prisma.atsInterviewRecording.create).not.toHaveBeenCalled();
+    expect(mocks.prisma.atsInterviewRecording.upsert).not.toHaveBeenCalled();
     expect(mocks.prisma.atsInterview.findUnique).not.toHaveBeenCalled();
   });
 
@@ -150,7 +162,45 @@ describe('interview recording finalization integrity', () => {
 
     expect(result).toEqual({ success: false, error: 'Recording already saved.' });
     expect(mocks.createSignedUrl).not.toHaveBeenCalled();
-    expect(mocks.prisma.atsInterviewRecording.create).not.toHaveBeenCalled();
+    expect(mocks.prisma.atsInterviewRecording.upsert).not.toHaveBeenCalled();
+  });
+
+  it('returns the winning durable row when concurrent finalizations race', async () => {
+    mocks.prisma.atsInterviewRecording.findUnique.mockResolvedValue(null);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(
+          new Uint8Array([
+            0x1a, 0x45, 0xdf, 0xa3, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0,
+          ]),
+          {
+            status: 206,
+            headers: { 'content-range': 'bytes 0-15/16' },
+          }
+        )
+      )
+    );
+
+    const result = await finalizeInterviewRecording({
+      recordingId: RECORDING_ID,
+      candidateId: CANDIDATE_ID,
+      title: 'Interview Take 1',
+      durationSeconds: 30,
+      mimeType: 'video/webm',
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      data: { id: RECORDING_ID, applicantId: CANDIDATE_ID },
+    });
+    expect(mocks.prisma.atsInterviewRecording.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: RECORDING_ID },
+        update: {},
+      })
+    );
   });
 
   it('does not persist metadata when playback access cannot be established', async () => {
@@ -190,7 +240,7 @@ describe('interview recording finalization integrity', () => {
       success: false,
       error: 'Failed to save recording. Please try again.',
     });
-    expect(mocks.prisma.atsInterviewRecording.create).not.toHaveBeenCalled();
+    expect(mocks.prisma.atsInterviewRecording.upsert).not.toHaveBeenCalled();
   });
 });
 

@@ -451,8 +451,10 @@ export async function finalizeInterviewRecording(input: {
     const url = await signedUrlFor(client, storagePath);
     const createdByUserId = isUuid(gate.user.id) ? gate.user.id : null;
 
-    const row = await prisma.atsInterviewRecording.create({
-      data: {
+    const row = await prisma.atsInterviewRecording.upsert({
+      where: { id: recordingId },
+      update: {},
+      create: {
         id: recordingId,
         interviewId: interview.id,
         candidateId,
@@ -465,6 +467,16 @@ export async function finalizeInterviewRecording(input: {
         createdByUserId,
       },
     });
+
+    if (
+      row.candidateId !== candidateId ||
+      row.interviewId !== interview.id ||
+      row.mimeType !== mimeType ||
+      row.storageBucket !== BUCKET ||
+      row.storagePath !== storagePath
+    ) {
+      return { success: false as const, error: 'Recording already saved.' };
+    }
 
     revalidatePath(`/ats/applicant/${candidateId}`);
 
