@@ -401,6 +401,10 @@ export async function finalizeInterviewRecording(input: {
       return { success: false as const, error: RECORDING_WRONG_TYPE_ERROR };
     }
 
+    // Prove the verified object is readable before committing durable metadata.
+    // Otherwise a signed-URL failure after `create` would report a failed save
+    // even though the recording row already exists.
+    const url = await signedUrlFor(client, storagePath);
     const createdByUserId = isUuid(gate.user.id) ? gate.user.id : null;
 
     const row = await prisma.atsInterviewRecording.create({
@@ -417,8 +421,6 @@ export async function finalizeInterviewRecording(input: {
         createdByUserId,
       },
     });
-
-    const url = await signedUrlFor(client, storagePath);
 
     revalidatePath(`/ats/applicant/${candidateId}`);
 

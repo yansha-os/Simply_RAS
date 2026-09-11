@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const RECORDING_ID = '11111111-1111-4111-8111-111111111111';
 const CANDIDATE_ID = '22222222-2222-4222-8222-222222222222';
@@ -6,14 +6,17 @@ const INTERVIEW_ID = '33333333-3333-4333-8333-333333333333';
 
 const mocks = vi.hoisted(() => {
   const remove = vi.fn();
-  const storageFrom = vi.fn(() => ({ remove }));
+  const createSignedUrl = vi.fn();
+  const storageFrom = vi.fn(() => ({ createSignedUrl, remove }));
   return {
+    createSignedUrl,
     remove,
     storageClient: { storage: { from: storageFrom } },
     requireStaff: vi.fn(),
     revalidatePath: vi.fn(),
     prisma: {
       atsInterviewRecording: {
+        create: vi.fn(),
         findMany: vi.fn(),
         findUnique: vi.fn(),
         delete: vi.fn(),
@@ -51,6 +54,10 @@ import {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.requireStaff.mockResolvedValue({ ok: true, user: { id: 'staff-id' } });
+  mocks.createSignedUrl.mockResolvedValue({
+    data: { signedUrl: 'https://storage.example.test/read' },
+    error: null,
+  });
   mocks.prisma.atsInterviewRecording.findMany.mockResolvedValue([]);
   mocks.prisma.atsInterviewRecording.findUnique.mockResolvedValue({
     id: RECORDING_ID,
@@ -62,6 +69,10 @@ beforeEach(() => {
   });
   mocks.prisma.atsInterviewRecording.delete.mockResolvedValue({});
   mocks.prisma.atsInterview.findUnique.mockResolvedValue({ id: INTERVIEW_ID });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe('interview recording action authorization', () => {
@@ -98,6 +109,48 @@ describe('interview recording action authorization', () => {
 
     expect(result).toEqual({ success: false, error: 'Not authorized.' });
     expect(mocks.prisma.atsInterviewRecording.findUnique).not.toHaveBeenCalled();
+  });
+});
+
+describe('interview recording finalization integrity', () => {
+  it('does not persist metadata when playback access cannot be established', async () => {
+    mocks.prisma.atsInterviewRecording.findUnique.mockResolvedValue(null);
+    mocks.createSignedUrl
+      .mockResolvedValueOnce({
+        data: { signedUrl: 'https://storage.example.test/head' },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: null,
+        error: { message: 'signing unavailable' },
+      });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(
+          new Uint8Array([
+            0x1a, 0x45, 0xdf, 0xa3, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0,
+          ]),
+          {
+            status: 206,
+            headers: { 'content-range': 'bytes 0-15/16' },
+          }
+        )
+      )
+    );
+
+    const result = await finalizeInterviewRecording({
+      recordingId: RECORDING_ID,
+      candidateId: CANDIDATE_ID,
+      mimeType: 'video/webm',
+    });
+
+    expect(result).toEqual({
+      success: false,
+      error: 'Failed to save recording. Please try again.',
+    });
+    expect(mocks.prisma.atsInterviewRecording.create).not.toHaveBeenCalled();
   });
 });
 
