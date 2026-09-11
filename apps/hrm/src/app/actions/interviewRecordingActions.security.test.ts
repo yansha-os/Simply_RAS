@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const RECORDING_ID = '11111111-1111-4111-8111-111111111111';
 const CANDIDATE_ID = '22222222-2222-4222-8222-222222222222';
+const OTHER_CANDIDATE_ID = '44444444-4444-4444-8444-444444444444';
 const INTERVIEW_ID = '33333333-3333-4333-8333-333333333333';
 
 const mocks = vi.hoisted(() => {
@@ -66,6 +67,10 @@ beforeEach(() => {
     storageBucket: 'ats-interview-recordings',
     storagePath: `${CANDIDATE_ID}/${INTERVIEW_ID}/${RECORDING_ID}.webm`,
     mimeType: 'video/webm',
+    title: 'Interview Take 1',
+    durationSeconds: 30,
+    byteSize: BigInt(16),
+    createdAt: new Date('2026-09-11T12:00:00.000Z'),
   });
   mocks.prisma.atsInterviewRecording.delete.mockResolvedValue({});
   mocks.prisma.atsInterview.findUnique.mockResolvedValue({ id: INTERVIEW_ID });
@@ -113,6 +118,41 @@ describe('interview recording action authorization', () => {
 });
 
 describe('interview recording finalization integrity', () => {
+  it('returns the durable recording when finalization is safely retried', async () => {
+    const result = await finalizeInterviewRecording({
+      recordingId: RECORDING_ID,
+      candidateId: CANDIDATE_ID,
+      title: 'Interview Take 1',
+      durationSeconds: 30,
+      mimeType: 'video/webm',
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      data: {
+        id: RECORDING_ID,
+        applicantId: CANDIDATE_ID,
+        interviewId: INTERVIEW_ID,
+        url: 'https://storage.example.test/read',
+        byteSize: 16,
+      },
+    });
+    expect(mocks.prisma.atsInterviewRecording.create).not.toHaveBeenCalled();
+    expect(mocks.prisma.atsInterview.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('rejects a retry when the recording belongs to another candidate', async () => {
+    const result = await finalizeInterviewRecording({
+      recordingId: RECORDING_ID,
+      candidateId: OTHER_CANDIDATE_ID,
+      mimeType: 'video/webm',
+    });
+
+    expect(result).toEqual({ success: false, error: 'Recording already saved.' });
+    expect(mocks.createSignedUrl).not.toHaveBeenCalled();
+    expect(mocks.prisma.atsInterviewRecording.create).not.toHaveBeenCalled();
+  });
+
   it('does not persist metadata when playback access cannot be established', async () => {
     mocks.prisma.atsInterviewRecording.findUnique.mockResolvedValue(null);
     mocks.createSignedUrl

@@ -355,10 +355,54 @@ export async function finalizeInterviewRecording(input: {
 
     const existing = await prisma.atsInterviewRecording.findUnique({
       where: { id: recordingId },
-      select: { id: true },
+      select: {
+        id: true,
+        candidateId: true,
+        interviewId: true,
+        storageBucket: true,
+        storagePath: true,
+        mimeType: true,
+        title: true,
+        durationSeconds: true,
+        byteSize: true,
+        createdAt: true,
+      },
     });
     if (existing) {
-      return { success: false as const, error: 'Recording already saved.' };
+      if (
+        existing.candidateId !== candidateId ||
+        existing.mimeType !== mimeType ||
+        existing.storageBucket !== BUCKET ||
+        !isInterviewRecordingStoragePath({
+          candidateId: existing.candidateId,
+          interviewId: existing.interviewId,
+          recordingId: existing.id,
+          mimeType: existing.mimeType,
+          storagePath: existing.storagePath,
+        })
+      ) {
+        return { success: false as const, error: 'Recording already saved.' };
+      }
+
+      const { client } = await getStorageClient();
+      const url = await signedUrlFor(client, existing.storagePath, existing.storageBucket);
+      return {
+        success: true as const,
+        data: {
+          id: existing.id,
+          applicantId: existing.candidateId,
+          interviewId: existing.interviewId,
+          title: existing.title,
+          url,
+          duration: existing.durationSeconds,
+          timestamp: existing.createdAt.toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit',
+          }),
+          mimeType: existing.mimeType,
+          byteSize: existing.byteSize != null ? Number(existing.byteSize) : null,
+        } satisfies InterviewRecordingDto,
+      };
     }
 
     const interview = await prisma.atsInterview.findUnique({
