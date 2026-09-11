@@ -69,6 +69,7 @@ import {
   saveRecordingBlob,
   loadSavedRecordings,
   deleteSavedRecording,
+  releaseLocalRecordingUrl,
   type RecordedVideoItem,
 } from '@/lib/recordingsDb';
 
@@ -169,6 +170,8 @@ export default function ApplicantProfilePage() {
   const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);
   const recordedChunksRef = React.useRef<Blob[]>([]);
   const timerRef = React.useRef<NodeJS.Timeout | null>(null);
+  const localArchiveUrlsRef = React.useRef(new Set<string>());
+  const previewUrlsRef = React.useRef(new Set<string>());
 
   // Submitted Application Form Data State
   const [submittedApp, setSubmittedApp] = useState<{
@@ -209,6 +212,15 @@ export default function ApplicantProfilePage() {
   const refreshRecordings = React.useCallback(async () => {
     setIsLoadingRecordings(true);
     const result = await loadSavedRecordings(applicantId);
+    for (const url of localArchiveUrlsRef.current) {
+      releaseLocalRecordingUrl({ url, durable: false });
+    }
+    localArchiveUrlsRef.current.clear();
+    for (const recording of result.items) {
+      if (!recording.durable && recording.url.startsWith('blob:')) {
+        localArchiveUrlsRef.current.add(recording.url);
+      }
+    }
     setRecordedVideos(result.items);
     setActiveVideoUrl((current) =>
       result.items.some((recording) => recording.url === current)
@@ -218,6 +230,20 @@ export default function ApplicantProfilePage() {
     setRecordingsLoadError(result.success ? null : result.error || 'Failed to load secure recordings.');
     setIsLoadingRecordings(false);
   }, [applicantId]);
+
+  useEffect(() => {
+    const localArchiveUrls = localArchiveUrlsRef.current;
+    const previewUrls = previewUrlsRef.current;
+
+    return () => {
+      for (const url of localArchiveUrls) {
+        releaseLocalRecordingUrl({ url, durable: false });
+      }
+      localArchiveUrls.clear();
+      for (const url of previewUrls) URL.revokeObjectURL(url);
+      previewUrls.clear();
+    };
+  }, []);
 
   useEffect(() => {
     if (!pendingRecordingDelete) return;
@@ -612,7 +638,9 @@ export default function ApplicantProfilePage() {
       mediaRecorder.onstop = () => {
         const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
         const title = `Interview Take ${recordedVideos.length + 1}`;
+        const previousActiveVideoUrl = activeVideoUrl || recordedVideos[0]?.url || null;
         const localPreview = URL.createObjectURL(blob);
+        previewUrlsRef.current.add(localPreview);
         setActiveVideoUrl(localPreview);
         setUploadProgress(0);
         toast.message('Saving interview take…');
@@ -627,6 +655,7 @@ export default function ApplicantProfilePage() {
           .then((res) => {
             setUploadProgress(null);
             if (!res.success || !res.item) {
+              setActiveVideoUrl((current) => current === localPreview ? previousActiveVideoUrl : current);
               toast.error(res.error || 'Failed to save recording');
               return;
             }
@@ -640,8 +669,13 @@ export default function ApplicantProfilePage() {
           })
           .catch((err) => {
             setUploadProgress(null);
+            setActiveVideoUrl((current) => current === localPreview ? previousActiveVideoUrl : current);
             console.error('Recording save error:', err);
             toast.error('Save failed — check your connection and try again.');
+          })
+          .finally(() => {
+            URL.revokeObjectURL(localPreview);
+            previewUrlsRef.current.delete(localPreview);
           });
       };
 
@@ -700,6 +734,8 @@ export default function ApplicantProfilePage() {
         }
         return updated;
       });
+      releaseLocalRecordingUrl(recording);
+      localArchiveUrlsRef.current.delete(recording.url);
       setPendingRecordingDelete(null);
       toast.success(recording.durable ? 'Secure interview take deleted.' : 'Local recovery copy deleted.');
     } finally {

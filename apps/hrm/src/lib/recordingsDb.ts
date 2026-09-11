@@ -26,6 +26,12 @@ export interface RecordedVideoItem {
   durable: boolean;
 }
 
+export function releaseLocalRecordingUrl(recording: Pick<RecordedVideoItem, 'url' | 'durable'>): void {
+  if (!recording.durable && recording.url.startsWith('blob:')) {
+    URL.revokeObjectURL(recording.url);
+  }
+}
+
 function toItem(dto: InterviewRecordingDto): RecordedVideoItem {
   return {
     id: dto.id,

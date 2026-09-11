@@ -18,7 +18,12 @@ vi.mock('@/app/actions/interviewRecordingActions', () => ({
   listInterviewRecordings: mocks.listRecordings,
 }));
 
-import { deleteSavedRecording, loadSavedRecordings, saveRecordingBlob } from './recordingsDb';
+import {
+  deleteSavedRecording,
+  loadSavedRecordings,
+  releaseLocalRecordingUrl,
+  saveRecordingBlob,
+} from './recordingsDb';
 
 class SuccessfulUploadRequest {
   status = 200;
@@ -136,5 +141,15 @@ describe('interview recording durability', () => {
       success: true,
       items: [],
     });
+  });
+
+  it('releases only browser-owned local recording URLs', () => {
+    const revokeObjectUrl = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+
+    releaseLocalRecordingUrl({ url: 'blob:https://hrm.example.test/local-take', durable: false });
+    releaseLocalRecordingUrl({ url: 'https://storage.example.test/signed-take', durable: true });
+
+    expect(revokeObjectUrl).toHaveBeenCalledOnce();
+    expect(revokeObjectUrl).toHaveBeenCalledWith('blob:https://hrm.example.test/local-take');
   });
 });
