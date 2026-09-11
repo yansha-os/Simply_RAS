@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => {
     revalidatePath: vi.fn(),
     prisma: {
       atsInterviewRecording: {
+        findMany: vi.fn(),
         findUnique: vi.fn(),
         delete: vi.fn(),
       },
@@ -41,12 +42,14 @@ vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }));
 import {
   deleteInterviewRecording,
   discardUnfinalizedInterviewRecording,
+  listInterviewRecordings,
 } from './interviewRecordingActions';
 
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.requireRole.mockResolvedValue({ id: 'staff-id' });
   mocks.requireStaff.mockResolvedValue({ ok: true, user: { id: 'staff-id' } });
+  mocks.prisma.atsInterviewRecording.findMany.mockResolvedValue([]);
   mocks.prisma.atsInterviewRecording.findUnique.mockResolvedValue({
     id: RECORDING_ID,
     candidateId: CANDIDATE_ID,
@@ -57,6 +60,42 @@ beforeEach(() => {
   });
   mocks.prisma.atsInterviewRecording.delete.mockResolvedValue({});
   mocks.prisma.atsInterview.findUnique.mockResolvedValue({ id: INTERVIEW_ID });
+});
+
+describe('interview recording archive completeness', () => {
+  it('short-circuits before database access when authorization fails', async () => {
+    mocks.requireStaff.mockResolvedValue({ ok: false, error: 'Not authorized.' });
+
+    const result = await listInterviewRecordings(CANDIDATE_ID);
+
+    expect(result).toEqual({ success: false, error: 'Not authorized.', data: [] });
+    expect(mocks.prisma.atsInterviewRecording.findMany).not.toHaveBeenCalled();
+  });
+
+  it('reports persisted recordings that cannot be loaded instead of claiming success', async () => {
+    mocks.prisma.atsInterviewRecording.findMany.mockResolvedValue([
+      {
+        id: RECORDING_ID,
+        candidateId: CANDIDATE_ID,
+        interviewId: INTERVIEW_ID,
+        storageBucket: 'another-private-bucket',
+        storagePath: `victim/${RECORDING_ID}.webm`,
+        mimeType: 'video/webm',
+        title: 'Interview recording',
+        durationSeconds: 30,
+        byteSize: BigInt(8),
+        createdAt: new Date('2026-09-11T12:00:00.000Z'),
+      },
+    ]);
+
+    const result = await listInterviewRecordings(CANDIDATE_ID);
+
+    expect(result).toEqual({
+      success: false,
+      error: '1 secure recording could not be loaded.',
+      data: [],
+    });
+  });
 });
 
 describe('unfinalized interview recording cleanup', () => {

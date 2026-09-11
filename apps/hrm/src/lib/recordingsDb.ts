@@ -190,7 +190,7 @@ export async function loadSavedRecordings(
       ? { success: true as const, items: res.data.map(toItem) }
       : {
           success: false as const,
-          items: [] as RecordedVideoItem[],
+          items: res.data.map(toItem),
           error: res.error || 'Failed to load secure recordings.',
         })
     .catch(() => ({

@@ -184,6 +184,32 @@ describe('interview recording durability', () => {
     });
   });
 
+  it('preserves readable secure recordings when the archive is only partially available', async () => {
+    mocks.listRecordings.mockResolvedValue({
+      success: false,
+      error: '1 secure recording could not be loaded.',
+      data: [{
+        id: RECORDING_ID,
+        applicantId: CANDIDATE_ID,
+        interviewId: INTERVIEW_ID,
+        title: 'Interview Take 1',
+        url: 'https://storage.example.test/read',
+        duration: 30,
+        timestamp: '10:00 AM',
+        mimeType: 'video/webm',
+        byteSize: 8,
+      }],
+    });
+
+    const result = await loadSavedRecordings(CANDIDATE_ID);
+
+    expect(result).toMatchObject({
+      success: false,
+      error: '1 secure recording could not be loaded.',
+      items: [{ id: RECORDING_ID, durable: true }],
+    });
+  });
+
   it('returns an explicit successful empty archive', async () => {
     await expect(loadSavedRecordings(CANDIDATE_ID)).resolves.toEqual({
       success: true,

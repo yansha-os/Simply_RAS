@@ -86,9 +86,12 @@ async function signedUrlFor(
 }
 
 export async function listInterviewRecordings(candidateId: string) {
-  try {
-    await requireRole(ATS_STAFF_ROLES);
+  const gate = await requireStaff(ATS_STAFF_ROLES);
+  if (!gate.ok) {
+    return { success: false as const, error: gate.error, data: [] as InterviewRecordingDto[] };
+  }
 
+  try {
     if (!isUuid(candidateId)) {
       return { success: false as const, error: 'Invalid candidate id.', data: [] as InterviewRecordingDto[] };
     }
@@ -104,6 +107,7 @@ export async function listInterviewRecordings(candidateId: string) {
 
     const { client } = await getStorageClient();
     const data: InterviewRecordingDto[] = [];
+    let unavailableCount = 0;
 
     for (const row of rows) {
       try {
@@ -117,6 +121,7 @@ export async function listInterviewRecordings(candidateId: string) {
             storagePath: row.storagePath,
           })
         ) {
+          unavailableCount += 1;
           continue;
         }
         const url = await signedUrlFor(client, row.storagePath, row.storageBucket);
@@ -135,8 +140,16 @@ export async function listInterviewRecordings(candidateId: string) {
           byteSize: row.byteSize != null ? Number(row.byteSize) : null,
         });
       } catch {
-        // Skip rows whose object is missing; still return others
+        unavailableCount += 1;
       }
+    }
+
+    if (unavailableCount > 0) {
+      return {
+        success: false as const,
+        error: `${unavailableCount} secure recording${unavailableCount === 1 ? '' : 's'} could not be loaded.`,
+        data,
+      };
     }
 
     return { success: true as const, data };
