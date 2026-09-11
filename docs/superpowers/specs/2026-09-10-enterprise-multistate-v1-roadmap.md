@@ -256,6 +256,15 @@ Each slice must identify evidence, make the smallest complete change, add regres
 - `/hr-dashboard` and `/payroll` remain LIVE because production renders real/limited operational views; only their richer fabricated KPI components are DEV_ONLY behind `isDevToolsEnabled()`. No independently reachable DEV_ONLY, PROTOTYPE, or HOLD route entry was found.
 - Route entry classification is complete for this snapshot. Track 0 remains open until server actions, background work, external adapters, and data stores receive the same source-derived classification.
 
+### 2026-09-11 — Server-action classification
+
+- Parsed the current `'use server'` modules and their top-level exports: **73 modules / 257 exported callables** — CRM has 48 modules / 146 callables; HRM has 25 modules / 111 callables. Tests and files that merely mention the directive were excluded.
+- Classified **245 callables as LIVE**, **11 as DEV_ONLY**, and **1 as HOLD**. DEV_ONLY consists of every export in the two `app/actions/devTools.ts` modules plus `devImpersonateApplicantSession`; all are protected by the shared production-off dev-tools gate.
+- The sole HOLD callable is `exportStateAggregatorBatch`: it deterministically formats a reviewed batch but has no production UI caller and performs no vendor transmission. It must remain HOLD until an EVV vendor/state enrollment and certification decision is complete.
+- Reviewed public boundaries are limited to CRM/HRM login, public RBT application, and applicant device-session binding. The existing authorization inventory test continues to require every other database-backed action module to declare a staff, client-resource, parent-token, applicant-session, notification-recipient, or dev-tools boundary.
+- Ownership matches the architecture map: CRM actions own client/intake/clinical/billing/case coordination; HRM actions own ATS/onboarding/RBT delivery/payroll views. No retired CRM RBT/HR action implementation remains.
+- Server-action classification is complete for this snapshot. Track 0 remains open for scheduled/background work, external adapters, and data stores.
+
 ## Authoritative linked evidence
 
 - Product ownership: [`../../ARCHITECTURE.md`](../../ARCHITECTURE.md)
