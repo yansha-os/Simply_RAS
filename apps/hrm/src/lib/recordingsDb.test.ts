@@ -21,6 +21,7 @@ vi.mock('@/app/actions/interviewRecordingActions', () => ({
 import {
   deleteSavedRecording,
   loadSavedRecordings,
+  releaseRecordingCaptureResources,
   releaseLocalRecordingUrl,
   saveRecordingBlob,
 } from './recordingsDb';
@@ -151,5 +152,24 @@ describe('interview recording durability', () => {
 
     expect(revokeObjectUrl).toHaveBeenCalledOnce();
     expect(revokeObjectUrl).toHaveBeenCalledWith('blob:https://hrm.example.test/local-take');
+  });
+
+  it('stops each capture track once and closes the audio engine', async () => {
+    const stopVideo = vi.fn();
+    const stopMic = vi.fn();
+    const closeAudio = vi.fn().mockResolvedValue(undefined);
+    const sharedVideoTrack = { stop: stopVideo };
+
+    await releaseRecordingCaptureResources({
+      streams: [
+        { getTracks: () => [sharedVideoTrack] },
+        { getTracks: () => [sharedVideoTrack, { stop: stopMic }] },
+      ],
+      audioContext: { state: 'running', close: closeAudio },
+    });
+
+    expect(stopVideo).toHaveBeenCalledOnce();
+    expect(stopMic).toHaveBeenCalledOnce();
+    expect(closeAudio).toHaveBeenCalledOnce();
   });
 });

@@ -32,6 +32,37 @@ export function releaseLocalRecordingUrl(recording: Pick<RecordedVideoItem, 'url
   }
 }
 
+type StoppableMediaStream = {
+  getTracks: () => ReadonlyArray<{ stop: () => void }>;
+};
+
+type ClosableAudioContext = {
+  state: string;
+  close: () => Promise<void>;
+};
+
+export async function releaseRecordingCaptureResources(resources: {
+  streams: ReadonlyArray<StoppableMediaStream>;
+  audioContext: ClosableAudioContext | null;
+}): Promise<void> {
+  const tracks = new Set(resources.streams.flatMap((stream) => stream.getTracks()));
+  for (const track of tracks) {
+    try {
+      track.stop();
+    } catch {
+      // Continue releasing the remaining device tracks.
+    }
+  }
+
+  if (resources.audioContext && resources.audioContext.state !== 'closed') {
+    try {
+      await resources.audioContext.close();
+    } catch {
+      // Tracks are already stopped; browser teardown failures are non-fatal.
+    }
+  }
+}
+
 function toItem(dto: InterviewRecordingDto): RecordedVideoItem {
   return {
     id: dto.id,

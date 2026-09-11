@@ -69,6 +69,7 @@ import {
   saveRecordingBlob,
   loadSavedRecordings,
   deleteSavedRecording,
+  releaseRecordingCaptureResources,
   releaseLocalRecordingUrl,
   type RecordedVideoItem,
 } from '@/lib/recordingsDb';
@@ -172,6 +173,10 @@ export default function ApplicantProfilePage() {
   const timerRef = React.useRef<NodeJS.Timeout | null>(null);
   const localArchiveUrlsRef = React.useRef(new Set<string>());
   const previewUrlsRef = React.useRef(new Set<string>());
+  const captureResourcesRef = React.useRef<{
+    streams: MediaStream[];
+    audioContext: AudioContext | null;
+  } | null>(null);
 
   // Submitted Application Form Data State
   const [submittedApp, setSubmittedApp] = useState<{
@@ -231,6 +236,12 @@ export default function ApplicantProfilePage() {
     setIsLoadingRecordings(false);
   }, [applicantId]);
 
+  const releaseCaptureResources = React.useCallback(async () => {
+    const resources = captureResourcesRef.current;
+    captureResourcesRef.current = null;
+    if (resources) await releaseRecordingCaptureResources(resources);
+  }, []);
+
   useEffect(() => {
     const localArchiveUrls = localArchiveUrlsRef.current;
     const previewUrls = previewUrlsRef.current;
@@ -242,8 +253,16 @@ export default function ApplicantProfilePage() {
       localArchiveUrls.clear();
       for (const url of previewUrls) URL.revokeObjectURL(url);
       previewUrls.clear();
+      const recorder = mediaRecorderRef.current;
+      if (recorder && recorder.state !== 'inactive') {
+        recorder.ondataavailable = null;
+        recorder.onstop = null;
+        recorder.stop();
+      }
+      if (timerRef.current) clearInterval(timerRef.current);
+      void releaseCaptureResources();
     };
-  }, []);
+  }, [releaseCaptureResources]);
 
   useEffect(() => {
     if (!pendingRecordingDelete) return;
@@ -585,16 +604,20 @@ export default function ApplicantProfilePage() {
   // In-Browser MediaRecorder Handlers with Audio Mixing (Mic + Display Audio)
   const handleStartRecording = async () => {
     try {
+      await releaseCaptureResources();
+
       // 1. Capture screen / tab audio & video
       const displayStream = await navigator.mediaDevices.getDisplayMedia({
         video: true,
         audio: true,
       });
+      captureResourcesRef.current = { streams: [displayStream], audioContext: null };
 
       // 2. Capture HR Agent local microphone audio
       let micStream: MediaStream | null = null;
       try {
         micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        captureResourcesRef.current.streams.push(micStream);
       } catch (micErr) {
         console.warn('Microphone permission not granted or unavailable:', micErr);
       }
@@ -607,6 +630,7 @@ export default function ApplicantProfilePage() {
         throw new Error('Web Audio API is not available.');
       }
       const audioCtx = new AudioContextConstructor();
+      captureResourcesRef.current.audioContext = audioCtx;
       const destination = audioCtx.createMediaStreamDestination();
 
       if (displayStream.getAudioTracks().length > 0) {
@@ -625,6 +649,7 @@ export default function ApplicantProfilePage() {
         ...destination.stream.getAudioTracks()
       ];
       const combinedStream = new MediaStream(combinedTracks);
+      captureResourcesRef.current.streams.push(combinedStream);
 
       recordedChunksRef.current = [];
       const mediaRecorder = new MediaRecorder(combinedStream, { mimeType: 'video/webm;codecs=vp8,opus' });
@@ -695,6 +720,7 @@ export default function ApplicantProfilePage() {
 
       toast.success('🔴 Live recording started! Conducting interview screen...');
     } catch {
+      await releaseCaptureResources();
       toast.error('Recording cancelled or screen permission denied.');
     }
   };
@@ -702,10 +728,11 @@ export default function ApplicantProfilePage() {
   const handleStopRecording = () => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
-      mediaRecorderRef.current.stream.getTracks().forEach((track) => track.stop());
     }
+    void releaseCaptureResources();
     if (timerRef.current) {
       clearInterval(timerRef.current);
+      timerRef.current = null;
     }
     setIsRecording(false);
   };
