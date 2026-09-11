@@ -19,6 +19,7 @@ vi.mock('@/app/actions/interviewRecordingActions', () => ({
 }));
 
 import {
+  calculateRecordingDurationSeconds,
   deleteSavedRecording,
   loadSavedRecordings,
   releaseRecordingCaptureResources,
@@ -171,5 +172,11 @@ describe('interview recording durability', () => {
     expect(stopVideo).toHaveBeenCalledOnce();
     expect(stopMic).toHaveBeenCalledOnce();
     expect(closeAudio).toHaveBeenCalledOnce();
+  });
+
+  it('derives recording duration from timestamps without interval drift', () => {
+    expect(calculateRecordingDurationSeconds(10_000, 75_999)).toBe(65);
+    expect(calculateRecordingDurationSeconds(75_999, 10_000)).toBe(0);
+    expect(calculateRecordingDurationSeconds(null, 75_999)).toBe(0);
   });
 });

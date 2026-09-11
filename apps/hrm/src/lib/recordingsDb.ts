@@ -26,6 +26,11 @@ export interface RecordedVideoItem {
   durable: boolean;
 }
 
+export function calculateRecordingDurationSeconds(startedAtMs: number | null, stoppedAtMs: number): number {
+  if (startedAtMs === null || !Number.isFinite(startedAtMs) || !Number.isFinite(stoppedAtMs)) return 0;
+  return Math.max(0, Math.floor((stoppedAtMs - startedAtMs) / 1000));
+}
+
 export function releaseLocalRecordingUrl(recording: Pick<RecordedVideoItem, 'url' | 'durable'>): void {
   if (!recording.durable && recording.url.startsWith('blob:')) {
     URL.revokeObjectURL(recording.url);

@@ -66,6 +66,7 @@ import {
 } from '@/app/actions/hrInterviewActions';
 import type { AtsCandidateData } from '@/lib/atsStage';
 import {
+  calculateRecordingDurationSeconds,
   saveRecordingBlob,
   loadSavedRecordings,
   deleteSavedRecording,
@@ -171,6 +172,7 @@ export default function ApplicantProfilePage() {
   const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);
   const recordedChunksRef = React.useRef<Blob[]>([]);
   const timerRef = React.useRef<NodeJS.Timeout | null>(null);
+  const recordingStartedAtRef = React.useRef<number | null>(null);
   const localArchiveUrlsRef = React.useRef(new Set<string>());
   const previewUrlsRef = React.useRef(new Set<string>());
   const captureResourcesRef = React.useRef<{
@@ -260,6 +262,7 @@ export default function ApplicantProfilePage() {
         recorder.stop();
       }
       if (timerRef.current) clearInterval(timerRef.current);
+      recordingStartedAtRef.current = null;
       void releaseCaptureResources();
     };
   }, [releaseCaptureResources]);
@@ -660,7 +663,13 @@ export default function ApplicantProfilePage() {
         }
       };
 
-      mediaRecorder.onstop = () => {
+      mediaRecorder.onstart = (event) => {
+        recordingStartedAtRef.current = event.timeStamp;
+      };
+
+      mediaRecorder.onstop = (event) => {
+        const durationSeconds = calculateRecordingDurationSeconds(recordingStartedAtRef.current, event.timeStamp);
+        recordingStartedAtRef.current = null;
         const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
         const title = `Interview Take ${recordedVideos.length + 1}`;
         const previousActiveVideoUrl = activeVideoUrl || recordedVideos[0]?.url || null;
@@ -674,7 +683,7 @@ export default function ApplicantProfilePage() {
           applicantId,
           title,
           blob,
-          duration: recordingDuration,
+          duration: durationSeconds,
           onProgress: (percent) => setUploadProgress(percent),
         })
           .then((res) => {
@@ -715,11 +724,12 @@ export default function ApplicantProfilePage() {
       setRecordingDuration(0);
 
       timerRef.current = setInterval(() => {
-        setRecordingDuration((prev) => prev + 1);
+        setRecordingDuration((previous) => previous + 1);
       }, 1000);
 
       toast.success('🔴 Live recording started! Conducting interview screen...');
     } catch {
+      recordingStartedAtRef.current = null;
       await releaseCaptureResources();
       toast.error('Recording cancelled or screen permission denied.');
     }
