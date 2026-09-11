@@ -247,6 +247,15 @@ Each slice must identify evidence, make the smallest complete change, add regres
 - Confirmed EVV vendor adapters and native EDI helpers exist but remain prototype/optional boundaries; they must not be promoted to LIVE through naming alone.
 - First implementation target selected: produce the authoritative production-surface classification, then centralize organization/location timezone resolution without changing historical service instants.
 
+### 2026-09-11 — Reachable route classification
+
+- Re-discovered route entry files directly from both App Router trees: **64 total** — CRM has 29 pages plus 5 HTTP handlers; HRM has 29 pages plus 1 HTTP handler. This count excludes layouts, loading/error boundaries, components, and server-action modules because they are not independent route entries.
+- Classified **61 entries as LIVE** and **3 as RETIRE compatibility redirects**. The RETIRE entries are CRM `/apply`, `/portal-hr/[[...path]]`, and `/rbt/[[...path]]`; each intentionally redirects to the HRM-owned survivor and contains no duplicate workflow implementation.
+- CRM LIVE families: authenticated CRM dashboards and portals, client detail, login/MFA, parent magic-link intake, careers landing, root routing, and the address/document/report/health/upload handlers.
+- HRM LIVE families: ATS and applicant detail, HR/finance/staffing workspaces, onboarding and applicant magic links, the RBT portal including Session Studio and simulation training, careers/apply, login/MFA, root routing, and health.
+- `/hr-dashboard` and `/payroll` remain LIVE because production renders real/limited operational views; only their richer fabricated KPI components are DEV_ONLY behind `isDevToolsEnabled()`. No independently reachable DEV_ONLY, PROTOTYPE, or HOLD route entry was found.
+- Route entry classification is complete for this snapshot. Track 0 remains open until server actions, background work, external adapters, and data stores receive the same source-derived classification.
+
 ## Authoritative linked evidence
 
 - Product ownership: [`../../ARCHITECTURE.md`](../../ARCHITECTURE.md)
