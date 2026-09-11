@@ -8,16 +8,17 @@ const mocks = vi.hoisted(() => ({
   createUpload: vi.fn(),
   deleteRecording: vi.fn(),
   finalize: vi.fn(),
+  listRecordings: vi.fn(),
 }));
 
 vi.mock('@/app/actions/interviewRecordingActions', () => ({
   createInterviewRecordingUpload: mocks.createUpload,
   deleteInterviewRecording: mocks.deleteRecording,
   finalizeInterviewRecording: mocks.finalize,
-  listInterviewRecordings: vi.fn(),
+  listInterviewRecordings: mocks.listRecordings,
 }));
 
-import { deleteSavedRecording, saveRecordingBlob } from './recordingsDb';
+import { deleteSavedRecording, loadSavedRecordings, saveRecordingBlob } from './recordingsDb';
 
 class SuccessfulUploadRequest {
   status = 200;
@@ -54,6 +55,7 @@ beforeEach(() => {
       byteSize: 8,
     },
   });
+  mocks.listRecordings.mockResolvedValue({ success: true, data: [] });
 });
 
 describe('interview recording durability', () => {
@@ -111,5 +113,28 @@ describe('interview recording durability', () => {
 
     expect(result).toEqual({ success: true });
     expect(mocks.deleteRecording).toHaveBeenCalledWith(RECORDING_ID);
+  });
+
+  it('distinguishes a secure-recording load failure from an empty archive', async () => {
+    mocks.listRecordings.mockResolvedValue({
+      success: false,
+      error: 'Failed to load recordings.',
+      data: [],
+    });
+
+    const result = await loadSavedRecordings(CANDIDATE_ID);
+
+    expect(result).toEqual({
+      success: false,
+      items: [],
+      error: 'Failed to load recordings.',
+    });
+  });
+
+  it('returns an explicit successful empty archive', async () => {
+    await expect(loadSavedRecordings(CANDIDATE_ID)).resolves.toEqual({
+      success: true,
+      items: [],
+    });
   });
 });

@@ -135,24 +135,38 @@ async function deleteFromIDBStore(recordingId: string): Promise<boolean> {
   }
 }
 
-export async function getRecordingsFromIDB(
+export async function loadSavedRecordings(
   applicantId: string
-): Promise<RecordedVideoItem[]> {
+): Promise<{ success: boolean; items: RecordedVideoItem[]; error?: string }> {
   const remotePromise = listInterviewRecordings(applicantId)
-    .then((res) => (res.success ? res.data.map(toItem) : []))
-    .catch(() => []);
+    .then((res) => res.success
+      ? { success: true as const, items: res.data.map(toItem) }
+      : {
+          success: false as const,
+          items: [] as RecordedVideoItem[],
+          error: res.error || 'Failed to load secure recordings.',
+        })
+    .catch(() => ({
+      success: false as const,
+      items: [] as RecordedVideoItem[],
+      error: 'Failed to load secure recordings. Check the connection and retry.',
+    }));
 
   const localPromise = getFromIDBStore(applicantId);
 
-  const [remoteItems, localItems] = await Promise.all([remotePromise, localPromise]);
+  const [remoteResult, localItems] = await Promise.all([remotePromise, localPromise]);
 
   const map = new Map<string, RecordedVideoItem>();
-  for (const item of remoteItems) map.set(item.id, item);
+  for (const item of remoteResult.items) map.set(item.id, item);
   for (const item of localItems) {
     if (!map.has(item.id)) map.set(item.id, item);
   }
 
-  return Array.from(map.values());
+  return {
+    success: remoteResult.success,
+    items: Array.from(map.values()),
+    ...(!remoteResult.success ? { error: remoteResult.error } : {}),
+  };
 }
 
 /** PUT the blob to the signed upload URL with real progress events. */

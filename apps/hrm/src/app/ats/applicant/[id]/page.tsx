@@ -67,7 +67,7 @@ import {
 import type { AtsCandidateData } from '@/lib/atsStage';
 import {
   saveRecordingBlob,
-  getRecordingsFromIDB,
+  loadSavedRecordings,
   deleteSavedRecording,
   type RecordedVideoItem,
 } from '@/lib/recordingsDb';
@@ -157,6 +157,8 @@ export default function ApplicantProfilePage() {
   const [recordedVideos, setRecordedVideos] = useState<RecordedVideoItem[]>([]);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [activeVideoUrl, setActiveVideoUrl] = useState<string | null>(null);
+  const [recordingsLoadError, setRecordingsLoadError] = useState<string | null>(null);
+  const [isLoadingRecordings, setIsLoadingRecordings] = useState(false);
   const [pendingRecordingDelete, setPendingRecordingDelete] = useState<RecordedVideoItem | null>(null);
   const [isDeletingRecording, setIsDeletingRecording] = useState(false);
   const mounted = useSyncExternalStore(
@@ -203,6 +205,19 @@ export default function ApplicantProfilePage() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [isResettingDeviceLock, setIsResettingDeviceLock] = useState(false);
   const [isCopyingMagicLink, setIsCopyingMagicLink] = useState(false);
+
+  const refreshRecordings = React.useCallback(async () => {
+    setIsLoadingRecordings(true);
+    const result = await loadSavedRecordings(applicantId);
+    setRecordedVideos(result.items);
+    setActiveVideoUrl((current) =>
+      result.items.some((recording) => recording.url === current)
+        ? current
+        : result.items[0]?.url || null
+    );
+    setRecordingsLoadError(result.success ? null : result.error || 'Failed to load secure recordings.');
+    setIsLoadingRecordings(false);
+  }, [applicantId]);
 
   useEffect(() => {
     if (!pendingRecordingDelete) return;
@@ -494,13 +509,8 @@ export default function ApplicantProfilePage() {
         }
       }
 
-      // Load recorded videos from Supabase Storage (Phase 4)
-      getRecordingsFromIDB(applicantId).then((videos) => {
-        if (videos && videos.length > 0) {
-          setRecordedVideos(videos);
-          setActiveVideoUrl(videos[0].url);
-        }
-      });
+      // Load secure recordings and any legacy local recovery copies in parallel.
+      void refreshRecordings();
 
       // Requirements from CandidateOnboardingPacket (Phase 1 SoT)
       const progressRes = await getOnboardingProgress(applicantId);
@@ -544,7 +554,7 @@ export default function ApplicantProfilePage() {
       window.removeEventListener('rbt_sim_changed', loadApplicant);
       window.removeEventListener('rbt_progress_synced', loadApplicant);
     };
-  }, [applicantId]);
+  }, [applicantId, refreshRecordings]);
 
   // In-Browser MediaRecorder Handlers with Audio Mixing (Mic + Display Audio)
   const handleStartRecording = async () => {
@@ -2240,6 +2250,30 @@ export default function ApplicantProfilePage() {
                 {/* SUB-TAB 4: DEDICATED RECORDING ARCHIVE TAB (MULTIPLE TAKES PLAYLIST) */}
                 {activeSubTab === 'RECORDING' && (
                   <div className="space-y-4">
+                    {recordingsLoadError && (
+                      <div
+                        role="alert"
+                        className="flex flex-col gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 sm:flex-row sm:items-center sm:justify-between"
+                      >
+                        <div className="flex items-start gap-3">
+                          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+                          <div>
+                            <p className="text-xs font-black text-amber-300">Secure recording archive unavailable</p>
+                            <p className="mt-1 text-[11px] leading-5 text-amber-100/70">
+                              {recordingsLoadError} Any local recovery copies shown below are not complete evidence.
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => void refreshRecordings()}
+                          disabled={isLoadingRecordings}
+                          className="shrink-0 rounded-xl border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-[11px] font-black text-amber-300 transition-colors hover:bg-amber-400/20 cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {isLoadingRecordings ? 'Retrying…' : 'Retry secure load'}
+                        </button>
+                      </div>
+                    )}
                     {recordedVideos.length > 0 ? (
                       <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
                         {/* MAIN VIDEO PLAYER */}
