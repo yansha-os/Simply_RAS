@@ -2,7 +2,7 @@
 
 import { prisma } from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
-import { requireRole } from '@/lib/auth-guard';
+import { requireRole, requireStaff } from '@/lib/auth-guard';
 import type { Role } from '@repo/db';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
@@ -432,6 +432,56 @@ export async function finalizeInterviewRecording(input: {
       success: false as const,
       error: 'Failed to save recording. Please try again.',
     };
+  }
+}
+
+export async function discardUnfinalizedInterviewRecording(input: {
+  recordingId: string;
+  candidateId: string;
+  mimeType: string;
+}) {
+  const gate = await requireStaff(ATS_STAFF_ROLES);
+  if (!gate.ok) return { success: false as const, error: gate.error };
+
+  try {
+    const recordingId = String(input.recordingId || '');
+    const candidateId = String(input.candidateId || '');
+    const mimeType = normalizeMimeType(String(input.mimeType || ''));
+    if (!isUuid(recordingId) || !isUuid(candidateId) || !isAllowedRecordingMime(mimeType)) {
+      return { success: false as const, error: 'Invalid recording cleanup request.' };
+    }
+
+    const finalized = await prisma.atsInterviewRecording.findUnique({
+      where: { id: recordingId },
+      select: { id: true },
+    });
+    if (finalized) {
+      return { success: false as const, error: 'Finalized recordings cannot be discarded as temporary uploads.' };
+    }
+
+    const interview = await prisma.atsInterview.findUnique({
+      where: { candidateId },
+      select: { id: true },
+    });
+    if (!interview) {
+      return { success: false as const, error: 'Interview not found for recording cleanup.' };
+    }
+
+    const storagePath = `${candidateId}/${interview.id}/${recordingId}.${extensionForMime(mimeType)}`;
+    const { client } = await getStorageClient();
+    const { error } = await client.storage.from(BUCKET).remove([storagePath]);
+    if (error) {
+      console.error('discardUnfinalizedInterviewRecording storage failed:', error.message);
+      return { success: false as const, error: 'Temporary recording cleanup failed.' };
+    }
+
+    return { success: true as const };
+  } catch (error) {
+    console.error(
+      'discardUnfinalizedInterviewRecording failed:',
+      error instanceof Error ? error.message : 'Unknown'
+    );
+    return { success: false as const, error: 'Temporary recording cleanup failed.' };
   }
 }
 

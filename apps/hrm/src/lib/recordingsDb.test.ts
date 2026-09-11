@@ -7,6 +7,7 @@ const RECORDING_ID = '33333333-3333-4333-8333-333333333333';
 const mocks = vi.hoisted(() => ({
   createUpload: vi.fn(),
   deleteRecording: vi.fn(),
+  discardUpload: vi.fn(),
   finalize: vi.fn(),
   listRecordings: vi.fn(),
 }));
@@ -14,6 +15,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/app/actions/interviewRecordingActions', () => ({
   createInterviewRecordingUpload: mocks.createUpload,
   deleteInterviewRecording: mocks.deleteRecording,
+  discardUnfinalizedInterviewRecording: mocks.discardUpload,
   finalizeInterviewRecording: mocks.finalize,
   listInterviewRecordings: mocks.listRecordings,
 }));
@@ -42,6 +44,10 @@ class SuccessfulUploadRequest {
   send() { this.onload?.(); }
 }
 
+class FailedUploadRequest extends SuccessfulUploadRequest {
+  status = 500;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.stubGlobal('XMLHttpRequest', SuccessfulUploadRequest);
@@ -64,6 +70,7 @@ beforeEach(() => {
     },
   });
   mocks.listRecordings.mockResolvedValue({ success: true, data: [] });
+  mocks.discardUpload.mockResolvedValue({ success: true });
 });
 
 describe('interview recording durability', () => {
@@ -97,6 +104,44 @@ describe('interview recording durability', () => {
 
     expect(result).toEqual({ success: false, error: 'Storage unavailable.' });
     expect(mocks.finalize).not.toHaveBeenCalled();
+    expect(mocks.discardUpload).not.toHaveBeenCalled();
+  });
+
+  it('removes an uploaded object when secure metadata finalization fails', async () => {
+    mocks.finalize.mockResolvedValue({ success: false, error: 'Verification failed.' });
+
+    const result = await saveRecordingBlob({
+      applicantId: CANDIDATE_ID,
+      title: 'Interview Take 1',
+      blob: new Blob(['recording'], { type: 'video/webm' }),
+      duration: 30,
+    });
+
+    expect(result).toEqual({ success: false, error: 'Verification failed.' });
+    expect(mocks.discardUpload).toHaveBeenCalledWith({
+      recordingId: RECORDING_ID,
+      candidateId: CANDIDATE_ID,
+      mimeType: 'video/webm',
+    });
+  });
+
+  it('attempts temporary-object cleanup after an HTTP upload failure', async () => {
+    vi.stubGlobal('XMLHttpRequest', FailedUploadRequest);
+
+    const result = await saveRecordingBlob({
+      applicantId: CANDIDATE_ID,
+      title: 'Interview Take 1',
+      blob: new Blob(['recording'], { type: 'video/webm' }),
+      duration: 30,
+    });
+
+    expect(result).toEqual({ success: false, error: 'Recording upload failed (HTTP 500).' });
+    expect(mocks.finalize).not.toHaveBeenCalled();
+    expect(mocks.discardUpload).toHaveBeenCalledWith({
+      recordingId: RECORDING_ID,
+      candidateId: CANDIDATE_ID,
+      mimeType: 'video/webm',
+    });
   });
 
   it('keeps a durable recording visible when secure deletion is rejected', async () => {

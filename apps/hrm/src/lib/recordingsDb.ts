@@ -3,6 +3,7 @@
 import {
   createInterviewRecordingUpload,
   deleteInterviewRecording,
+  discardUnfinalizedInterviewRecording,
   finalizeInterviewRecording,
   listInterviewRecordings,
   type InterviewRecordingDto,
@@ -242,6 +243,19 @@ function putToSignedUrl(
   });
 }
 
+async function discardAuthorizedUpload(params: {
+  recordingId: string;
+  candidateId: string;
+  mimeType: string;
+}): Promise<boolean> {
+  try {
+    const result = await discardUnfinalizedInterviewRecording(params);
+    return result.success;
+  } catch {
+    return false;
+  }
+}
+
 /** Upload directly to private server storage and finalize durable metadata. */
 export async function saveRecordingBlob(params: {
   applicantId: string;
@@ -265,6 +279,7 @@ export async function saveRecordingBlob(params: {
   // Interview recordings are sensitive evidence: only secure server storage
   // counts as a successful save. Legacy IndexedDB entries remain readable so
   // staff can identify and delete older recovery copies.
+  let authorizedRecordingId: string | null = null;
   try {
     const authz = await createInterviewRecordingUpload({
       candidateId: params.applicantId,
@@ -274,6 +289,7 @@ export async function saveRecordingBlob(params: {
     if (!authz.success || !authz.data) {
       return { success: false, error: authz.error || 'Recording upload could not be authorized.' };
     }
+    authorizedRecordingId = authz.data.recordingId;
 
     const put = await putToSignedUrl(
       authz.data.signedUrl,
@@ -282,7 +298,15 @@ export async function saveRecordingBlob(params: {
       params.onProgress
     );
     if (!put.ok) {
-      return { success: false, error: `Recording upload failed (HTTP ${put.status}).` };
+      const cleaned = await discardAuthorizedUpload({
+        recordingId: authz.data.recordingId,
+        candidateId: params.applicantId,
+        mimeType: mime,
+      });
+      return {
+        success: false,
+        error: `Recording upload failed (HTTP ${put.status}).${cleaned ? '' : ' Temporary storage cleanup could not be confirmed.'}`,
+      };
     }
 
     const finalized = await finalizeInterviewRecording({
@@ -293,18 +317,34 @@ export async function saveRecordingBlob(params: {
       mimeType: mime,
     });
     if (!finalized.success || !finalized.data) {
-      return { success: false, error: finalized.error || 'Recording upload could not be finalized.' };
+      const cleaned = await discardAuthorizedUpload({
+        recordingId: authz.data.recordingId,
+        candidateId: params.applicantId,
+        mimeType: mime,
+      });
+      const error = finalized.error || 'Recording upload could not be finalized.';
+      return {
+        success: false,
+        error: `${error}${cleaned ? '' : ' Temporary storage cleanup could not be confirmed.'}`,
+      };
     }
 
     return { success: true, item: toItem(finalized.data) };
   } catch (error) {
+    const cleaned = authorizedRecordingId
+      ? await discardAuthorizedUpload({
+          recordingId: authorizedRecordingId,
+          candidateId: params.applicantId,
+          mimeType: mime,
+        })
+      : true;
     console.warn(
       'Remote recording storage upload failed:',
       error instanceof Error ? error.message : 'Unknown error'
     );
     return {
       success: false,
-      error: 'Recording was not saved to secure server storage. Check the connection and retry.',
+      error: `Recording was not saved to secure server storage. Check the connection and retry.${cleaned ? '' : ' Temporary storage cleanup could not be confirmed.'}`,
     };
   }
 }
