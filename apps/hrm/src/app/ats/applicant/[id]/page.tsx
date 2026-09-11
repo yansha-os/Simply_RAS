@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useSyncExternalStore } from 'react';
+import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import Image, { type ImageLoaderProps } from 'next/image';
 import { useParams, useRouter } from 'next/navigation';
@@ -97,6 +98,18 @@ function uploadedDocumentImageLoader({ src }: ImageLoaderProps): string {
   return src;
 }
 
+function subscribeToClientMount(): () => void {
+  return () => undefined;
+}
+
+function getClientMountSnapshot(): boolean {
+  return true;
+}
+
+function getServerMountSnapshot(): boolean {
+  return false;
+}
+
 export default function ApplicantProfilePage() {
   const { role } = useHrmRole();
   const params = useParams();
@@ -144,6 +157,13 @@ export default function ApplicantProfilePage() {
   const [recordedVideos, setRecordedVideos] = useState<RecordedVideoItem[]>([]);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [activeVideoUrl, setActiveVideoUrl] = useState<string | null>(null);
+  const [pendingRecordingDelete, setPendingRecordingDelete] = useState<RecordedVideoItem | null>(null);
+  const [isDeletingRecording, setIsDeletingRecording] = useState(false);
+  const mounted = useSyncExternalStore(
+    subscribeToClientMount,
+    getClientMountSnapshot,
+    getServerMountSnapshot
+  );
   const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);
   const recordedChunksRef = React.useRef<Blob[]>([]);
   const timerRef = React.useRef<NodeJS.Timeout | null>(null);
@@ -183,6 +203,19 @@ export default function ApplicantProfilePage() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [isResettingDeviceLock, setIsResettingDeviceLock] = useState(false);
   const [isCopyingMagicLink, setIsCopyingMagicLink] = useState(false);
+
+  useEffect(() => {
+    if (!pendingRecordingDelete) return;
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !isDeletingRecording) {
+        setPendingRecordingDelete(null);
+      }
+    };
+
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [isDeletingRecording, pendingRecordingDelete]);
 
   const handleResetDeviceLock = async () => {
     setIsResettingDeviceLock(true);
@@ -633,27 +666,35 @@ export default function ApplicantProfilePage() {
     setIsRecording(false);
   };
 
-  const handleDeleteTake = async (takeId: string, e: React.MouseEvent) => {
+  const requestDeleteTake = (recording: RecordedVideoItem, e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
-    const recording = recordedVideos.find((video) => video.id === takeId);
-    if (!recording) {
-      toast.error('Recording is no longer available.');
-      return;
-    }
+    setPendingRecordingDelete(recording);
+  };
 
-    const result = await deleteSavedRecording(recording);
-    if (!result.success) {
-      toast.error(result.error || 'Failed to delete recording');
-      return;
-    }
-    setRecordedVideos(prev => {
-      const updated = prev.filter(v => v.id !== takeId);
-      if (activeVideoUrl === prev.find(v => v.id === takeId)?.url) {
-        setActiveVideoUrl(updated[0]?.url || null);
+  const handleDeleteTake = async () => {
+    const recording = pendingRecordingDelete;
+    if (!recording || isDeletingRecording) return;
+
+    setIsDeletingRecording(true);
+    try {
+      const result = await deleteSavedRecording(recording);
+      if (!result.success) {
+        toast.error(result.error || 'Failed to delete recording');
+        return;
       }
-      return updated;
-    });
-    toast.success(recording.durable ? 'Secure interview take deleted.' : 'Local recovery copy deleted.');
+
+      setRecordedVideos(prev => {
+        const updated = prev.filter(v => v.id !== recording.id);
+        if (activeVideoUrl === prev.find(v => v.id === recording.id)?.url) {
+          setActiveVideoUrl(updated[0]?.url || null);
+        }
+        return updated;
+      });
+      setPendingRecordingDelete(null);
+      toast.success(recording.durable ? 'Secure interview take deleted.' : 'Local recovery copy deleted.');
+    } finally {
+      setIsDeletingRecording(false);
+    }
   };
 
   const handleSaveNotes = async () => {
@@ -1159,6 +1200,70 @@ export default function ApplicantProfilePage() {
             </div>
           </div>
         </div>
+      )}
+
+      {pendingRecordingDelete && mounted && createPortal(
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in"
+          onClick={() => {
+            if (!isDeletingRecording) setPendingRecordingDelete(null);
+          }}
+          role="presentation"
+        >
+          <div
+            className="relative m-auto w-full max-w-md rounded-3xl border border-rose-500/40 bg-zinc-950 p-6 text-white shadow-2xl shadow-rose-950/40"
+            onClick={(event) => event.stopPropagation()}
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="delete-recording-title"
+            aria-describedby="delete-recording-description"
+          >
+            <button
+              type="button"
+              onClick={() => setPendingRecordingDelete(null)}
+              disabled={isDeletingRecording}
+              className="absolute right-5 top-5 rounded-lg p-1.5 text-zinc-500 transition-colors hover:bg-white/5 hover:text-white cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+              aria-label="Close recording deletion confirmation"
+            >
+              <X className="w-4 h-4 cursor-pointer" />
+            </button>
+
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-rose-500/30 bg-rose-500/10 text-rose-400">
+              <Trash2 className="h-6 w-6" />
+            </div>
+            <div className="mt-5 space-y-2 text-center">
+              <h3 id="delete-recording-title" className="font-heading text-lg font-black">
+                Delete interview take?
+              </h3>
+              <p id="delete-recording-description" className="text-xs leading-5 text-zinc-400">
+                <strong className="text-white">{pendingRecordingDelete.title}</strong> will be permanently deleted
+                {pendingRecordingDelete.durable ? ' from secure server storage' : ' from this browser'}.
+                This action cannot be undone.
+              </p>
+            </div>
+
+            <div className="mt-6 flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setPendingRecordingDelete(null)}
+                disabled={isDeletingRecording}
+                className="flex-1 rounded-xl border border-white/10 bg-zinc-900 py-3 text-xs font-bold text-zinc-300 transition-colors hover:bg-zinc-800 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleDeleteTake()}
+                disabled={isDeletingRecording}
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-rose-600 py-3 text-xs font-black text-white shadow-lg shadow-rose-600/20 transition-all hover:bg-rose-500 cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isDeletingRecording ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                {isDeletingRecording ? 'Deleting…' : 'Delete Take'}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
 
       {/* CORE NAVIGATION TABS */}
@@ -2168,17 +2273,19 @@ export default function ApplicantProfilePage() {
                             {recordedVideos.map((vid, idx) => {
                               const isActive = (activeVideoUrl || recordedVideos[0]?.url) === vid.url;
                               return (
-                                <button
+                                <div
                                   key={vid.id || idx}
-                                  type="button"
-                                  onClick={() => setActiveVideoUrl(vid.url)}
-                                  className={`w-full text-left p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between ${
+                                  className={`w-full rounded-xl border transition-all flex items-center ${
                                     isActive
                                       ? 'bg-rose-500/20 border-rose-500/50 text-white shadow-md'
                                       : 'bg-zinc-950 border-white/5 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
                                   }`}
                                 >
-                                  <div>
+                                  <button
+                                    type="button"
+                                    onClick={() => setActiveVideoUrl(vid.url)}
+                                    className="min-w-0 flex-1 p-3 text-left cursor-pointer"
+                                  >
                                     <div className="text-xs font-bold font-mono flex items-center gap-1.5">
                                       <Video className="w-3.5 h-3.5 text-rose-400" />
                                       <span>{vid.title}</span>
@@ -2187,23 +2294,25 @@ export default function ApplicantProfilePage() {
                                     <span className={`text-[10px] font-mono font-bold block mt-1 ${vid.durable ? 'text-emerald-400' : 'text-amber-400'}`}>
                                       {vid.durable ? 'Secure server copy' : 'Local recovery copy — not submission-ready'}
                                     </span>
-                                  </div>
+                                  </button>
 
-                                  <div className="flex items-center gap-2">
+                                  <div className="flex items-center gap-2 pr-3">
                                     {isActive && (
                                       <span className="text-[10px] font-mono font-bold bg-rose-500/30 text-rose-300 px-2 py-0.5 rounded-full border border-rose-500/40">
                                         ▶ Playing
                                       </span>
                                     )}
-                                    <span
-                                      onClick={(e) => handleDeleteTake(vid.id, e)}
+                                    <button
+                                      type="button"
+                                      onClick={(event) => requestDeleteTake(vid, event)}
                                       className="p-1 text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 rounded transition-colors cursor-pointer"
-                                      title="Delete Take"
+                                      title={`Delete ${vid.title}`}
+                                      aria-label={`Delete ${vid.title}`}
                                     >
                                       <Trash2 className="w-3.5 h-3.5" />
-                                    </span>
+                                    </button>
                                   </div>
-                                </button>
+                                </div>
                               );
                             })}
                           </div>
