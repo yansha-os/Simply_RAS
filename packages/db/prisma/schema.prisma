@@ -134,6 +134,44 @@ enum DeficiencyStatus {
   RESOLVED
 }
 
+enum JurisdictionLevel {
+  COUNTRY
+  STATE
+  LOCAL
+}
+
+enum ProviderEnrollmentStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  TERMINATED
+}
+
+enum RuleAuthorityKind {
+  FEDERAL
+  JURISDICTION
+  PAYER_PLAN
+  SERVICE_LOCATION
+  ORGANIZATION
+}
+
+enum RuleLifecycleStatus {
+  DRAFT
+  ACTIVE
+  SUPERSEDED
+  RETIRED
+}
+
+enum RuleCategory {
+  BILLING
+  EVV
+  CREDENTIAL
+  CONSENT
+  RETENTION
+  INCIDENT
+  EMPLOYMENT
+}
+
 // ------------------------------------------------------
 // MODELS
 // ------------------------------------------------------
@@ -147,6 +185,7 @@ model User {
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  organizationId String? @db.Uuid
 
   // Relationships
   assignedCases          Client[]         @relation("CaseCoordinator")
@@ -175,6 +214,11 @@ model User {
   atsInterviewRecordings     AtsInterviewRecording[] @relation("AtsInterviewRecordingCreator")
   caseOpeningsCreated        CaseOpening[]           @relation("CaseOpeningCreator")
   caseApplications           CaseApplication[]       @relation("CaseApplicationRbt")
+  organization               Organization?           @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  providerEnrollments        ProviderEnrollment[]
+  approvedRuleVersions       RuleVersion[]            @relation("RuleVersionApprover")
+
+  @@index([organizationId])
 }
 
 model Client {
@@ -206,6 +250,8 @@ model Client {
 
   createdAt               DateTime     @default(now())
   updatedAt               DateTime     @updatedAt
+  organizationId          String?      @db.Uuid
+  primaryServiceLocationId String?     @db.Uuid
 
   // Clinical & Ops Team
   caseCoordinatorId String?    @db.Uuid
@@ -242,12 +288,16 @@ model Client {
   reAuthPackets   ReAuthPacket[]
   caseOpenings    CaseOpening[]
   notifications   Notification[]
+  organization    Organization?   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  primaryServiceLocation ServiceLocation? @relation(fields: [primaryServiceLocationId], references: [id], onDelete: Restrict)
 
   @@index([caseCoordinatorId])
   @@index([clinicalSupportId])
   @@index([bcbaId])
   @@index([rbtId])
   @@index([dualRunCohort])
+  @@index([organizationId])
+  @@index([primaryServiceLocationId])
 }
 
 model Document {
@@ -314,6 +364,8 @@ model Session {
 
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
+  organizationId  String?       @db.Uuid
+  serviceLocationId String?     @db.Uuid
 
   client          Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
   rbt             User?         @relation("RbtSession", fields: [rbtId], references: [id])
@@ -322,6 +374,9 @@ model Session {
   trialLogs       SessionTrialData[]
   behaviorLogs    BehaviorLog[]
   evvLogs         EVVLog[]
+  organization    Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  serviceLocation ServiceLocation? @relation(fields: [serviceLocationId], references: [id], onDelete: Restrict)
+  resolvedRuleSnapshots ResolvedRuleSnapshot[]
 
   // Hot paths: client-scoped lists/ranges ordered by scheduledStart (chart,
   // notes pipeline, auth units, weekly grids, parent portal, activation gate)
@@ -330,6 +385,8 @@ model Session {
   @@index([clientId, scheduledStart])
   @@index([rbtId, scheduledStart])
   @@index([bcbaId, scheduledStart])
+  @@index([organizationId, scheduledStart])
+  @@index([serviceLocationId, scheduledStart])
 }
 
 model SessionNote {
@@ -1036,4 +1093,214 @@ model CaseApplication {
   @@index([rbtUserId])
   @@index([status])
   @@index([openingId])
+}
+
+// ------------------------------------------------------
+// MULTI-STATE RULE OWNERSHIP & DURABLE RESOLUTION
+// ------------------------------------------------------
+
+model Organization {
+  id        String   @id @default(uuid()) @db.Uuid
+  slug      String   @unique
+  name      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users               User[]
+  clients             Client[]
+  sessions            Session[]
+  serviceLocations    ServiceLocation[]
+  payerPlans           PayerPlan[]
+  providerEnrollments ProviderEnrollment[]
+  ruleSets             RuleSet[]
+}
+
+model ServiceLocation {
+  id             String    @id @default(uuid()) @db.Uuid
+  organizationId String    @db.Uuid
+  code           String
+  name           String
+  timezone       String
+  addressLine1   String?
+  addressLine2   String?
+  city           String?
+  stateCode      String?
+  postalCode     String?
+  isActive       Boolean   @default(true)
+  activeFrom     DateTime?
+  activeTo       DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization        Organization                  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  primaryForClients   Client[]
+  sessions            Session[]
+  jurisdictionLinks   ServiceLocationJurisdiction[]
+  providerEnrollments ProviderEnrollment[]
+  ruleSets             RuleSet[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId, isActive])
+}
+
+model Jurisdiction {
+  id        String            @id @default(uuid()) @db.Uuid
+  code      String            @unique
+  name      String
+  level     JurisdictionLevel
+  parentId  String?           @db.Uuid
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  parent        Jurisdiction?                  @relation("JurisdictionTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children      Jurisdiction[]                 @relation("JurisdictionTree")
+  locationLinks ServiceLocationJurisdiction[]
+  payerPlans    PayerPlan[]
+  ruleSets      RuleSet[]
+
+  @@index([parentId])
+  @@index([level])
+}
+
+model ServiceLocationJurisdiction {
+  serviceLocationId String @db.Uuid
+  jurisdictionId    String @db.Uuid
+
+  serviceLocation ServiceLocation @relation(fields: [serviceLocationId], references: [id], onDelete: Cascade)
+  jurisdiction    Jurisdiction    @relation(fields: [jurisdictionId], references: [id], onDelete: Restrict)
+
+  @@id([serviceLocationId, jurisdictionId])
+  @@index([jurisdictionId])
+}
+
+model PayerPlan {
+  id             String    @id @default(uuid()) @db.Uuid
+  organizationId String    @db.Uuid
+  jurisdictionId String?   @db.Uuid
+  code           String
+  name           String
+  payerCode      String?
+  programCode    String?
+  isActive       Boolean   @default(true)
+  effectiveFrom  DateTime?
+  effectiveTo    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization        Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  jurisdiction        Jurisdiction?         @relation(fields: [jurisdictionId], references: [id], onDelete: Restrict)
+  providerEnrollments ProviderEnrollment[]
+  ruleSets             RuleSet[]
+
+  @@unique([organizationId, code])
+  @@index([jurisdictionId])
+  @@index([organizationId, isActive])
+}
+
+model ProviderEnrollment {
+  id                 String                   @id @default(uuid()) @db.Uuid
+  organizationId     String                   @db.Uuid
+  payerPlanId        String                   @db.Uuid
+  serviceLocationId  String?                  @db.Uuid
+  providerUserId     String?                  @db.Uuid
+  enrollmentType     String
+  providerIdentifier String?
+  status             ProviderEnrollmentStatus @default(PENDING)
+  effectiveFrom      DateTime?
+  effectiveTo        DateTime?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  payerPlan        PayerPlan        @relation(fields: [payerPlanId], references: [id], onDelete: Restrict)
+  serviceLocation ServiceLocation? @relation(fields: [serviceLocationId], references: [id], onDelete: Restrict)
+  provider        User?            @relation(fields: [providerUserId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, status])
+  @@index([payerPlanId, status])
+  @@index([serviceLocationId])
+  @@index([providerUserId])
+}
+
+model RuleSet {
+  id                String            @id @default(uuid()) @db.Uuid
+  key               String
+  category          RuleCategory
+  authorityKind     RuleAuthorityKind
+  organizationId    String?           @db.Uuid
+  serviceLocationId String?           @db.Uuid
+  jurisdictionId    String?           @db.Uuid
+  payerPlanId       String?           @db.Uuid
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  organization    Organization?    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  serviceLocation ServiceLocation? @relation(fields: [serviceLocationId], references: [id], onDelete: Restrict)
+  jurisdiction    Jurisdiction?    @relation(fields: [jurisdictionId], references: [id], onDelete: Restrict)
+  payerPlan       PayerPlan?       @relation(fields: [payerPlanId], references: [id], onDelete: Restrict)
+  versions        RuleVersion[]
+
+  @@index([key, category])
+  @@index([organizationId])
+  @@index([serviceLocationId])
+  @@index([jurisdictionId])
+  @@index([payerPlanId])
+}
+
+model RuleVersion {
+  id            String              @id @default(uuid()) @db.Uuid
+  ruleSetId     String              @db.Uuid
+  version       Int
+  status        RuleLifecycleStatus @default(DRAFT)
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  payload       Json
+  sourceRefs    Json                @default("[]")
+  contentHash   String
+  approvedById  String?             @db.Uuid
+  approvedAt    DateTime?
+  createdAt     DateTime            @default(now())
+
+  ruleSet    RuleSet                        @relation(fields: [ruleSetId], references: [id], onDelete: Restrict)
+  approvedBy User?                          @relation("RuleVersionApprover", fields: [approvedById], references: [id], onDelete: Restrict)
+  selections ResolvedRuleVersionSelection[]
+
+  @@unique([ruleSetId, version])
+  @@unique([ruleSetId, contentHash])
+  @@index([ruleSetId, status, effectiveFrom, effectiveTo])
+  @@index([approvedById])
+}
+
+model ResolvedRuleSnapshot {
+  id               String   @id @default(uuid()) @db.Uuid
+  sessionId        String   @db.Uuid
+  decisionKey      String
+  evaluatorVersion String
+  resolvedFacts    Json
+  contentHash      String
+  supersedesId     String?  @db.Uuid
+  createdAt        DateTime @default(now())
+
+  session      Session                        @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  supersedes   ResolvedRuleSnapshot?          @relation("RuleSnapshotHistory", fields: [supersedesId], references: [id], onDelete: Restrict)
+  supersededBy ResolvedRuleSnapshot[]         @relation("RuleSnapshotHistory")
+  selections   ResolvedRuleVersionSelection[]
+
+  @@unique([sessionId, decisionKey, contentHash])
+  @@index([sessionId, decisionKey, createdAt])
+  @@index([supersedesId])
+}
+
+model ResolvedRuleVersionSelection {
+  snapshotId    String @db.Uuid
+  ruleVersionId String @db.Uuid
+  precedence    Int
+
+  snapshot    ResolvedRuleSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  ruleVersion RuleVersion          @relation(fields: [ruleVersionId], references: [id], onDelete: Restrict)
+
+  @@id([snapshotId, ruleVersionId])
+  @@unique([snapshotId, precedence])
+  @@index([ruleVersionId])
 }
