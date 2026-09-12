@@ -112,10 +112,16 @@ export default function RbtApplicationForm() {
     mimeType: string;
   } | null>(null);
 
-  // LOAD DRAFT FROM LOCAL STORAGE (form fields only — not file blobs)
+  // Keep sensitive application drafts scoped to this browser tab.
   useEffect(() => {
     try {
-      const saved = localStorage.getItem(DRAFT_KEY);
+      // Purge pre-hardening persistent copies; only this tab's draft may remain.
+      localStorage.removeItem(DRAFT_KEY);
+      localStorage.removeItem('ras_latest_submitted_app');
+      for (const key of Object.keys(localStorage)) {
+        if (key.startsWith('ras_submitted_app_')) localStorage.removeItem(key);
+      }
+      const saved = sessionStorage.getItem(DRAFT_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed.formData) {
@@ -204,7 +210,7 @@ export default function RbtApplicationForm() {
     setFormData((prev) => {
       const updated = { ...prev, [field]: value };
       try {
-        localStorage.setItem(DRAFT_KEY, JSON.stringify({ formData: updated, currentStep }));
+        sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ formData: updated, currentStep }));
       } catch {}
       return updated;
     });
@@ -212,7 +218,7 @@ export default function RbtApplicationForm() {
 
   const clearDraft = () => {
     try {
-      localStorage.removeItem(DRAFT_KEY);
+      sessionStorage.removeItem(DRAFT_KEY);
     } catch {}
     setFormData({
       firstName: '',
@@ -268,7 +274,7 @@ export default function RbtApplicationForm() {
         ? current.filter((i) => i !== item)
         : [...current, item];
       try {
-        localStorage.setItem(DRAFT_KEY, JSON.stringify({ formData: { ...prev, [field]: updated }, currentStep }));
+        sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ formData: { ...prev, [field]: updated }, currentStep }));
       } catch {}
       return { ...prev, [field]: updated };
     });
@@ -351,7 +357,7 @@ export default function RbtApplicationForm() {
     const nextStep = Math.min(currentStep + 1, 6);
     setCurrentStep(nextStep);
     try {
-      localStorage.setItem(DRAFT_KEY, JSON.stringify({ formData, currentStep: nextStep }));
+      sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ formData, currentStep: nextStep }));
     } catch {}
   };
 
@@ -359,7 +365,7 @@ export default function RbtApplicationForm() {
     const prevStep = Math.max(currentStep - 1, 1);
     setCurrentStep(prevStep);
     try {
-      localStorage.setItem(DRAFT_KEY, JSON.stringify({ formData, currentStep: prevStep }));
+      sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ formData, currentStep: prevStep }));
     } catch {}
   };
 
@@ -401,7 +407,7 @@ export default function RbtApplicationForm() {
 
       if (res.success && !res.applicantId) {
         try {
-          localStorage.removeItem(DRAFT_KEY);
+          sessionStorage.removeItem(DRAFT_KEY);
           localStorage.removeItem('ras_file_data_urls');
         } catch {
           // Submission is complete even if local draft cleanup is unavailable.
@@ -446,35 +452,8 @@ export default function RbtApplicationForm() {
         setDocumentSubmissionIssue(uploadIssue);
 
         try {
-          localStorage.removeItem(DRAFT_KEY);
+          sessionStorage.removeItem(DRAFT_KEY);
           localStorage.removeItem('ras_file_data_urls');
-          // Metadata-only cache for Dev Tools / same-browser ATS peek (no file blobs)
-          const submittedAppPayload = {
-            applicantId: res.applicantId,
-            fullName: `${formData.firstName} ${formData.lastName}`,
-            email: formData.email,
-            phoneNumber: formData.phoneNumber,
-            address: `${formData.addressLine1}${formData.addressLine2 ? ', ' + formData.addressLine2 : ''}, ${formData.city}, ${formData.state} ${formData.zipCode}`,
-            gender: formData.gender,
-            rbtStatus: formData.courseCompleted,
-            cprStatus: formData.cprStatus || null,
-            yearsExperience: formData.yearsExperience || null,
-            languages: formData.languages,
-            boroughs: formData.boroughs.join(', '),
-            weeklyHours: formData.weeklyHours || null,
-            availableToStart: formData.availableToStart || null,
-            workAuth: formData.workAuth,
-            backgroundCheck: formData.backgroundCheck,
-            transportation: formData.transportation,
-            availability: formData.weekdays.concat(formData.weekends).join(', '),
-            additionalNotes: formData.additionalNotes || null,
-            resumeFileName: formData.resumeFileName || null,
-            govtIdFileName: formData.idFileName || null,
-            fortyHourCertFileName: formData.rbtCertFileName || null,
-            submittedAt: new Date().toISOString(),
-          };
-          localStorage.setItem(`ras_submitted_app_${res.applicantId}`, JSON.stringify(submittedAppPayload));
-          localStorage.setItem('ras_latest_submitted_app', JSON.stringify(submittedAppPayload));
         } catch {}
         setIsSubmitted(true);
         if (uploadIssue) {

@@ -243,6 +243,10 @@ model Client {
   caseOpenings    CaseOpening[]
   notifications   Notification[]
 
+  @@index([caseCoordinatorId])
+  @@index([clinicalSupportId])
+  @@index([bcbaId])
+  @@index([rbtId])
   @@index([dualRunCohort])
 }
 
@@ -257,6 +261,8 @@ model Document {
   updatedAt      DateTime     @updatedAt
 
   client         Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, createdAt])
 }
 
 model Authorization {
@@ -275,6 +281,8 @@ model Authorization {
 
   client         Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
   cptCodes       AuthCptCode[]
+
+  @@index([clientId, createdAt])
 }
 
 model AuthCptCode {
@@ -284,6 +292,8 @@ model AuthCptCode {
   unitsApproved   Int?
 
   authorization   Authorization @relation(fields: [authorizationId], references: [id], onDelete: Cascade)
+
+  @@index([authorizationId])
 }
 
 model Session {
@@ -319,6 +329,7 @@ model Session {
   // are served by the leading column of each index.
   @@index([clientId, scheduledStart])
   @@index([rbtId, scheduledStart])
+  @@index([bcbaId, scheduledStart])
 }
 
 model SessionNote {
@@ -373,6 +384,10 @@ model ActionItem {
   assignee    User?        @relation("Assignee", fields: [assigneeId], references: [id])
   creator     User?        @relation("Creator", fields: [creatorId], references: [id])
   client      Client?      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([assigneeId, createdAt])
+  @@index([creatorId])
+  @@index([clientId])
 }
 
 model ContactLog {
@@ -388,6 +403,9 @@ model ContactLog {
 
   client      Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
   author      User          @relation(fields: [authorId], references: [id])
+
+  @@index([clientId, createdAt])
+  @@index([authorId])
 }
 
 model RbtOnboarding {
@@ -408,6 +426,8 @@ model RbtOnboarding {
 
   client              Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
   rbt                 User     @relation(fields: [rbtId], references: [id])
+
+  @@index([rbtId])
 }
 
 model NoteDeficiency {
@@ -425,6 +445,10 @@ model NoteDeficiency {
   note        SessionNote      @relation(fields: [noteId], references: [id], onDelete: Cascade)
   author      User             @relation("DeficiencyAuthor", fields: [authorId], references: [id])
   flaggedBy   User             @relation("DeficiencyFlagger", fields: [flaggedById], references: [id])
+
+  @@index([noteId, status])
+  @@index([authorId])
+  @@index([flaggedById])
 }
 
 model IntakePacket {
@@ -489,6 +513,8 @@ model PARequest {
   updatedAt             DateTime @updatedAt
 
   client                Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, createdAt])
 }
 
 model ClientMessage {
@@ -501,6 +527,8 @@ model ClientMessage {
   readAt      DateTime?
 
   client      Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, createdAt])
 }
 
 model StaffMessage {
@@ -616,6 +644,8 @@ model BehaviorLog {
 
   session        Session        @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   behavior       BehaviorTarget @relation(fields: [behaviorId], references: [id], onDelete: Cascade)
+
+  @@index([behaviorId])
 }
 
 // ------------------------------------------------------
@@ -697,6 +727,8 @@ model ReAuthPacket {
   updatedAt            DateTime @updatedAt
 
   client               Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([paRequestId])
 }
 
 model AuditLogVault {
@@ -861,6 +893,7 @@ model AtsHelpMessage {
 
   @@index([ticketId])
   @@index([createdAt])
+  @@index([senderUserId])
 }
 
 model AtsInterviewRecording {
@@ -882,6 +915,7 @@ model AtsInterviewRecording {
 
   @@index([interviewId])
   @@index([candidateId])
+  @@index([createdByUserId])
 }
 
 model ApplicantDeviceSession {

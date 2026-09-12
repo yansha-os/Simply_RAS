@@ -110,35 +110,6 @@ function openIDB(): Promise<IDBDatabase> {
   });
 }
 
-async function saveToIDBStore(item: {
-  id: string;
-  applicantId: string;
-  title: string;
-  duration: number;
-  timestamp: string;
-  blob: Blob;
-}): Promise<RecordedVideoItem> {
-  const db = await openIDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readwrite');
-    const store = tx.objectStore(STORE_NAME);
-    const req = store.put(item);
-    req.onsuccess = () => {
-      const url = URL.createObjectURL(item.blob);
-      resolve({
-        id: item.id,
-        applicantId: item.applicantId,
-        title: item.title,
-        url,
-        duration: item.duration,
-        timestamp: item.timestamp,
-        durable: false,
-      });
-    };
-    req.onerror = () => reject(req.error);
-  });
-}
-
 async function getFromIDBStore(applicantId: string): Promise<RecordedVideoItem[]> {
   try {
     const db = await openIDB();
@@ -346,27 +317,6 @@ export async function saveRecordingBlob(params: {
       success: false,
       error: `Recording was not saved to secure server storage. Check the connection and retry.${cleaned ? '' : ' Temporary storage cleanup could not be confirmed.'}`,
     };
-  }
-}
-
-/** Legacy wrapper kept for backward compatibility. */
-export async function saveRecordingToIDB(
-  item: RecordedVideoItem
-): Promise<boolean> {
-  try {
-    const res = await fetch(item.url);
-    const blob = await res.blob();
-    await saveToIDBStore({
-      id: item.id,
-      applicantId: item.applicantId,
-      title: item.title,
-      duration: item.duration,
-      timestamp: item.timestamp,
-      blob,
-    });
-    return true;
-  } catch {
-    return false;
   }
 }
 

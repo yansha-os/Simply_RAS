@@ -65,8 +65,8 @@ Clinical facts stay independent from jurisdiction rules. EVV vendors, clearingho
 - [x] Freeze new product surfaces during stabilization.
 - [x] Establish v1/v1.x/v2 evidence and data boundaries.
 - [x] Preserve CRM ownership of client/clinical/PA/case coordination and HRM ownership of ATS/RBT delivery.
-- [ ] Inventory every reachable production route, server action, scheduled/background task, external adapter, and data store.
-- [ ] Classify each surface: LIVE, DEV_ONLY, PROTOTYPE, HOLD, or RETIRE.
+- [x] Inventory every reachable production route, server action, scheduled/background task, external adapter, and data store.
+- [x] Classify each surface: LIVE, DEV_ONLY, PROTOTYPE, HOLD, or RETIRE.
 - [ ] Map every critical workflow to its source-of-truth records and owning roles.
 - [ ] Reconcile this program against open checklist rows; remove stale claims rather than duplicate them.
 
@@ -280,6 +280,16 @@ Each slice must identify evidence, make the smallest complete change, add regres
 - Retired the orphaned synthetic Sandata/HHAeXchange dispatcher and adapters. They had no production caller and manufactured success response IDs without network transmission; keeping them would undermine EVV state integrity.
 - No payment processor, clearinghouse, email/SMS provider, live EVV vendor, analytics SDK, or AI/model API is integrated. Cross-app CRM/HRM links share product state through Postgres and are not external adapters.
 - External-adapter classification is complete for this snapshot. Track 0 remains open for the authoritative data-store inventory.
+
+### 2026-09-11 — Authoritative data-store classification
+
+- LIVE durable systems are the shared Supabase PostgreSQL database (**36 Prisma models**) and three private Storage buckets: `client-documents`, `ats-applicant-docs`, and `ats-interview-recordings`. Supabase Auth owns staff identity; durable applicant device-session records plus HttpOnly cookies own applicant access. The root and package Prisma schema definitions now match after restoring 23 missing performance indexes to the package copy.
+- LIVE browser storage is limited to non-authoritative, bounded state: visual preferences in `localStorage`; tab-scoped application/session drafts, short-TTL read caches, and Session Studio recovery data in `sessionStorage`; and user-initiated Blob downloads. Authorization, hiring, clinical, EVV, signature, claim, and payroll truth must always be re-established from server records.
+- Removed production writes and reads of submitted applicant dossiers in `localStorage`, moved the sensitive public-application draft to tab-scoped `sessionStorage`, and stopped mirroring authenticated applicant identity into persistent browser keys. Existing legacy dossier/draft keys are purged when the public application loads.
+- RETIRE migration support remains read/delete-only for pre-hardening interview recordings in IndexedDB; its unused write API was removed. DEV_ONLY impersonation state remains behind the production-off developer-tools gate.
+- HOLD/PROTOTYPE browser projections (`ras_rbt_pay_holds`, `ras_rbt_job_applications`, locally completed schedule markers, and finance-ticket drafts) may support synthetic UI demonstrations, but are not authoritative and cannot unlock payment, staffing, billing, or compliance decisions. Replacing or retiring these projections is governed by the workflow source-of-truth pass.
+- No application-managed filesystem upload directory, service-worker cache, durable process-memory store, or browser database other than the read/delete legacy recording store was found. Manual SQL files describe intended database state but do not prove that a target environment applied it.
+- Production-surface discovery and classification are complete for this source snapshot. Track 0 remains open for critical-workflow source-of-truth mapping and checklist reconciliation; Gate 0 is not yet claimed.
 
 ## Authoritative linked evidence
 

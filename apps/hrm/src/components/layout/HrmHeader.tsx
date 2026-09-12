@@ -36,17 +36,6 @@ export function HrmHeader() {
           return;
         }
 
-        const stored = localStorage.getItem('ras_latest_submitted_app');
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          if (parsed.fullName && parsed.email) {
-            setApplicantProfile({
-              name: parsed.fullName,
-              email: parsed.email,
-            });
-            return;
-          }
-        }
       } catch {}
       setApplicantProfile(null);
     }

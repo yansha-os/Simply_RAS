@@ -423,20 +423,8 @@ function ApplicantOnboardingTasksHub() {
   const handleBookInterview = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    let realCandidateId = getActiveApplicantId() || '';
-    let realCandidateName = getActiveApplicantName() || 'Applicant';
-
-    try {
-      const storedApp = localStorage.getItem('ras_latest_submitted_app');
-      if (storedApp) {
-        const parsed = JSON.parse(storedApp);
-        if (parsed.fullName) realCandidateName = parsed.fullName;
-        else if (parsed.name) realCandidateName = parsed.name;
-        if (parsed.applicantId) realCandidateId = parsed.applicantId;
-      }
-    } catch {
-      // ignore
-    }
+    const realCandidateId = getActiveApplicantId() || '';
+    const realCandidateName = getActiveApplicantName() || 'Applicant';
 
     if (!realCandidateId) {
       toast.error('No active applicant selected.');
@@ -2179,9 +2167,7 @@ function ApplicantOnboardingTasksHub() {
             <form
               onSubmit={async (e) => {
                 e.preventDefault();
-                const candidateId =
-                  localStorage.getItem('ras_active_impersonated_applicant_id') ||
-                  localStorage.getItem('ras_active_applicant_id');
+                const candidateId = getActiveApplicantId();
                 if (!candidateId || candidateId === 'c1') {
                   toast.error('No active applicant selected.');
                   return;

@@ -189,14 +189,6 @@ export function HrmSidebar() {
           setApplicantName(impName);
           return;
         }
-        const stored = localStorage.getItem('ras_latest_submitted_app');
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          if (parsed.fullName) {
-            setApplicantName(parsed.fullName);
-            return;
-          }
-        }
       } catch {}
     }
     void ensureActiveApplicantId().then(() => loadName());

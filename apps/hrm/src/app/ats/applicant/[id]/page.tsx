@@ -392,7 +392,7 @@ export default function ApplicantProfilePage() {
         }
       }
 
-      // Application dossier + documents from Supabase (Phase 5); localStorage is metadata fallback only
+      // Application dossier + documents come only from the authenticated server store.
       let submittedForm: {
         fullName?: string;
         email?: string;
@@ -474,24 +474,6 @@ export default function ApplicantProfilePage() {
             typeof dossier.submittedAt === 'string' ? dossier.submittedAt : undefined,
         };
         setSubmittedApp(submittedForm);
-      } else {
-        try {
-          const exactStoredApp = localStorage.getItem(`ras_submitted_app_${applicantId}`);
-          let storedApp = exactStoredApp;
-          if (!storedApp) {
-            const latestRaw = localStorage.getItem('ras_latest_submitted_app');
-            if (latestRaw) {
-              try {
-                const latestParsed = JSON.parse(latestRaw);
-                if (latestParsed.applicantId === applicantId) storedApp = latestRaw;
-              } catch {}
-            }
-          }
-          if (storedApp) {
-            submittedForm = JSON.parse(storedApp);
-            setSubmittedApp(submittedForm);
-          }
-        } catch {}
       }
 
       if (submittedForm) {

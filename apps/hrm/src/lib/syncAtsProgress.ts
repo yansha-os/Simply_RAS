@@ -27,11 +27,6 @@ export function cacheApplicantSessionClient(session: ActiveApplicantSession) {
   sessionStorage.setItem(SESSION_ID_KEY, session.candidateId);
   sessionStorage.setItem(SESSION_NAME_KEY, session.name);
   sessionStorage.setItem(SESSION_EMAIL_KEY, session.email);
-  // Legacy keys for components not yet migrated — clear file-blob SoT paths only
-  localStorage.setItem('ras_active_applicant_id', session.candidateId);
-  localStorage.setItem('ras_active_impersonated_applicant_id', session.candidateId);
-  localStorage.setItem('ras_active_impersonated_applicant_name', session.name);
-  localStorage.setItem('ras_active_impersonated_applicant_email', session.email);
   setCached(CACHE_KEYS.applicantSession, session, SESSION_TTL_MS);
   window.dispatchEvent(new Event('ras_applicant_session_changed'));
 }
