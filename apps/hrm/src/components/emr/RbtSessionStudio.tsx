@@ -73,7 +73,6 @@ import {
 } from '@/lib/sessionStudio';
 import { evaluateClaimReady } from '@/lib/sessionStudioClaimReady';
 import { SessionClaimReadyPanel } from '@/components/emr/SessionClaimReadyPanel';
-import { upsertRbtPayHold, clearRbtPayHold } from '@/lib/rbtPayHolds';
 import {
   clearSessionStudioAll,
   attemptDurableSessionClockIn,
@@ -981,11 +980,8 @@ function HydratedRbtSessionStudio({ sessionId, client }: Props) {
       clockedOut: true,
     });
     const finalChecklist = finalEval.checklist;
-    const missing = finalEval.blocks;
     const isIncomplete = forceIncomplete || !finalEval.claimReady;
     const displayUnits = billableUnitsFromSeconds(seconds);
-    const displayAtRisk =
-      Math.round(displayUnits * (client.ratePerHour / 4) * 100) / 100;
 
     const persistRecoveryDraft = () => {
       if (saveTimer.current) {
@@ -1033,26 +1029,6 @@ function HydratedRbtSessionStudio({ sessionId, client }: Props) {
         setClockOutPending(false);
 
         if (outcome.status === 'CLOCKED_OUT') {
-          const durable = outcome.result;
-          const durableAtRisk =
-            Math.round(
-              durable.billableUnits * (client.ratePerHour / 4) * 100
-            ) / 100;
-          upsertRbtPayHold({
-            id: `hold-${sessionId}`,
-            sessionId,
-            clientName: client.name,
-            severity: 'BLOCKING',
-            title: missing[0]?.label || 'Documentation pending',
-            detail: `Service and EVV were durably closed. Missing: ${missing.map((m) => m.label).join('; ') || 'documentation completion'}. Finance will hold units until fixed.`,
-            amountHeld: Math.max(durableAtRisk, client.ratePerHour),
-            sessionRef: `${client.name} · ${new Date(durable.endedAt).toLocaleDateString()} · ${formatSeconds(durable.durationSeconds)}`,
-            missingKeys:
-              missing.length > 0
-                ? missing.map((m) => m.key)
-                : ['DOCUMENTATION_PENDING'],
-            createdAt: durable.endedAt,
-          });
           saveSessionStudioMeta(sessionId, client);
           markScheduleSessionDone(sessionId);
           toast.message(
@@ -1138,7 +1114,6 @@ function HydratedRbtSessionStudio({ sessionId, client }: Props) {
             setClockedIn(true);
             setClockedOut(true);
             setRunning(false);
-            clearRbtPayHold(sessionId);
             clearSessionStudioAll(sessionId);
             markScheduleSessionDone(sessionId);
             pushCompletedStudioSession(
@@ -1178,18 +1153,6 @@ function HydratedRbtSessionStudio({ sessionId, client }: Props) {
             ? outcome.result.error || 'Server rejected documentation submit.'
             : 'The submit request did not reach a confirmed server result.';
         toast.error(`${detail} Draft retained on the Sign screen.`);
-        upsertRbtPayHold({
-          id: `hold-${sessionId}`,
-          sessionId,
-          clientName: client.name,
-          severity: 'BLOCKING',
-          title: 'Submit blocked — draft retained',
-          detail,
-          amountHeld: displayAtRisk,
-          sessionRef: `${client.name} · ${formatSeconds(seconds)}`,
-          missingKeys: ['SUBMIT'],
-          createdAt: new Date().toISOString(),
-        });
       })();
     });
   };

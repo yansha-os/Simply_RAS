@@ -5,7 +5,6 @@ import {
   checklistPassedFromSnapshot,
   derivePayHoldFromFlags,
   estimateUnitsFromWindow,
-  loadRbtPayHolds,
   resolvePayrollUnits,
   type SessionPayFlags,
 } from '../rbtPayHolds';
@@ -176,14 +175,10 @@ describe('estimateUnitsFromWindow', () => {
   });
 });
 
-describe('checklist and local hold compatibility helpers', () => {
+describe('checklist compatibility helper', () => {
   it('reads only complete canonical checklist snapshots', () => {
     expect(checklistPassedFromSnapshot(checklist(true))).toBe(true);
     expect(checklistPassedFromSnapshot(checklist(false))).toBe(false);
     expect(checklistPassedFromSnapshot({ passed: true })).toBeNull();
-  });
-
-  it('returns no local holds outside the browser', () => {
-    expect(loadRbtPayHolds()).toEqual([]);
   });
 });

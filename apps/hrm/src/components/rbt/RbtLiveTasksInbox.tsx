@@ -162,17 +162,11 @@ export function RbtLiveTasksInbox() {
     const initialRefreshTimer = window.setTimeout(() => {
       void refresh(false);
     }, 0);
-    const onHolds = () => void refresh(true);
-    const onJobs = () => void refresh(true);
     const onProgress = () => void refresh(true);
-    window.addEventListener('ras_rbt_pay_holds_changed', onHolds);
-    window.addEventListener('ras_rbt_jobs_changed', onJobs);
     window.addEventListener('rbt_progress_synced', onProgress);
     window.addEventListener('rbt_tasks_changed', onProgress);
     return () => {
       window.clearTimeout(initialRefreshTimer);
-      window.removeEventListener('ras_rbt_pay_holds_changed', onHolds);
-      window.removeEventListener('ras_rbt_jobs_changed', onJobs);
       window.removeEventListener('rbt_progress_synced', onProgress);
       window.removeEventListener('rbt_tasks_changed', onProgress);
       refreshSequence.current += 1;

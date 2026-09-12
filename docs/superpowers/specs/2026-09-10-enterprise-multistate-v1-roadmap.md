@@ -67,7 +67,7 @@ Clinical facts stay independent from jurisdiction rules. EVV vendors, clearingho
 - [x] Preserve CRM ownership of client/clinical/PA/case coordination and HRM ownership of ATS/RBT delivery.
 - [x] Inventory every reachable production route, server action, scheduled/background task, external adapter, and data store.
 - [x] Classify each surface: LIVE, DEV_ONLY, PROTOTYPE, HOLD, or RETIRE.
-- [ ] Map every critical workflow to its source-of-truth records and owning roles.
+- [x] Map every critical workflow to its source-of-truth records and owning roles.
 - [ ] Reconcile this program against open checklist rows; remove stale claims rather than duplicate them.
 
 **Gate 0:** no unknown or ambiguously owned production surface.
@@ -287,9 +287,26 @@ Each slice must identify evidence, make the smallest complete change, add regres
 - LIVE browser storage is limited to non-authoritative, bounded state: visual preferences in `localStorage`; tab-scoped application/session drafts, short-TTL read caches, and Session Studio recovery data in `sessionStorage`; and user-initiated Blob downloads. Authorization, hiring, clinical, EVV, signature, claim, and payroll truth must always be re-established from server records.
 - Removed production writes and reads of submitted applicant dossiers in `localStorage`, moved the sensitive public-application draft to tab-scoped `sessionStorage`, and stopped mirroring authenticated applicant identity into persistent browser keys. Existing legacy dossier/draft keys are purged when the public application loads.
 - RETIRE migration support remains read/delete-only for pre-hardening interview recordings in IndexedDB; its unused write API was removed. DEV_ONLY impersonation state remains behind the production-off developer-tools gate.
-- HOLD/PROTOTYPE browser projections (`ras_rbt_pay_holds`, `ras_rbt_job_applications`, locally completed schedule markers, and finance-ticket drafts) may support synthetic UI demonstrations, but are not authoritative and cannot unlock payment, staffing, billing, or compliance decisions. Replacing or retiring these projections is governed by the workflow source-of-truth pass.
+- HOLD/PROTOTYPE browser projections (locally completed schedule markers and finance-ticket drafts) may support synthetic UI demonstrations, but are not authoritative and cannot unlock payment, staffing, billing, or compliance decisions. The browser pay-hold ledger and orphaned browser job-application module were retired during the workflow source-of-truth pass.
 - No application-managed filesystem upload directory, service-worker cache, durable process-memory store, or browser database other than the read/delete legacy recording store was found. Manual SQL files describe intended database state but do not prove that a target environment applied it.
 - Production-surface discovery and classification are complete for this source snapshot. Track 0 remains open for critical-workflow source-of-truth mapping and checklist reconciliation; Gate 0 is not yet claimed.
+
+### 2026-09-12 — Critical-workflow source-of-truth map
+
+| Workflow boundary | Durable source of truth | Owning role/product |
+|---|---|---|
+| Client intake and family corrections | `Client.status`, one-to-one `IntakePacket`, private `client-documents` objects | CRM Intake; parent mutations use the bound magic link |
+| Clinical review and payer authorization | `Client.status`, `PARequest`, `Authorization`, approved intake evidence | CRM Clinical Support, BCBA, and Billing at their gated transitions |
+| Case readiness and staffing | CRM-authored `CaseOpening`; HRM-authored `CaseApplication`; accepted RBT/BCBA assignments on `Client` | CRM Case Coordination authors/accepts; HRM RBT applies |
+| Applicant hire and activation | `AtsCandidate`, `CandidateOnboardingPacket`, interview/signature/document records, linked `User` | HRM applicant, HR, and authorized hiring roles |
+| Schedule and service occurrence | `Session` planned/actual interval and `EVVLog` evidence | CRM Case Coordination schedules; assigned HRM RBT records service |
+| Clinical documentation | one-to-one `SessionNote`, `SessionTrialData`, `BehaviorLog`, `NoteDeficiency` | Assigned RBT submits; assigned/authorized BCBA reviews and signs |
+| Claim readiness and outcome | frozen `SessionNote.checklistSnapshot`, `billableUnits`, signatures, deficiencies, `isConverted`, `claimOutcome`; `Authorization` limits | CRM Billing/Clinical gates; manual Plutus handoff remains explicit |
+| Payroll readiness | server-derived `Session` + `SessionNote` attestation and signed LS-54 wage evidence | HRM RBT/Finance views; no browser state can make a session payable |
+
+- Replaced the LIVE schedule's browser `ras_rbt_pay_holds` ledger with a server-derived incomplete queue from the same payroll action used by payroll and dashboard views. Session Studio no longer creates or clears local pay authority, its live repair action routes back into the durable Studio workflow, and the schedule purges the retired browser key when loaded.
+- Deleted the unreferenced `rbtJobApplications` browser module; actual staffing applications already persist as `CaseApplication` records with a unique opening/RBT constraint.
+- Critical workflow ownership and records are mapped for this source snapshot. Track 0 now remains open only for cross-checking the active readiness checklists and removing stale claims.
 
 ## Authoritative linked evidence
 

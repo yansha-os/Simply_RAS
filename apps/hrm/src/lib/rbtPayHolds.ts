@@ -1,25 +1,10 @@
-/** Shared pay holds between Session Studio incomplete close and RBT Payroll. */
+/** Shared deterministic attestation and unit rules for payroll/readiness views. */
 
 import {
   checklistPassedFromSnapshot as readChecklistPassed,
   evaluateAttestationState,
   type AttestationFailureCode,
 } from '@repo/db/session-note-attestation';
-
-export const RBT_PAY_HOLDS_KEY = 'ras_rbt_pay_holds';
-
-export type RbtPayHold = {
-  id: string;
-  sessionId: string;
-  clientName: string;
-  severity: 'BLOCKING' | 'WARNING';
-  title: string;
-  detail: string;
-  amountHeld: number;
-  sessionRef: string;
-  missingKeys: string[];
-  createdAt: string;
-};
 
 export type SessionPayFlags = {
   hasNote: boolean;
@@ -170,42 +155,4 @@ export function resolvePayrollUnits(
 /** Read checklist pass/fail from a SessionNote.checklistSnapshot JSON blob. */
 export function checklistPassedFromSnapshot(snapshot: unknown): boolean | null {
   return readChecklistPassed(snapshot);
-}
-
-export function loadRbtPayHolds(): RbtPayHold[] {
-  if (typeof window === 'undefined') return [];
-  try {
-    const raw = localStorage.getItem(RBT_PAY_HOLDS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-export function saveRbtPayHolds(holds: RbtPayHold[]) {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(RBT_PAY_HOLDS_KEY, JSON.stringify(holds));
-  window.dispatchEvent(new Event('ras_rbt_pay_holds_changed'));
-}
-
-export function upsertRbtPayHold(hold: RbtPayHold) {
-  const next = [hold, ...loadRbtPayHolds().filter((h) => h.sessionId !== hold.sessionId)];
-  saveRbtPayHolds(next);
-}
-
-export function clearRbtPayHold(sessionId: string) {
-  saveRbtPayHolds(loadRbtPayHolds().filter((h) => h.sessionId !== sessionId));
-}
-
-/** Drop local Incomplete holds once DB marks the session payable (Bridge G SoT). */
-export function reconcileRbtPayHoldsAgainstPayable(payableSessionIds: string[]) {
-  if (typeof window === 'undefined' || payableSessionIds.length === 0) return;
-  const payable = new Set(payableSessionIds);
-  const current = loadRbtPayHolds();
-  const next = current.filter((h) => !payable.has(h.sessionId));
-  if (next.length !== current.length) {
-    saveRbtPayHolds(next);
-  }
 }

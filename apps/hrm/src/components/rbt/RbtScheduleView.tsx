@@ -31,7 +31,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { FixIncompleteSessionDrawer, IncompleteSessionItem } from './FixIncompleteSessionDrawer';
 import type { SessionStudioClient } from '@/lib/sessionStudio';
-import { clearRbtPayHold, loadRbtPayHolds } from '@/lib/rbtPayHolds';
+import type { PayableSessionRow } from '@/app/actions/payrollActions';
 import {
   loadCompletedStudioSessions,
   loadDoneScheduleSessionIds,
@@ -139,26 +139,31 @@ function mapDbRowsToScheduled(
     });
 }
 
-function holdsToIncomplete(holds: ReturnType<typeof loadRbtPayHolds>): IncompleteSessionItem[] {
-  return holds.map((h) => {
+function payrollRowsToIncomplete(rows: PayableSessionRow[]): IncompleteSessionItem[] {
+  return rows
+    .filter((row) => !row.payable && ['COMPLETED', 'IN_PROGRESS'].includes(row.status))
+    .map((row) => {
     const missing =
-      h.missingKeys.includes('CAREGIVER_SIGN') || h.title.toLowerCase().includes('signature')
+      row.holdReason?.toLowerCase().includes('parent') ||
+      row.holdReason?.toLowerCase().includes('caregiver')
         ? ('MISSING_PARENT_SIGNATURE' as const)
         : ('MISSING_SOAP_NOTE' as const);
+    const start = new Date(row.scheduledStart);
+    const end = new Date(row.scheduledEnd);
     return {
-      id: h.sessionId,
-      client: h.clientName,
+      id: row.sessionId,
+      client: row.clientName,
       age: 0,
       bcba: 'Assigned BCBA',
-      date: h.createdAt.slice(0, 10),
-      time: h.sessionRef,
-      location: 'See Session Studio',
-      cptCode: '97153 - Adaptive Behavior Treatment',
+      date: clinicDateKey(start),
+      time: `${start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', timeZone: CLINIC_TIME_ZONE })} - ${end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', timeZone: CLINIC_TIME_ZONE })} ET`,
+      location: row.location || 'See Session Studio',
+      cptCode: `${row.cptCode} - Adaptive Behavior Treatment`,
       missingReason: missing,
       loggedTrialsCount: 0,
       rbtSignature: '',
       parentSignature: '',
-      soapSummary: h.detail,
+      soapSummary: row.holdReason || 'Documentation is incomplete.',
     };
   });
 }
@@ -426,7 +431,11 @@ export function RbtScheduleView({ mode = 'LIVE', onStartEvvClick }: RbtScheduleV
   useEffect(() => {
     const syncHolds = () => {
       if (mode !== 'LIVE') return;
-      setIncompleteSessions(holdsToIncomplete(loadRbtPayHolds()));
+      localStorage.removeItem('ras_rbt_pay_holds');
+      void import('@/app/actions/payrollActions')
+        .then(({ listRbtPayrollSessions }) => listRbtPayrollSessions())
+        .then((res) => setIncompleteSessions(payrollRowsToIncomplete(res.sessions || [])))
+        .catch(() => setIncompleteSessions([]));
     };
     const syncCompleted = () => {
       if (mode !== 'LIVE') return;
@@ -499,7 +508,6 @@ export function RbtScheduleView({ mode = 'LIVE', onStartEvvClick }: RbtScheduleV
     window.addEventListener('rbt_tasks_changed', loadFromDb);
     window.addEventListener('rbt_availability_changed', loadFromDb);
     window.addEventListener('rbt_progress_synced', loadFromDb);
-    window.addEventListener('ras_rbt_pay_holds_changed', syncHolds);
     window.addEventListener('ras_rbt_completed_changed', syncCompleted);
     window.addEventListener('ras_rbt_schedule_done_changed', onScheduleDoneChanged);
     window.addEventListener('storage', syncHolds);
@@ -511,7 +519,6 @@ export function RbtScheduleView({ mode = 'LIVE', onStartEvvClick }: RbtScheduleV
       window.removeEventListener('rbt_tasks_changed', loadFromDb);
       window.removeEventListener('rbt_availability_changed', loadFromDb);
       window.removeEventListener('rbt_progress_synced', loadFromDb);
-      window.removeEventListener('ras_rbt_pay_holds_changed', syncHolds);
       window.removeEventListener('ras_rbt_completed_changed', syncCompleted);
       window.removeEventListener('ras_rbt_schedule_done_changed', onScheduleDoneChanged);
       window.removeEventListener('storage', syncHolds);
@@ -693,7 +700,6 @@ export function RbtScheduleView({ mode = 'LIVE', onStartEvvClick }: RbtScheduleV
   };
 
   const handleFixComplete = (sessionId: string) => {
-    if (mode === 'LIVE') clearRbtPayHold(sessionId);
     setIncompleteSessions((prev) => prev.filter((s) => s.id !== sessionId));
   };
 
