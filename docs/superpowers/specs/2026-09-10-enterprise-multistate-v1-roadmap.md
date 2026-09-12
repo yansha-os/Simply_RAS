@@ -272,6 +272,15 @@ Each slice must identify evidence, make the smallest complete change, add regres
 - V1 therefore has **zero LIVE background jobs** and no hidden automation claim. Any future PDF, PA-expiration, payroll, notification, or adapter job must use durable persisted state, authenticated enqueueing, idempotency, bounded retry/backoff, dead-letter/reconciliation behavior, and PHI-safe observability before being classified LIVE.
 - Background-work classification is complete for this snapshot. Track 0 remains open for external adapters and data stores.
 
+### 2026-09-11 — External-adapter classification
+
+- LIVE v1 boundaries are Supabase Auth/Postgres/private Storage; server-mediated Photon, Nominatim, and U.S. Census address lookup; browser-launched Jitsi rooms; and the manual Plutus CSV handoff. Plutus has no API integration, acknowledgment, or payment-status adapter.
+- Address providers and public Jitsi are acceptable only for the declared synthetic/deidentified v1 scope. They are **not authorized for v2 PHI** without privacy/security review, appropriate agreements, data-minimization controls, and an explicit written go/no-go.
+- The local 837P generator is DEV_ONLY and display-only. The unmounted 835 parser and non-transmitting EVV batch formatter remain HOLD; neither proves clearinghouse or aggregator acceptance.
+- Retired the orphaned synthetic Sandata/HHAeXchange dispatcher and adapters. They had no production caller and manufactured success response IDs without network transmission; keeping them would undermine EVV state integrity.
+- No payment processor, clearinghouse, email/SMS provider, live EVV vendor, analytics SDK, or AI/model API is integrated. Cross-app CRM/HRM links share product state through Postgres and are not external adapters.
+- External-adapter classification is complete for this snapshot. Track 0 remains open for the authoritative data-store inventory.
+
 ## Authoritative linked evidence
 
 - Product ownership: [`../../ARCHITECTURE.md`](../../ARCHITECTURE.md)

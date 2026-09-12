@@ -166,7 +166,7 @@ Quick path per role — expect **200 + correct portal**, not 404/403 loops.
 
 | Gap | Severity | Notes |
 |-----|----------|-------|
-| **EVV aggregator** | HOLD | Clock-in/out + GPS capture work in Session Studio; `evvSyncDispatcher` + Sandata/HHA adapters are **synthetic prototypes**. SQL `2026-08-16-232000Z-*` on HOLD until vendor decision. |
+| **EVV aggregator** | HOLD | Clock-in/out + GPS capture work in Session Studio. Synthetic Sandata/HHA adapters were removed; there is no external transmission path. SQL `2026-08-16-232000Z-*` stays on HOLD until vendor decision, enrollment, and certification. |
 | **Single `Client.rbtId`** | Medium | One assigned RBT per client in schema; multi-RBT assignment deferred to `ClientStaffAssignment` (Phase 2). Wrong-RBT-on-note risk if staff bypass assignment SOP. |
 | **RLS policies** | Medium | Broad authenticated policies may remain until `2026-08-12-rls-storage-hardening.sql` reviewed and applied. Server actions + service role are primary guard today. |
 | **Manual QA not run** | High for cutover | Pre-prod deploy can be **GO**; **cold cutover** requires sandbox ≥10-note QA + Billing sign-off. |

@@ -210,10 +210,10 @@ For each domain: **current state**, **Artemis dependency**, **target enclosed st
 
 | | |
 |---|---|
-| **Current state** | `EVVLog` + Studio clock-in/out; geofence engine + aggregator adapters (Sandata, HHA Exchange) in progress. SQL: `docs/sql/2026-08-16-232000Z-evv-aggregator-sync-fields.sql`. |
+| **Current state** | `EVVLog` + Studio clock-in/out and the geofence review engine are implemented. No vendor adapter or external submission exists; the held aggregator-sync SQL remains unapplied. |
 | **Artemis dependency** | **Medium** — Artemis EVV or parallel mobile app may still be used for some RBTs. |
 | **Target state** | EVV capture in Session Studio for all billable direct service; geofence audit panel for ops; aggregator submit decision documented (build vs vendor vs defer). |
-| **Key modules** | HRM: `sessionEmrActions.ts` (clock-in idempotent) · `apps/hrm/src/components/rbt/RbtEvvSimulationStudio.tsx` (dev/sim) · CRM: `apps/crm/src/lib/evvGeofenceEngine.ts` · `apps/crm/src/lib/evv/evvSyncDispatcher.ts` · `sandataAdapter.ts` · `hhaExchangeAdapter.ts` · `apps/crm/src/components/evv/EvvGeofenceAuditPanel.tsx` · `EvvSyncStatusBadge.tsx` |
+| **Key modules** | HRM: `sessionEmrActions.ts` (clock-in idempotent) · `apps/hrm/src/components/rbt/RbtEvvSimulationStudio.tsx` (dev/sim) · CRM: `apps/crm/src/lib/evvGeofenceEngine.ts` · `apps/crm/src/components/evv/EvvGeofenceAuditPanel.tsx` · `EvvSyncStatusBadge.tsx` |
 | **Acceptance criteria** | Every completed 97153 has matching EVV start/stop; GPS captured where required; sync status visible per session; no Artemis EVV path for cutover cohort; aggregator submit or signed risk-accept before Phase 2 exit. |
 
 ---
