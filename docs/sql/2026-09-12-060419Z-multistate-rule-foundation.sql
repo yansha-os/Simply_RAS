@@ -1,6 +1,6 @@
 -- Multi-state ownership, effective rule versions, and durable resolution snapshots.
 -- Generated 2026-09-12 06:04:19Z.
--- PENDING APPLY: run manually in Supabase SQL Editor after review.
+-- VERIFIED APPLIED to Simple_RAS_CRM_DEV on 2026-09-12; verify independently on every other target.
 -- Additive rollout only: organization/location links on existing records remain nullable.
 
 BEGIN;

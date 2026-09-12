@@ -395,7 +395,7 @@ This is a source-code inventory, not legal advice or validation of any statute, 
 - Added matching Prisma definitions for organization, service location, jurisdiction hierarchy/location bindings, payer plan, provider enrollment, scoped rule sets, immutable rule versions, session-linked resolved snapshots, and ordered version selections.
 - Existing `User`, `Client`, and `Session` organization/location links are nullable for the additive rollout. They must not become required until bootstrap data, authorization scoping, write paths, and backfill verification are complete.
 - The pending manual SQL adds interval/scope/hash/approval checks, foreign keys, query-shaped indexes, RLS enablement, browser-role privilege revocation, published-rule immutability, and immutable resolved history. It creates no organization, location, jurisdiction, payer, enrollment, or policy data and enables no state rule.
-- SQL: [`../../sql/2026-09-12-060419Z-multistate-rule-foundation.sql`](../../sql/2026-09-12-060419Z-multistate-rule-foundation.sql) is **PENDING APPLY**. Prisma Client generation is intentionally deferred until the user confirms the target database migration was applied.
+- SQL: [`../../sql/2026-09-12-060419Z-multistate-rule-foundation.sql`](../../sql/2026-09-12-060419Z-multistate-rule-foundation.sql) was user-confirmed and catalog-verified on `Simple_RAS_CRM_DEV` on 2026-09-12. Prisma Client was regenerated only after that confirmation.
 - The Track 1 snapshot row remains open: storage capability alone is not completion. A later slice must write canonical resolved billing facts and ordered selected-version links transactionally at the service decision boundary.
 
 ## Authoritative linked evidence
