@@ -76,7 +76,7 @@ Clinical facts stay independent from jurisdiction rules. EVV vendors, clearingho
 
 - [x] Inventory New York assumptions: timezone, address, Medicaid IDs, codes, modifiers, credentials, EVV, consent, retention, incidents, and copy.
 - [x] Define organization, service location, jurisdiction, payer plan, provider enrollment, and effective-dated rule ownership.
-- [ ] Define deterministic rule resolution and conflict precedence.
+- [x] Define deterministic rule resolution and conflict precedence.
 - [ ] Snapshot rule version and resolved billing facts on durable service records.
 - [ ] Make scheduling timezone-aware across DST boundaries and multi-location views.
 - [ ] Support multiple assigned care-team members without weakening note/session authorization.
@@ -381,6 +381,14 @@ This is a source-code inventory, not legal advice or validation of any statute, 
 - Separated provider certification/licensure from payer enrollment and separated client coverage identity from the current free-text payer fields.
 - Defined effective-time selection, authority/specificity precedence, ambiguity holds, non-executable structured rule payloads, and immutable historical decisions. No New York or payer behavior is enabled by this design-only slice.
 - The next slice is the deterministic rule-resolution contract and test matrix. The later schema slice must follow the manual SQL workflow and remain pending until the user confirms application.
+
+### 2026-09-12 — Deterministic rule resolution
+
+- Added the database-free `@repo/db/rule-resolution` policy module so CRM, HRM, and tests share one selector without network, model inference, PHI, Prisma, or Next.js dependencies.
+- The selector accepts only an already-authorized service context and one logical rule set, filters ACTIVE versions with half-open effective intervals, selects exactly one version per applicable authority scope, and orders the resulting constraint stack federal → jurisdiction (country/state/local depth) → payer plan → service location → organization.
+- Irrelevant tenant, location, payer, and jurisdiction candidates are ignored. Malformed context/version data, mixed logical rule sets, overlapping active versions at one scope, and absent required scopes return typed manual-review holds.
+- Added 12 focused tests covering deterministic order, state/local depth, boundary instants, inactive versions, cross-context exclusion, ambiguity, required-scope absence, malformed intervals/identity/version/context, and mixed rule sets. The root Vitest workspace now includes database-free shared-policy tests as a distinct project.
+- Selection does not merge payloads or decide whether a lower authority weakens a higher constraint; category-specific deterministic evaluators must enforce that invariant. The next slice snapshots selected versions and normalized resolved billing facts on durable service records.
 
 ## Authoritative linked evidence
 

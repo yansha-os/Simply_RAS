@@ -16,6 +16,10 @@
     "./pilot-cohort-hygiene": {
       "types": "./src/pilot-cohort-hygiene.ts",
       "default": "./src/pilot-cohort-hygiene.ts"
+    },
+    "./rule-resolution": {
+      "types": "./src/rule-resolution.ts",
+      "default": "./src/rule-resolution.ts"
     }
   },
   "scripts": {

@@ -5,7 +5,8 @@ const rootDir = import.meta.dirname;
 
 /**
  * Unit tests for pure logic only (no DB, no React, no Next runtime).
- * Two projects so `@/` resolves to each app's own src/.
+ * App projects keep `@/` scoped to their own source; the shared DB package has
+ * a separate project for database-free cross-app policy tests.
  */
 export default defineConfig({
   test: {
@@ -32,6 +33,13 @@ export default defineConfig({
           alias: {
             '@': path.resolve(rootDir, 'apps/hrm/src'),
           },
+        },
+      },
+      {
+        test: {
+          name: 'db-policy',
+          environment: 'node',
+          include: ['packages/db/src/**/*.test.ts'],
         },
       },
     ],
