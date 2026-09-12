@@ -28,7 +28,7 @@ Also see:
 | ATS hire cycle | Apply → screen → interview → offer → hire → `User` |
 | RBT portal | Schedule, documents, job board apply, payroll view, session studio |
 | Onboarding | Embedded forms, signatures, candidate docs, wage / LS-54 offer |
-| Applications | `RbtJobApplication` against CRM-authored `CaseOpening` |
+| Applications | `CaseApplication` against CRM-authored `CaseOpening` |
 | ATS ops UI | Pipeline, applicant audit, help tickets, RBT manager |
 
 Shared with CRM (do not duplicate product): one Postgres DB, `Notification` rows, `User` role flags.
@@ -104,7 +104,7 @@ Applicant cycle is marked **COMPLETE** in the spine roadmap — do not reopen un
 
 ```
 CRM writes CaseOpening + ClientStatus / PA
-HRM writes AtsCandidate hire + RbtJobApplication
+HRM writes AtsCandidate hire + CaseApplication
 Shared: Notification + User
 ```
 

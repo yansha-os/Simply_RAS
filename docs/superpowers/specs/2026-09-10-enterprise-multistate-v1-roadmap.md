@@ -74,7 +74,7 @@ Clinical facts stay independent from jurisdiction rules. EVV vendors, clearingho
 
 ### Track 1 — Multi-state domain foundation
 
-- [ ] Inventory New York assumptions: timezone, address, Medicaid IDs, codes, modifiers, credentials, EVV, consent, retention, incidents, and copy.
+- [x] Inventory New York assumptions: timezone, address, Medicaid IDs, codes, modifiers, credentials, EVV, consent, retention, incidents, and copy.
 - [ ] Define organization, service location, jurisdiction, payer plan, provider enrollment, and effective-dated rule ownership.
 - [ ] Define deterministic rule resolution and conflict precedence.
 - [ ] Snapshot rule version and resolved billing facts on durable service records.
@@ -274,8 +274,8 @@ Each slice must identify evidence, make the smallest complete change, add regres
 
 ### 2026-09-11 — External-adapter classification
 
-- LIVE v1 boundaries are Supabase Auth/Postgres/private Storage; server-mediated Photon, Nominatim, and U.S. Census address lookup; browser-launched Jitsi rooms; and the manual Plutus CSV handoff. Plutus has no API integration, acknowledgment, or payment-status adapter.
-- Address providers and public Jitsi are acceptable only for the declared synthetic/deidentified v1 scope. They are **not authorized for v2 PHI** without privacy/security review, appropriate agreements, data-minimization controls, and an explicit written go/no-go.
+- LIVE v1 boundaries are Supabase Auth/Postgres/private Storage, browser-launched Jitsi rooms, and the manual Plutus CSV handoff. Plutus has no API integration, acknowledgment, or payment-status adapter.
+- Public address-provider calls are disabled and the legacy route fails closed; patient-entered addresses and coordinates are not sent to Photon/Nominatim. Public Jitsi is acceptable only for the declared synthetic/deidentified v1 scope. Neither boundary is authorized for v2 PHI without privacy/security review, appropriate agreements, data-minimization controls, and an explicit written go/no-go.
 - The local 837P generator is DEV_ONLY and display-only. The unmounted 835 parser and non-transmitting EVV batch formatter remain HOLD; neither proves clearinghouse or aggregator acceptance.
 - Retired the orphaned synthetic Sandata/HHAeXchange dispatcher and adapters. They had no production caller and manufactured success response IDs without network transmission; keeping them would undermine EVV state integrity.
 - No payment processor, clearinghouse, email/SMS provider, live EVV vendor, analytics SDK, or AI/model API is integrated. Cross-app CRM/HRM links share product state through Postgres and are not external adapters.
@@ -315,6 +315,28 @@ Each slice must identify evidence, make the smallest complete change, add regres
 - Removed operational dependence on the retired `/portal-billing/audit` worksheet and corrected the demo-data verifier invocation to its real `node scripts/verify-no-demo-data.mjs` entry point (no npm alias). Sandbox cohort membership, reviewed note IDs, discrepancies, and go/no-go signatures are controlled operational evidence outside RAS.
 - Corrected clinical/payroll claims to the current fail-closed behavior: required credential defects block ACTIVE-client sign/convert, `isConverted` never bypasses durable attestation, persisted note units are authoritative, and LIVE incomplete/payroll views derive from database evidence rather than browser holds.
 - **Gate 0 passed for the source snapshot:** every reachable surface category is inventoried/classified, ownership and authoritative records are mapped, and active checklists now point to one owner for changing facts. This does not satisfy any later code, environment, clinical, billing, security, or human-approval gate.
+
+### 2026-09-12 — New York assumption inventory
+
+This is a source-code inventory, not legal advice or validation of any statute, payer policy, or vendor rule. Discovery counts identify review scope; an item becomes an enabled rule only after authoritative research, dated evidence, owner approval, and tests.
+
+| Assumption area | Source finding | Required ownership |
+|---|---|---|
+| Timezone | `America/New_York` occurs across 22 application files, including duplicate CRM/HRM clinic-time helpers and scheduling/payroll formatting. | Organization/service-location timezone; preserve historical instants and test DST. |
+| Geography | Borough terms occur across 37 application files; NYC coordinates, New York fallbacks, service areas, and sample addresses are mixed together. | Service-area/location configuration; keep demo fixtures separate from operational rules. |
+| Medicaid and payer identity | `Client.medicaidId` and `insurancePayer` are generic strings; there is no effective-dated payer plan, program, or enrollment authority. | Payer plan/program plus provider enrollment, scoped by jurisdiction and effective date. |
+| Codes, modifiers, POS, and units | Billing helpers contain default CPT/POS values, a fixed POS set, provisional MUEs, unit formulas, utilization thresholds, and a universal caregiver-signature check. | Reviewed payer/program rule versions; current hard-coded values remain non-authoritative until verified. |
+| Credentials | BACB certification is represented as `BACB_LICENSE` and can hard-stop ACTIVE-client billing, but national certification, state licensure, payer credentialing, and enrollment are not separate authorities. | Credential definitions and requirements by role, jurisdiction, payer/program, location, and effective date. |
+| EVV | Durable session/EVV records capture much of the service evidence, while the 500-foot radius, default CPT/POS, and vendor batch formats are prototype assumptions. | Applicability and adapter profiles by state, program, payer, code, location, vendor, and effective date. |
+| Consent and privacy | Intake and workforce acknowledgments contain organization, federal, and New York-specific language without versioned jurisdiction/template ownership. | Versioned consent/disclosure templates with signer, locale, jurisdiction, effective dates, and immutable evidence. |
+| Retention and legal hold | A detailed technical plan exists, but no approved retention schedule, legal-hold engine, or production purge workflow is active. | Counsel-approved policy versions and fail-closed retention/hold execution. |
+| Incidents | Mandated-reporting copy exists, but the source scan did not find a formal incident lifecycle with triage, escalation, correction, and closure evidence. | Organization/jurisdiction incident policy and authorized immutable workflow. |
+| Employment | LS-54 wage notice and other New York workforce language are embedded throughout hiring/onboarding. | Employment-jurisdiction templates and gates, separate from national hiring state. |
+| UI and demo copy | New York/NYC terms occur across 45 application files and mix real organization scope, examples, labels, and behavioral rules. | Brand/organization copy and demo fixtures separated from regulatory configuration. |
+
+- The schema has no first-class organization, service location, jurisdiction, payer plan, provider enrollment, or effective-dated rule snapshot foundation. That is the next Track 1 design slice; it must precede state-specific implementation.
+- Disabled patient address autocomplete and reverse geocoding at both caller and route boundaries. Manual address entry and the existing local ZIP-only parser remain available, eliminating public-provider URL disclosure and needless network requests.
+- Corrected the architecture/HRM ownership map to name the durable `CaseApplication` model instead of the retired `RbtJobApplication` browser prototype.
 
 ## Authoritative linked evidence
 

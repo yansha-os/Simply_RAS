@@ -28,9 +28,6 @@ type AddressSuggestion = {
   source: 'osm' | 'census' | 'device';
 };
 
-const DEFAULT_NYC_LAT = 40.7128;
-const DEFAULT_NYC_LNG = -74.0060;
-
 export function AutoSaveAddressInput({
   label,
   fieldId,
@@ -44,10 +41,9 @@ export function AutoSaveAddressInput({
   const [previousDefaultValue, setPreviousDefaultValue] = useState(defaultValue);
   const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [isLocating, setIsLocating] = useState(false);
+  const isLocating = false;
   const [isOpen, setIsOpen] = useState(false);
   const [isVerified, setIsVerified] = useState(false);
-  const [deviceCoords, setDeviceCoords] = useState<{ lat: number; lng: number } | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -68,17 +64,8 @@ export function AutoSaveAddressInput({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Fetch address autocomplete from server API route
-  const fetchAddressSuggestions = useCallback(async (query: string, lat: number, lon: number): Promise<AddressSuggestion[]> => {
-    try {
-      const res = await fetch(`/api/address-autocomplete?q=${encodeURIComponent(query)}&lat=${lat}&lon=${lon}`);
-      if (!res.ok) return [];
-      const data = await res.json();
-      return data.suggestions || [];
-    } catch {
-      return [];
-    }
-  }, []);
+  // External address lookup remains disabled until an approved PHI-safe vendor exists.
+  const fetchAddressSuggestions = useCallback(async (): Promise<AddressSuggestion[]> => [], []);
 
   // Search trigger on typing
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -96,10 +83,7 @@ export function AutoSaveAddressInput({
 
     debounceTimerRef.current = setTimeout(async () => {
       setIsLoading(true);
-      const lat = deviceCoords?.lat ?? DEFAULT_NYC_LAT;
-      const lng = deviceCoords?.lng ?? DEFAULT_NYC_LNG;
-
-      const results = await fetchAddressSuggestions(query, lat, lng);
+      const results = await fetchAddressSuggestions();
       setSuggestions(results);
       setIsOpen(results.length > 0);
       setIsLoading(false);
@@ -129,66 +113,7 @@ export function AutoSaveAddressInput({
 
   // One-tap Device Geolocation ("📍 Use Current Location")
   const handleUseCurrentLocation = () => {
-    if (!navigator.geolocation) {
-      toast.error('Geolocation is not supported by your browser.');
-      return;
-    }
-
-    setIsLocating(true);
-    const toastId = toast.loading('Finding your GPS location...');
-
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        const lat = position.coords.latitude;
-        const lng = position.coords.longitude;
-        setDeviceCoords({ lat, lng });
-
-        try {
-          const res = await fetch(`/api/address-autocomplete?reverse=true&lat=${lat}&lon=${lng}`);
-          const data = await res.json();
-          const result = data?.result;
-
-          if (result && result.formatted) {
-            setVal(result.formatted);
-            setIsVerified(true);
-            toast.dismiss(toastId);
-            toast.success('Address filled from your device GPS!');
-
-            const addressParts: IntakeAddressParts = {
-              street: result.street,
-              city: result.city,
-              state: result.state,
-              zip: result.zip,
-              lat: result.lat,
-              lng: result.lng,
-            };
-
-            if (onAddressSelect) {
-              onAddressSelect(addressParts);
-            }
-            onBlur(fieldId, result.formatted);
-          } else {
-            toast.dismiss(toastId);
-            toast.info('Location found, please enter street number.');
-          }
-        } catch {
-          toast.dismiss(toastId);
-          toast.error('Could not reverse-geocode your GPS location.');
-        } finally {
-          setIsLocating(false);
-        }
-      },
-      (err) => {
-        setIsLocating(false);
-        toast.dismiss(toastId);
-        if (err.code === err.PERMISSION_DENIED) {
-          toast.error('Location permission was denied. Please enter your address manually.');
-        } else {
-          toast.error('Could not determine your GPS location.');
-        }
-      },
-      { enableHighAccuracy: true, timeout: 10000 }
-    );
+    toast.info('For privacy, enter the address manually.');
   };
 
   // Commit on input blur (fallback parser)

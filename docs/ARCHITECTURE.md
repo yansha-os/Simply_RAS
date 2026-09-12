@@ -24,7 +24,7 @@ Cross-app collaboration is **data + notifications**, not embedded UI.
 
 ```text
 CRM writes CaseOpening + clinical / PA status
-HRM writes AtsCandidate hire + RbtJobApplication
+HRM writes AtsCandidate hire + CaseApplication
 Both read Notification for signed-in user
 ```
 
