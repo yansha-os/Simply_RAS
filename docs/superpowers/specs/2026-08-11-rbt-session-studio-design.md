@@ -63,12 +63,12 @@ Session note phase uses ABA 97153 sections: logistics summary → goals → obje
 ## Persistence
 
 - Mid-session: `sessionStorage` draft (`ras_session_studio_draft_*`) + meta (`ras_session_studio_meta_*`)  
-- Incomplete / pay holds: `localStorage` (`ras_rbt_pay_holds`)  
+- Incomplete / pay holds: derived from durable `Session` + `SessionNote` attestation through `listRbtPayrollSessions`
 - Claim-ready submit: `submitHrmSessionEmrNote` → Session + SessionNote; `SessionTrialData` when trial `targetId` is a real SkillTarget UUID  
 
 ## Integration points
 
-- `RbtScheduleView` LIVE: seed upcoming demo sessions; Start → `/rbt/session/[id]`  
+- `RbtScheduleView` LIVE: database-backed assigned sessions only; Start → `/rbt/session/[id]`
 - Incomplete tab: Resume Session Studio (not thin fix drawer)  
-- Payroll: same hold IDs  
+- Payroll and LIVE Incomplete tab: same server-derived attestation evidence
 - `/rbt/simulation` unchanged (training Motivity engine)

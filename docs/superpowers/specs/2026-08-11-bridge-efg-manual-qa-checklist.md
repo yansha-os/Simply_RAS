@@ -164,7 +164,7 @@ Then: HRM DevTools → **Active Users → David Miller (RBT)** → `/rbt/schedul
 | `rbtSigned` false | false | RBT signature incomplete |
 | `rbtSigned` true, `bcbaSigned` false | false | Awaiting BCBA e-sign |
 | `bcbaSigned` true | true | null |
-| `isConverted` true (even if used alone) | true | null |
+| `isConverted` true but durable attestation is incomplete | false | First failed durable attestation requirement |
 | `cptCode = 97151` | excluded from list | — |
 
 ### Common failure points (G)
@@ -173,9 +173,9 @@ Then: HRM DevTools → **Active Users → David Miller (RBT)** → `/rbt/schedul
 |---------|----------------|
 | Empty payroll | Wrong RBT user / impersonation fallback; session `rbtId` mismatch |
 | Still held after e-sign | Hard refresh; signed different note; `rbtId` not this RBT |
-| Payable without BCBA sign | Only if `isConverted` true (unusual) — check flags |
-| Local Incomplete vs DB disagree | `localStorage` holds stale — trust `SessionNote` flags |
-| Units look wrong | Estimated from actual/scheduled duration ÷ 15 — Studio SoT units not yet persisted |
+| Payable without BCBA sign | Integrity defect — durable attestation must fail closed regardless of `isConverted` |
+| Incomplete queue disagrees with payroll | Refresh both views; both must derive from the same `Session` + `SessionNote` attestation evidence |
+| Units look wrong | Inspect persisted `SessionNote.billableUnits`; an “Estimated” badge is non-payable fallback information, not approved pay |
 
 ---
 

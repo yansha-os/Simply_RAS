@@ -36,35 +36,21 @@
 
 ---
 
-## A. SQL apply order (Supabase SQL Editor)
+## A. Database and storage evidence (Supabase)
 
-Prerequisite: archive `prisma/migrations/` scripts `01`–`15` already on the target DB.
+The authoritative SQL dependency order and per-script APPLY/HOLD status live only in [`docs/sql/README.md`](../../sql/README.md). This checklist intentionally does not duplicate that changing list. Use Supabase SQL Editor for approved SQL; never use Prisma migration or push commands against the shared database.
 
-### MUST APPLY before prod deploy
+| Evidence | Verified ☐ | Date / target |
+|---|:---:|---|
+| Target project/environment is named; CRM and HRM point to that same database | [ ] | |
+| Archive `prisma/migrations/` scripts `01`–`15` baseline is verified on the target | [ ] | |
+| Every current **APPLY** row in `docs/sql/README.md` is verified on this target in dependency order | [ ] | |
+| Every current **HOLD** row remains unapplied unless its documented promotion gate was separately approved | [ ] | |
+| Prisma schema and target catalog parity check passes; generated client was refreshed with `npm run db:generate` if needed | [ ] | |
+| Private buckets `client-documents`, `ats-applicant-docs`, and `ats-interview-recordings` match documented privacy, size, and MIME controls | [ ] | |
+| Supabase security/performance advisors were reviewed and unresolved findings are recorded with owner/severity | [ ] | |
 
-| Order | File | Purpose | Applied ☐ | Date |
-|------:|------|---------|:---------:|------|
-| 1 | [`2026-08-11-case-opening-marketplace.sql`](../../sql/2026-08-11-case-opening-marketplace.sql) | CaseOpening + CaseApplication | [ ] | |
-| 2 | [`2026-08-11-case-opening-listing-enrichment.sql`](../../sql/2026-08-11-case-opening-listing-enrichment.sql) | Listing enrichment + RBT zip | [ ] | |
-| 3 | [`2026-08-11-session-note-structured-fields.sql`](../../sql/2026-08-11-session-note-structured-fields.sql) | Session Studio structured note fields | [ ] | |
-| 4 | [`2026-08-12-staff-message.sql`](../../sql/2026-08-12-staff-message.sql) | StaffMessage table | [ ] | |
-| 5 | [`2026-08-12-schema-parity-backfill.sql`](../../sql/2026-08-12-schema-parity-backfill.sql) | Remaining schema.prisma parity | [ ] | |
-| 6 | [`2026-08-12-magic-link-expiry.sql`](../../sql/2026-08-12-magic-link-expiry.sql) | Magic-link expiry/revocation columns | [ ] | |
-| 7 | [`2026-08-12-session-indexes.sql`](../../sql/2026-08-12-session-indexes.sql) | Session hot-path indexes | [ ] | |
-| 11 | [`2026-08-19-182500Z-client-portal-notifications.sql`](../../sql/2026-08-19-182500Z-client-portal-notifications.sql) | Notification.clientId for parent bell | [ ] | |
-| 12 | [`2026-08-20-010500Z-session-notes-coordinator-role.sql`](../../sql/2026-08-20-010500Z-session-notes-coordinator-role.sql) | SESSION_NOTES_COORDINATOR enum | [ ] | |
-| 13 | [`2026-08-20-012800Z-dual-run-cohort-fields.sql`](../../sql/2026-08-20-012800Z-dual-run-cohort-fields.sql) | Sandbox cohort tags on Client | [ ] | |
-| 14 | [`2026-08-20-015300Z-clinical-emr-provisioned-rename.sql`](../../sql/2026-08-20-015300Z-clinical-emr-provisioned-rename.sql) | RbtOnboarding column rename | [ ] | |
-
-After apply: run `npx prisma generate` locally; redeploy both apps.
-
-### HOLD — do not apply until product decision / UI wired
-
-| File | Why HOLD |
-|------|----------|
-| [`2026-08-16-231000Z-client-emr-fields.sql`](../../sql/2026-08-16-231000Z-client-emr-fields.sql) | Intake Form01 still uses packet `diagnosisText`, not `Client.primaryDiagnosisCode` |
-| [`2026-08-16-232000Z-evv-aggregator-sync-fields.sql`](../../sql/2026-08-16-232000Z-evv-aggregator-sync-fields.sql) | **EVV HOLD** — Sandata/HHA adapters are synthetic prototypes; no live aggregator chosen |
-| [`2026-08-12-rls-storage-hardening.sql`](../../sql/2026-08-12-rls-storage-hardening.sql) | **PENDING MANUAL SECURITY REVIEW** — apply only after both apps verified with `SUPABASE_SERVICE_ROLE_KEY` |
+Observed catalog state can support a verification, but repository filenames alone never prove that manual SQL was executed. Record the target and date for every claim.
 
 ---
 
@@ -114,7 +100,7 @@ Quick path per role — expect **200 + correct portal**, not 404/403 loops.
 - [x] Applicant cookie forgery closed; magic-link expiry enforced in code
 - [x] Legacy CRM `/portal-hr/session-emr` auto-convert deleted; CRM `/rbt/*` redirects to HRM
 - [x] Mock KPI routes dev-gated; orphan dashboards removed
-- [x] Core `docs/sql/` scripts 1–6 applied (confirm in Section A)
+- [x] Core database changes are scripted and indexed; target-specific application remains an unchecked Section A evidence gate
 - [x] `next build` + vitest green in CI
 - [x] `docs/ENV.md` filled; dev-tools boot assert in both layouts
 
@@ -140,8 +126,8 @@ Quick path per role — expect **200 + correct portal**, not 404/403 loops.
 - [x] Staff-facing copy: zero Artemis / Motivity / dual-run labels in `apps/crm` + `apps/hrm`
 - [x] `RbtOnboarding.clinicalEmrProvisioned` in Prisma + rename SQL scripted
 - [x] EmrDocumentVault category: **Historical EMR archive** (not vendor-branded)
-- [x] Sandbox QA nav labels (`/portal-billing/audit`) — not "Dual-Run Audit"
-- [ ] SQL row 14 applied in Supabase (Section A)
+- [x] Retired `/portal-billing/audit` worksheet is absent from production navigation
+- [ ] `clinicalEmrProvisioned` rename verified on the named target through Section A
 
 ---
 

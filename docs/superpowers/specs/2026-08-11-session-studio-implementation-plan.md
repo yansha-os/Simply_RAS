@@ -182,10 +182,10 @@ CREATE INDEX IF NOT EXISTS "SessionNote_rbtSigned_bcbaSigned_idx"
 
 | | |
 |--|--|
-| **Work** | Prefer `SessionNote.billableUnits` in `listRbtPayrollSessions`; treat Incomplete as DB-backed (unsigned / failed checklist) — keep `localStorage` secondary/migrated |
+| **Work** | Prefer `SessionNote.billableUnits` in `listRbtPayrollSessions`; derive Incomplete/payroll holds from durable unsigned or failed-checklist evidence |
 | **Touch** | `payrollActions.ts`, `RbtPayrollView`, `rbtPayHolds.ts` (de-emphasize) |
 | **Success** | Payable units match Studio 8-minute rule display; G QA holds/payable still correct; no pay for unsigned |
-| **Progress** | `resolvePayrollUnits` prefers persisted `billableUnits` (`unitsSource: NOTE \| ESTIMATE` badge in `RbtPayrollView`); payroll query now includes `IN_PROGRESS` sessions as DB-backed incomplete holds; failed frozen checklist is a DB hold reason. `localStorage` holds remain secondary for local-only drafts and reconcile against payable rows. Vitest suite extended (`rbtPayHolds.test.ts`). |
+| **Progress** | `resolvePayrollUnits` prefers persisted `billableUnits` (`unitsSource: NOTE \| ESTIMATE` badge in `RbtPayrollView`); payroll includes `IN_PROGRESS` sessions and failed frozen checklists as DB-backed holds. The LIVE schedule now derives its incomplete queue from this same action; the browser hold ledger and its event plumbing were retired. |
 
 ### Slice 8 — Hygiene (can parallel late) — **DONE (Studio-lane files, 2026-08-12)**
 

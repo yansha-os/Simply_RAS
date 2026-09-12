@@ -68,7 +68,7 @@ Clinical facts stay independent from jurisdiction rules. EVV vendors, clearingho
 - [x] Inventory every reachable production route, server action, scheduled/background task, external adapter, and data store.
 - [x] Classify each surface: LIVE, DEV_ONLY, PROTOTYPE, HOLD, or RETIRE.
 - [x] Map every critical workflow to its source-of-truth records and owning roles.
-- [ ] Reconcile this program against open checklist rows; remove stale claims rather than duplicate them.
+- [x] Reconcile this program against open checklist rows; remove stale claims rather than duplicate them.
 
 **Gate 0:** no unknown or ambiguously owned production surface.
 
@@ -307,6 +307,14 @@ Each slice must identify evidence, make the smallest complete change, add regres
 - Replaced the LIVE schedule's browser `ras_rbt_pay_holds` ledger with a server-derived incomplete queue from the same payroll action used by payroll and dashboard views. Session Studio no longer creates or clears local pay authority, its live repair action routes back into the durable Studio workflow, and the schedule purges the retired browser key when loaded.
 - Deleted the unreferenced `rbtJobApplications` browser module; actual staffing applications already persist as `CaseApplication` records with a unique opening/RBT constraint.
 - Critical workflow ownership and records are mapped for this source snapshot. Track 0 now remains open only for cross-checking the active readiness checklists and removing stale claims.
+
+### 2026-09-12 — Checklist reconciliation and Gate 0
+
+- Reconciled the enterprise roadmap with the pre-production checklist, sandbox/cold-cutover checklist, connected-product playbook, Bridge E–G QA, and canonical SQL ledger. Environment checks, browser walkthroughs, ≥10-note clinical review, and leadership approvals remain deliberately unchecked because repository evidence cannot satisfy them.
+- Removed the stale seven-script database subset from the connected playbook; all target-database work now resolves through `docs/sql/README.md`, which owns dependency order and APPLY/HOLD decisions. The retired dual-run cohort script is HOLD for new targets, and the removed synthetic EVV adapters are no longer described as present.
+- Removed operational dependence on the retired `/portal-billing/audit` worksheet and corrected the demo-data verifier invocation to its real `node scripts/verify-no-demo-data.mjs` entry point (no npm alias). Sandbox cohort membership, reviewed note IDs, discrepancies, and go/no-go signatures are controlled operational evidence outside RAS.
+- Corrected clinical/payroll claims to the current fail-closed behavior: required credential defects block ACTIVE-client sign/convert, `isConverted` never bypasses durable attestation, persisted note units are authoritative, and LIVE incomplete/payroll views derive from database evidence rather than browser holds.
+- **Gate 0 passed for the source snapshot:** every reachable surface category is inventoried/classified, ownership and authoritative records are mapped, and active checklists now point to one owner for changing facts. This does not satisfy any later code, environment, clinical, billing, security, or human-approval gate.
 
 ## Authoritative linked evidence
 

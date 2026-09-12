@@ -1,8 +1,8 @@
 # Connected Product — Test Playbook
 
-**Version:** v2 — 2026-08-12  
+**Revision:** 2026-09-12
 **Status:** Manual runbook (one shared DB, both apps)  
-**Purpose:** Walk the connected CRM ↔ HRM product once — SQL → apps → intake → staffing → ACTIVE → Studio note → BCBA sign → Plutus tracker → payroll — plus the new production gates (link expiry, auth-unit hard stop, credential warnings, audit vault, health probes).
+**Purpose:** Walk the connected CRM ↔ HRM product once — SQL → apps → intake → staffing → ACTIVE → Studio note → BCBA sign → Plutus tracker → payroll — plus production gates for link expiry, authorization/credential hard stops, audit evidence, and health probes.
 
 **Detail click-paths (Bridges E–G):** [`2026-08-11-bridge-efg-manual-qa-checklist.md`](./2026-08-11-bridge-efg-manual-qa-checklist.md)  
 **Spine / status enum:** [`2026-08-11-aba-crm-hrm-spine-roadmap.md`](./2026-08-11-aba-crm-hrm-spine-roadmap.md)  
@@ -12,7 +12,7 @@
 
 ## 0. Do this tonight (7 steps)
 
-1. Paste the **seven** `docs/sql/` scripts below into Supabase SQL Editor **in order**; confirm no errors.
+1. Open the canonical [`docs/sql/README.md`](../../sql/README.md), verify the target database against every **APPLY** row in its dependency order, and leave every **HOLD** row unapplied; record human confirmation.
 2. In Supabase Storage, confirm a **private** bucket named **`client-documents`** exists (parent doc uploads land there; uploads 500 without it).
 3. Start **CRM :3000** and **HRM :3001** against the **same** `DATABASE_URL`; hit `http://localhost:3000/api/health` and `http://localhost:3001/api/health` — both must return `{"ok":true,...,"db":"ok"}`.
 4. With `NEXT_PUBLIC_ENABLE_DEV_TOOLS=true`, open CRM or HRM DevTools → **Seed Studio→payroll (ACTIVE + session)** (ACTIVE + scheduled 97153). Use DevTools **role impersonation** for role switching — the email-pattern login shortcuts are dev-gated and real login is rate-limited (5 attempts / 15 min per email+IP).
@@ -26,25 +26,13 @@
 
 ---
 
-## 1. SQL to run (ordered)
+## 1. Database and storage prerequisites
 
-Paste into the **Supabase SQL Editor** only. Do **not** run `prisma migrate` / `db push` against live DB.
+The only authoritative apply order is [`docs/sql/README.md`](../../sql/README.md). Do not copy a numbered subset from this playbook: the ledger contains later security, parity, and fail-closed scripts plus explicit HOLD decisions. Paste approved SQL into the **Supabase SQL Editor** only; never run Prisma migration or push commands against a shared database.
 
-| Order | File | What it adds |
-|------:|------|--------------|
-| 1 | [`docs/sql/2026-08-11-case-opening-marketplace.sql`](../../sql/2026-08-11-case-opening-marketplace.sql) | `CaseOpening` + `CaseApplication` (+ enums) — staffing marketplace |
-| 2 | [`docs/sql/2026-08-11-case-opening-listing-enrichment.sql`](../../sql/2026-08-11-case-opening-listing-enrichment.sql) | Listing fields on `CaseOpening` + RBT home zip / travel miles |
-| 3 | [`docs/sql/2026-08-11-session-note-structured-fields.sql`](../../sql/2026-08-11-session-note-structured-fields.sql) | Session Studio Slice 0 — `SessionNote` structured/signer/tracker cols, `Session.placeOfServiceCode`, `SessionStatus.IN_PROGRESS` |
-| 4 | [`docs/sql/2026-08-12-staff-message.sql`](../../sql/2026-08-12-staff-message.sql) | `StaffMessage` table (staff chat / case-coord messaging) |
-| 5 | [`docs/sql/2026-08-12-schema-parity-backfill.sql`](../../sql/2026-08-12-schema-parity-backfill.sql) | Schema-parity backfill — enum values, EMR/messaging/notification tables, **`AuditLogVault`**, ATS base tables. No-op where the live DB already has them |
-| 6 | [`docs/sql/2026-08-12-magic-link-expiry.sql`](../../sql/2026-08-12-magic-link-expiry.sql) | `magicLinkExpiresAt` / `magicLinkRevokedAt` on `IntakePacket` + `CandidateOnboardingPacket` (30-day expiry / revocation) |
-| 7 | [`docs/sql/2026-08-12-session-indexes.sql`](../../sql/2026-08-12-session-indexes.sql) | `Session` hot-path indexes (`clientId+scheduledStart`, `rbtId+scheduledStart`) |
+Before the walkthrough, record evidence that the target has the archive `01`–`15` baseline, every currently required **APPLY** row, and the three private buckets `client-documents`, `ats-applicant-docs`, and `ats-interview-recordings` with the documented limits and MIME controls. Repository files or observed columns do not establish manual execution history.
 
-**Prerequisites:** Base schema / numbered archive under `prisma/migrations/` (`01`–`15`) already applied on this DB, **and** a private Supabase Storage bucket **`client-documents`** (uploads write `{clientId}/...` paths there; reads go through `/api/documents` signed URLs).
-
-**After SQL:** `npx prisma generate` locally if the client is stale — client only, no DB write.
-
-Canonical ordered list also lives in [`docs/sql/README.md`](../../sql/README.md) → **Run these for connected product**.
+After a schema change, regenerate the local Prisma client with `npm run db:generate`; this changes generated client code only and does not write to the database.
 
 ---
 
@@ -116,13 +104,13 @@ Full asserts / negatives → Bridge E section of the [QA checklist](./2026-08-11
 | 14 | HRM | `/rbt/session/[sessionId]` → complete Studio (collect → note → sign) → claim-ready submit. Submit is **one transaction** — session completion, note, trials, checklist snapshot land together or not at all. | `rbtSigned`; `bcbaSigned=false`; `isConverted=false`; `checklistSnapshot` frozen green |
 | 15 | HRM | Re-open the same session and **resubmit** with edited trial data. | Prior trial rows are **replaced, not duplicated** |
 | 16 | HRM | `/rbt/payroll` | Session **held** (awaiting BCBA); rows are DB-backed (no localStorage) with a **unit source badge**: "Note units" (from the signed note) or "Estimated" |
-| 17 | CRM | `/portal-clinical/daily` → **E-Sign Note** (or Batch E-Sign). If the signing BCBA or session RBT has an expired/missing credential, a **non-blocking credential warning** toast appears. | `bcbaSigned=true`; `AuditLogVault` gets a `SIGN` row |
+| 17 | CRM | `/portal-clinical/daily` → **E-Sign Note** (or Batch E-Sign). Expired/missing required RBT or BCBA credentials must block signing for ACTIVE clients. | Valid credentials → `bcbaSigned=true` and `AuditLogVault` gets a `SIGN` row; invalid credentials → `CREDENTIAL_HARD_STOP` |
 | 18 | HRM | Refresh `/rbt/payroll` | **Payable**, badge "Note units" |
 | 19 | CRM | `/notes` → **Mark sent to Plutus (manual tracker)**. Convert is gated: RBT + BCBA signatures **and** a green `checklistSnapshot` **and** the auth-unit hard stop (G4). | `isConverted=true`; `AuditLogVault` gets a `CONVERT` row |
 
 ---
 
-## 4. Gate & negative checks (new in v2)
+## 4. Gate and negative checks
 
 Each of these is a concrete browser check against a gate that shipped 2026-08-12. Run with dev tools enabled.
 
@@ -133,9 +121,9 @@ Each of these is a concrete browser check against a gate that shipped 2026-08-12
 | G3 | Device lock | Open a bound magic link from a second browser / incognito | Red **"Device Locked"** screen; parent server actions also refuse ("locked to the device that first opened the link") |
 | G4 | Auth-unit hard stop | On `/notes`, convert a note whose units exceed the client's remaining authorized units for that CPT/auth window | Blocked: "Auth-unit hard stop: X unit(s) remaining for CPT … — converting would overbill…". Non-leadership sees "A Billing / Finance / CEO override is required." As BILLING/FINANCE/CEO, override **requires a reason** and writes an `OVERRIDE` / `AUTH_UNIT_HARD_STOP_OVERRIDE` audit row with the numbers |
 | G5 | Convert gate order | Try converting before BCBA sign, then with a failed/missing checklist | "BCBA e-sign required…", "RBT signature required…", or "Billing checklist snapshot missing / failed at RBT submit — cannot convert" |
-| G6 | Credential warnings | Expire a staff credential (`StaffCredential`), then BCBA-sign or convert a note for that staff | Action **succeeds** with a warning naming the staff + credential issue (soft gate — warn, never block) |
+| G6 | Credential hard stop | Expire a required staff credential (`StaffCredential`), then BCBA-sign or convert an ACTIVE-client note for that staff | Action fails closed with `CREDENTIAL_HARD_STOP`; no signature or conversion is persisted |
 | G7 | Login rate limit | 5 failed logins for one email, then a 6th | "Too many sign-in attempts. Please try again later." (generic on purpose) |
-| G8 | Audit-log spot check | `npx prisma studio` → `AuditLogVault`, or SQL: `select action, "resourceType", "resourceId", timestamp from "AuditLogVault" order by timestamp desc limit 20;` | Rows for `VIEW` (chart opens), `SIGN` (step 17), `CONVERT` (step 19), plus `OVERRIDE` if you ran G4 |
+| G8 | Audit-log spot check | Run the documented read-only SQL against `AuditLogVault` in Supabase SQL Editor | Rows for `VIEW` (chart opens), `SIGN` (step 17), `CONVERT` (step 19), plus `OVERRIDE` if you ran G4 |
 | G9 | PA queue deny → P2P | `/portal-billing/clients` queues: deny a PA as **clinical** with a reason | Reason lands in `p2pNotes`, `p2pResolved=false`; BCBA P2P queue on `/portal-clinical` picks it up; billing can log the P2P resolution afterward |
 | G10 | Sandbox cohort QA | Follow [`2026-08-11-ras-sandbox-cutover-checklist.md`](./2026-08-11-ras-sandbox-cutover-checklist.md) | Complete the ≥10-note clinical/billing review and record the written go/no-go outside RAS. The retired `/portal-billing/audit` dual-run worksheet must not be expected. |
 | G11 | Cross-app notification links | Trigger a notification whose target lives in the other app (e.g. "note awaiting BCBA sign" seen from HRM) | Bell link resolves to the **owning app's** absolute URL (e.g. `:3000/portal-clinical/...` from HRM, `:3001/rbt/payroll` from CRM) — full navigation, no 404 |
@@ -172,7 +160,7 @@ Related (not required for tonight’s smoke):
 | Full **Artemis** clinical replacement | Chart modules, sandbox QA, cold cutover, and SOP purge remain governed by the roadmap/cutover checklist; not this smoke. No legacy-system dual-run worksheet exists in RAS. |
 | Real **EDI** / Plutus API / clearinghouse | Billing = **manual** Plutus tracker (`isConverted` + claim ref). EDI stubs are P3-optional |
 | State **EVV aggregator** submission | Capture / Studio clock only (clock-in → `IN_PROGRESS` is honest and idempotent, but nothing is submitted upstream) |
-| DocuSign-grade crypto e-sign | Typed-name + timestamps OK; credential checks on sign are **warnings**, not blocks |
+| DocuSign-grade crypto e-sign | Typed-name + timestamps are the current evidence model; required ACTIVE-client credentials are hard stops, but no third-party digital-signature certification is claimed |
 | CRM-side RBT / HR portals | Gone by design — CRM `/rbt/*` and `/portal-hr/*` only redirect to HRM |
 | Production email for magic link | Copy-link remains valid (now with 30-day expiry + device binding) |
 | Reopening ATS applicant cycle | Marked COMPLETE — freeze unless regressions |
@@ -188,4 +176,4 @@ If a portal looks “Artemis-grade” but is labeled stub / aspirational — tre
 | 1 | 2026-08-11 | Initial connected-product test playbook |
 | 2 | 2026-08-11 | Connected Loop board (`/dev/connected-loop`) as unison view |
 | 3 | 2026-08-11 | Removed loop board; primary path is DevTools Seed Studio→payroll click-path |
-| v2 rewrite | 2026-08-12 | Product-wide v2 pass: HRM-only RBT/HR routes (CRM redirects), magic-link 30-day expiry + device fingerprint + validated submit + rejected-doc loop, private `client-documents` bucket, login rate limit + DevTools impersonation, convert gates (signatures + checklist + auth-unit hard stop w/ BILLING/FINANCE/CEO override), transactional Studio submit + idempotent EVV/resubmit, DB-backed payroll units (NOTE/ESTIMATE badges), new section 4 gate checks (health, audit vault, PA P2P, dual-run audit, cross-app notifications, dev-gated HRM KPIs) |
+| 2026-09-12 reconciliation | 2026-09-12 | Canonical SQL ledger replaces the stale seven-file subset; credential checks match the ACTIVE-client hard stop; retired dual-run worksheet is not part of the smoke path |

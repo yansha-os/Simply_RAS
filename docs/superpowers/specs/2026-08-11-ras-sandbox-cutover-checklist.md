@@ -1,6 +1,6 @@
 # RAS Sandbox → Cold Cutover Checklist
 
-**Date:** 2026-08-11 (revised 2026-08-19)
+**Date:** 2026-08-11 (revised 2026-09-12)
 **Status:** Operational go/no-go (ops / clinical leadership — not legal advice)
 **Product:** Rise & Shine — Simple RAS CRM + HRM
 **Spine owner:** [`2026-08-11-aba-emr-artemis-replacement-roadmap.md`](./2026-08-11-aba-emr-artemis-replacement-roadmap.md) §8
@@ -22,7 +22,7 @@
 
 | Phase | RAS role | Production caseload | Promotion gate |
 |-------|----------|---------------------|----------------|
-| **Sandbox** | Pretend clients only; full workflow rehearsal | External stack (friend CRM+HRM) | Studio QA green; Bridges E–G smoke; cohort tagged |
+| **Sandbox** | Pretend clients only; full workflow rehearsal | External stack (friend CRM+HRM) | Studio QA green; Bridges E–G smoke; cohort roster recorded |
 | **Cutover Readiness** | Sandbox cohort at full claim-ready depth | Still external | ≥10-note internal QA sample; Billing accepts RAS→Plutus |
 | **Cold Cutover** | Flip real ACTIVE clients to RAS SoT | **RAS only** for flipped cohort | Written go/no-go; rollback plan rehearsed |
 | **Enclosed Operations** | RAS SoT for all active care | RAS | Phase 0–3 roadmap exits met per domain |
@@ -49,9 +49,9 @@ Use this to judge go/no-go — do not invent readiness from aspirational UI.
 | Area | Reality today | Cutover implication |
 |------|---------------|---------------------|
 | **Bridges E–G** | **DONE** (wiring) | Re-run [Bridge E–F–G QA](./2026-08-11-bridge-efg-manual-qa-checklist.md) on sandbox sample |
-| **Session Studio depth** | Slices 0–2 landed; 3–8 partial | **Do not start Cutover Readiness** until claim-ready path green for cohort CPT mix |
-| **Chart Progress** | Light readiness surface | Helpful for BCBA; not full enclosed chart until P1 |
-| **Auth units** | Display estimate | Not claim-grade ledger — P2 |
+| **Session Studio depth** | Slices 0–8 landed in code | Still prove the claim-ready path manually for the cohort CPT mix |
+| **Chart Progress** | Durable trial/behavior aggregates are wired | Requires clinical acceptance on pretend ACTIVE clients |
+| **Auth units** | Server-side ledger and convert hard stop are wired | Requires target-database and billing acceptance evidence |
 | **Plutus** | Manual tracker by design | Stay Plutus through cutover |
 | **Production caseload** | External stack until cold flip | Sandbox uses pretend clients — never dual-document real DOS |
 
@@ -61,7 +61,7 @@ Use this to judge go/no-go — do not invent readiness from aspirational UI.
 
 1. Name a **sandbox cohort** (pretend client list + assigned RBT/BCBA IDs) and fill the header table.
 2. Complete **Phase A** (sandbox readiness) before expanding beyond pretend clients.
-3. Advance modes **Sandbox → Cutover Ready → Live** using `/portal-billing/audit` cohort tags (DB enum maps to UI labels).
+3. Record promotion **Sandbox → Cutover Ready → Live** on this controlled cohort sheet; the retired `/portal-billing/audit` worksheet is not a product dependency.
 4. Check every box in the **current** phase before promoting.
 5. **Cold Cutover** requires written leadership go/no-go — not an in-app button.
 6. Keep **Phase C** (rollback to external production) printed with the cohort sheet; rehearse once before cutover.
@@ -128,16 +128,15 @@ Use **after Phase 0 security gates are green** and session-note structured SQL i
 
 | Day | Owner | Action | Pass |
 |-----|-------|--------|------|
-| 1 | Ops | Apply `docs/sql/2026-08-20-012800Z-dual-run-cohort-fields.sql` in Supabase; pick 3–8 **pretend** ACTIVE clients + RBT/BCBA roster | Cohort header filled |
-| 1 | Ops | CRM `/portal-billing/audit` → **Tag sandbox client** (cohort label + **Sandbox** mode) | Client filter shows cohort |
+| 1 | Ops | Verify the target against the canonical [`docs/sql/README.md`](../../sql/README.md); pick 3–8 **pretend** ACTIVE clients + RBT/BCBA roster | Database evidence and cohort header filled |
 | 1 | Eng | DevTools seed or real schedule path; run Bridge E–F–G QA on one twin client | Bridge checklist smoke green |
 | 2–7 | Clinical | RBT: HRM schedule → EVV → Session Studio (real SkillTargets — **no demo t1/b1 on ACTIVE**) | Claim-ready submit succeeds |
 | 2–7 | BCBA | CRM `/portal-clinical/daily` e-sign; zero open deficiencies | `bcbaSigned=true` |
-| 2–7 | Billing | `/notes` convert (manual Plutus ref); `/portal-billing/audit` mark notes **Audited ✓** | ≥10 audited, 0 open discrepancies |
-| 7 | Ops + Clinical | Promote cohort mode to **Cutover ready** on audit page | Cutover Readiness boxes signed |
+| 2–7 | Billing | `/notes` convert (manual Plutus ref); record each reviewed note ID and outcome on the controlled cohort sheet | ≥10 reviewed, 0 open discrepancies |
+| 7 | Ops + Clinical | Sign **Cutover Ready** on the controlled cohort sheet | Cutover Readiness boxes signed |
 | 7+ | Leadership | Schedule **Cold Cutover** only after gate 10 + Billing accept RAS→Plutus | Written go/no-go on cohort sheet |
 
-**Product surfaces:** `/portal-billing/audit` (cohort filter + sandbox QA worksheet) · DevTools link · `/ops` sandbox banner · `npm run verify-no-demo-data` before activating real cohort clients.
+**Product surfaces:** HRM Session Studio and payroll; CRM clinical review, `/notes`, billing/client charts, and `/ops`. The QA roster and sign-off are controlled operational evidence outside RAS; there is no in-app dual-run/audit worksheet. Before real-client activation, run the repository verifier as `node scripts/verify-no-demo-data.mjs` (there is no npm alias).
 
 ---
 
@@ -158,7 +157,7 @@ Use **after Phase 0 security gates are green** and session-note structured SQL i
 
 - [ ] Written Clinical + Billing + Ops **GO** (timestamped).
 - [ ] External production stack marked read-only for flipped clients (operational — outside RAS).
-- [ ] Cohort mode promoted to **Live** in RAS.
+- [ ] Cohort marked **Live** on the controlled operational roster.
 - [ ] Spot-check: new DOS documented only in Session Studio.
 - [ ] Billing converts only RAS-signed notes for flipped DOS.
 

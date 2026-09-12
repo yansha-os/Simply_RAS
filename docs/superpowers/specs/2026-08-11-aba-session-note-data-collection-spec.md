@@ -538,7 +538,7 @@ Document any override in Finance SOP; do not silently pay Incomplete notes.
 | TA steps / frequency modalities | Payload fields exist; UI limited | Full modality matrix incomplete |
 | BCBA co-sign | CRM actions/queue emerging | Ensure single source of truth with this spec |
 | Plutus tracker fields | `isConverted` only | Need claim ref / convertedAt / ready queue UX |
-| Payroll holds | `localStorage` | Bridge G: replace with durable holds tied to note id |
+| Payroll holds | Durable `Session` + `SessionNote` attestation | LIVE payroll and incomplete queues derive the same fail-closed result; browser hold ledger retired |
 | `IN_PROGRESS` status | Not in enum | SQL appendix |
 | HIPAA logging | Mixed `console.error` with messages | Strip PHI; ids only |
 
