@@ -75,7 +75,7 @@ Clinical facts stay independent from jurisdiction rules. EVV vendors, clearingho
 ### Track 1 — Multi-state domain foundation
 
 - [x] Inventory New York assumptions: timezone, address, Medicaid IDs, codes, modifiers, credentials, EVV, consent, retention, incidents, and copy.
-- [ ] Define organization, service location, jurisdiction, payer plan, provider enrollment, and effective-dated rule ownership.
+- [x] Define organization, service location, jurisdiction, payer plan, provider enrollment, and effective-dated rule ownership.
 - [ ] Define deterministic rule resolution and conflict precedence.
 - [ ] Snapshot rule version and resolved billing facts on durable service records.
 - [ ] Make scheduling timezone-aware across DST boundaries and multi-location views.
@@ -84,6 +84,42 @@ Clinical facts stay independent from jurisdiction rules. EVV vendors, clearingho
 - [ ] Prove a second synthetic state package can be added without schema surgery or UI condition sprawl.
 
 **Gate 1:** a state/payer package is data/configuration plus reviewed deterministic logic—not scattered conditionals.
+
+#### Track 1 domain contract
+
+The foundation uses explicit ownership rather than interpreting free-text fields. The names below are conceptual until the additive Prisma/SQL slice lands; this contract controls that migration.
+
+| Authority | Cardinality and purpose | Immutable/history rule |
+|---|---|---|
+| `Organization` | Tenant and billing/legal operator. Owns users, clients, locations, plans, enrollments, policies, and all generated records. | An operational record never changes organization. Cross-organization access fails closed. |
+| `ServiceLocation` | Belongs to one organization; carries IANA timezone, service-area identity, address metadata, active dates, and default jurisdiction bindings. | Historical services retain their location and timezone snapshot even if the location changes or closes. |
+| `Jurisdiction` | Reusable COUNTRY, STATE, or LOCAL authority with stable code and optional parent. Locations bind to all applicable jurisdictions. | Codes are stable; revised requirements create rule versions rather than editing history. |
+| `PayerPlan` | Organization-owned contract/program identity, distinct from display-name payer text; may bind a state/program and claims/EVV configuration. | A client coverage period points to a plan version/effective interval; payer-name edits cannot rewrite prior services. |
+| `ProviderEnrollment` | Connects organization, payer plan, optional service location, and optional rendering provider with identifiers, status, and effective interval. | Enrollment validity is evaluated at service time; identifiers are restricted and prior intervals remain auditable. |
+| `RuleSet` | Stable logical rule key and category (billing, EVV, credential, consent, retention, incident, employment) owned by a federal, jurisdiction, payer-plan, or organization authority. | The key is stable and contains no mutable effective behavior. |
+| `RuleVersion` | Immutable reviewed payload with version, effective interval, source references, approval state, and deterministic evaluator contract. | Published versions cannot be edited; corrections supersede them. Overlapping active versions at the same scope are rejected. |
+| `ResolvedRuleSnapshot` | Content-addressed result attached to a durable service/note/claim decision, including selected version IDs and normalized resolved facts. | Never recomputed to alter history. Reprocessing creates a new decision linked to the prior one. |
+
+Required relationships for the additive rollout:
+
+- Bootstrap exactly one organization for existing data, then backfill `organizationId` before making tenant columns required. No request may accept a caller-supplied organization as authority.
+- Every user and client belongs to one organization in v1. A future cross-organization workforce relationship requires an explicit membership model; it must not be simulated with global role access.
+- Every service-bearing session references one service location. Client primary location is a default only; the session location is the historical authority.
+- Client coverage becomes effective-dated and references `PayerPlan`; existing `insurancePayer`, `memberId`, and `medicaidId` remain compatibility inputs until encrypted/restricted coverage storage is migrated and verified.
+- Provider enrollment is separate from certification/licensure. A valid credential does not imply payer enrollment, and enrollment does not imply permission to perform a service.
+- Rules store structured normalized data, never executable source. Unknown values, missing applicability, ambiguous overlap, or failed schema validation produce a review hold—not a guessed default.
+- All PHI/PII queries remain organization- and resource-scoped in server authorization. Adding tenant columns does not itself satisfy the Track 2 tenant-isolation gate.
+
+Resolution inputs are the service instant, organization, service location, applicable jurisdictions, payer-plan coverage, provider/enrollment, service code/modifiers/POS, and rule category. Resolution precedence is deterministic:
+
+1. Preserve explicit recorded service facts; policy resolution may validate them but may not silently rewrite them.
+2. Apply non-waivable federal and jurisdiction requirements as constraints.
+3. Apply the effective payer-plan/program version when it is more specific and does not weaken a higher constraint.
+4. Apply service-location and organization policy only for permitted operational choices or stricter controls.
+5. Within the same authority and specificity, select the single version whose half-open interval contains the service instant; zero or multiple matches fail closed.
+6. Persist canonical normalized facts, selected version IDs, evaluator version, and a SHA-256 content hash on the durable decision boundary.
+
+Dates use half-open intervals (`effectiveFrom <= serviceInstant < effectiveTo`), with null `effectiveTo` meaning open-ended. Draft, approved, active, superseded, and retired lifecycle state is distinct from the effective interval. Activation requires named clinical/billing/compliance ownership appropriate to the category; legal or payer claims additionally require authoritative dated sources and human approval.
 
 ### Track 2 — Authorization, privacy, and security
 
@@ -337,6 +373,14 @@ This is a source-code inventory, not legal advice or validation of any statute, 
 - The schema has no first-class organization, service location, jurisdiction, payer plan, provider enrollment, or effective-dated rule snapshot foundation. That is the next Track 1 design slice; it must precede state-specific implementation.
 - Disabled patient address autocomplete and reverse geocoding at both caller and route boundaries. Manual address entry and the existing local ZIP-only parser remain available, eliminating public-provider URL disclosure and needless network requests.
 - Corrected the architecture/HRM ownership map to name the durable `CaseApplication` model instead of the retired `RbtJobApplication` browser prototype.
+
+### 2026-09-12 — Multi-state ownership contract
+
+- Defined the seven-authority foundation and its cardinalities: organization, service location, jurisdiction, payer plan, provider enrollment, stable rule set/immutable rule version, and content-addressed resolved snapshots.
+- Defined a safe single-organization rollout for the existing product: additive nullable keys, deterministic backfill, authorization migration, verification, and only then required constraints. Schema presence alone never proves tenant isolation.
+- Separated provider certification/licensure from payer enrollment and separated client coverage identity from the current free-text payer fields.
+- Defined effective-time selection, authority/specificity precedence, ambiguity holds, non-executable structured rule payloads, and immutable historical decisions. No New York or payer behavior is enabled by this design-only slice.
+- The next slice is the deterministic rule-resolution contract and test matrix. The later schema slice must follow the manual SQL workflow and remain pending until the user confirms application.
 
 ## Authoritative linked evidence
 

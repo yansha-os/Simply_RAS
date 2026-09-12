@@ -98,7 +98,7 @@ CRM has **no** RBT or HR surfaces anymore (2026-08-12). The old CRM `/rbt/*` pag
 
 ```
 CRM writes CaseOpening + clinical / PA / ClientStatus
-HRM writes AtsCandidate hire + RbtJobApplication
+HRM writes AtsCandidate hire + CaseApplication
 Shared: Notification + User
 ```
 

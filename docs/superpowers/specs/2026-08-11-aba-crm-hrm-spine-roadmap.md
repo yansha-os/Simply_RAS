@@ -35,7 +35,7 @@ Cross-app collaboration is **data + notifications**, not embedded UI.
 
 ```text
 CRM writes CaseOpening + clinical / PA status
-HRM writes AtsCandidate hire + RbtJobApplication
+HRM writes AtsCandidate hire + CaseApplication
 Both read Notification for signed-in user
 ```
 
@@ -97,7 +97,7 @@ In [`FlowMap.tsx`](../../../apps/crm/src/components/client-profile/FlowMap.tsx):
 
 | Bridge | From → To | Mechanism | Status |
 |---|---|---|---|
-| Job board | Case Coord posts opening → RBT applies in HRM | `CaseOpening` + `RbtJobApplication` + notifications | BRIDGE_V1 |
+| Job board | Case Coord posts opening → RBT applies in HRM | `CaseOpening` + `CaseApplication` + notifications | BRIDGE_V1 |
 | BCBA assign | CD / clinical assigns supervising BCBA | `Client.bcbaId` + stage gates | PARTIAL |
 | First session | Staffed client → ACTIVE | Durable `Session` then status flip | **DONE** (Bridge E) |
 | Notes → Plutus tracker | Signed note → billing queue | Manual tracker fields; no EDI | **DONE** (Bridge F) |
