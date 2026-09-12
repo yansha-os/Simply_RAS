@@ -265,6 +265,13 @@ Each slice must identify evidence, make the smallest complete change, add regres
 - Ownership matches the architecture map: CRM actions own client/intake/clinical/billing/case coordination; HRM actions own ATS/onboarding/RBT delivery/payroll views. No retired CRM RBT/HR action implementation remains.
 - Server-action classification is complete for this snapshot. Track 0 remains open for scheduled/background work, external adapters, and data stores.
 
+### 2026-09-11 — Scheduled and background-work classification
+
+- Confirmed there is no deployed cron entry, webhook consumer, worker process, durable queue, or automatic scheduled job in either application. Browser timers are UI/session mechanics, and request-scoped timeouts only bound external calls; neither category is background infrastructure.
+- Retired the orphaned CRM in-memory task prototype (`lib/tasks/`). It was referenced only by its own test, stored jobs in process memory, scheduled work with `setTimeout`, simulated PDF and PA-scan results, and declared an unimplemented payroll-sync type. It was not safe to classify as LIVE on a restartable Render web process.
+- V1 therefore has **zero LIVE background jobs** and no hidden automation claim. Any future PDF, PA-expiration, payroll, notification, or adapter job must use durable persisted state, authenticated enqueueing, idempotency, bounded retry/backoff, dead-letter/reconciliation behavior, and PHI-safe observability before being classified LIVE.
+- Background-work classification is complete for this snapshot. Track 0 remains open for external adapters and data stores.
+
 ## Authoritative linked evidence
 
 - Product ownership: [`../../ARCHITECTURE.md`](../../ARCHITECTURE.md)
